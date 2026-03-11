@@ -32,52 +32,80 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   const rubyPlaceholders = [];
   const emphasisPlaceholders = [];
 
+  // プレースホルダーにはUnicode Private Use Area文字を使用
+  // （ASCII文字・数字を含まないため、後続の縦中横・ラテン文字処理で破壊されない）
+  const phRuby = (i) => `\uE000${String.fromCharCode(0xE010 + i)}\uE000`;
+  const phEmphasis = (i) => `\uE001${String.fromCharCode(0xE010 + i)}\uE001`;
+
+  // HTMLエスケープ＋縦書き変換の共通処理
+  // ラテン文字・縦中横を先にプレースホルダー化してからダッシュ等のspanタグを生成し、
+  // 最後にプレースホルダーをHTMLに展開する（spanタグ内の英字を二重処理しないため）
+  const spanPlaceholders = [];
+  const phSpan = (html) => {
+    const idx = spanPlaceholders.length;
+    spanPlaceholders.push(html);
+    return `\uE002${String.fromCharCode(0xE010 + idx)}\uE002`;
+  };
+
+  function processInnerText(t) {
+    let r = t
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    if (vertical) {
+      r = r.replace(/-/g, '\uFF0D');
+      // ラテン文字・縦中横を先にプレースホルダーへ（まだHTMLタグを含まない段階）
+      r = r.replace(/\d[\d,.]*\d|\d/g, (match) => {
+        if (/^\d{2}$/.test(match)) return phSpan(`<span class="tcy">${match}</span>`);
+        return match;
+      });
+      r = r.replace(/[a-zA-Z]+/g, (match) => phSpan(`<span class="latin">${match}</span>`));
+      // ダッシュ等のspanタグを生成（この時点でラテン文字はもうプレースホルダーなので安全）
+      if (separateSymbolClasses) {
+        r = r.replace(/([—―\uFF0D]+)/g, '<span class="dash">$1</span>');
+        r = r.replace(/([…‥]+)/g, '<span class="ellipsis">$1</span>');
+        r = r.replace(/([～〜]+)/g, '<span class="wave-dash">$1</span>');
+      } else {
+        r = r.replace(/([—―\uFF0D]+)/g, '<span class="dash">$1</span>');
+        r = r.replace(/([…‥]+)/g, '<span class="dash">$1</span>');
+        r = r.replace(/([～〜]+)/g, '<span class="dash">$1</span>');
+      }
+    }
+    return r;
+  }
+
   // 傍点: 《《テキスト》》
   let result = text.replace(/《《(.+?)》》/g, (_, content) => {
     const idx = emphasisPlaceholders.length;
     emphasisPlaceholders.push(content);
-    return `\x00EMPHASIS${idx}\x00`;
+    return phEmphasis(idx);
   });
 
   // ルビ: |漢字《ルビ》
   result = result.replace(/\|(.+?)《(.+?)》/g, (_, base, ruby) => {
     const idx = rubyPlaceholders.length;
     rubyPlaceholders.push({ base, ruby });
-    return `\x00RUBY${idx}\x00`;
+    return phRuby(idx);
   });
 
-  // HTMLエスケープ
-  result = result
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  // 本文のHTMLエスケープ＋縦書き変換
+  result = processInnerText(result);
 
-  // 縦書き時はダッシュ・三点リーダ・波ダッシュをspanで囲んで回転
-  if (vertical) {
-    result = result.replace(/-/g, '\uFF0D');
-    if (separateSymbolClasses) {
-      result = result.replace(/([—―\uFF0D]+)/g, '<span class="dash">$1</span>');
-      result = result.replace(/([…‥]+)/g, '<span class="ellipsis">$1</span>');
-      result = result.replace(/([～〜]+)/g, '<span class="wave-dash">$1</span>');
-    } else {
-      result = result.replace(/([—―\uFF0D]+)/g, '<span class="dash">$1</span>');
-      result = result.replace(/([…‥]+)/g, '<span class="dash">$1</span>');
-      result = result.replace(/([～〜]+)/g, '<span class="dash">$1</span>');
-    }
-    // 2桁の半角数字を縦中横にする
-    result = result.replace(/(\d{2})/g, '<span class="tcy">$1</span>');
-  }
-
-  // プレースホルダーをHTMLに戻す
-  result = result.replace(/\x00RUBY(\d+)\x00/g, (_, idx) => {
-    const { base, ruby } = rubyPlaceholders[parseInt(idx, 10)];
-    return `<ruby>${base}<rt>${ruby}</rt></ruby>`;
+  // プレースホルダーをHTMLに戻す（中身も同じ変換を適用）
+  result = result.replace(/\uE000([\uE010-\uEFFF])\uE000/g, (_, ch) => {
+    const { base, ruby } = rubyPlaceholders[ch.charCodeAt(0) - 0xE010];
+    return `<ruby>${processInnerText(base)}<rt>${processInnerText(ruby)}</rt></ruby>`;
   });
 
-  result = result.replace(/\x00EMPHASIS(\d+)\x00/g, (_, idx) => {
-    const content = emphasisPlaceholders[parseInt(idx, 10)];
-    return `<span class="emphasis">${content}</span>`;
+  result = result.replace(/\uE001([\uE010-\uEFFF])\uE001/g, (_, ch) => {
+    const content = emphasisPlaceholders[ch.charCodeAt(0) - 0xE010];
+    return `<span class="emphasis">${processInnerText(content)}</span>`;
+  });
+
+  // spanプレースホルダーをHTMLに展開（tcy, latin）
+  result = result.replace(/\uE002([\uE010-\uEFFF])\uE002/g, (_, ch) => {
+    return spanPlaceholders[ch.charCodeAt(0) - 0xE010];
   });
 
   return result;
@@ -88,10 +116,10 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
  * @param {string} filePath - テキストファイルのパス
  * @param {object} options
  * @param {boolean} options.vertical - 縦書きモード（デフォルト: true）
- * @param {number|null} options.sectionNumber - 空の【】に振るセクション番号
  * @param {boolean} options.separateSymbolClasses - EPUB用シンボルクラス分離
+ * @param {number|null} options.sectionNumber - 空の【】に振るセクション番号（内部用）
  */
-export function parseTextFile(filePath, { vertical = true, sectionNumber = null, separateSymbolClasses = false } = {}) {
+export function parseTextFile(filePath, { vertical = true, separateSymbolClasses = false, sectionNumber = null } = {}) {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
   const htmlParts = [];
@@ -164,8 +192,11 @@ export function parseTextFile(filePath, { vertical = true, sectionNumber = null,
 
 /**
  * EPUB用テキスト解析（空行スキップ、チャプタータイトル抽出）
+ * @param {string} filePath
+ * @param {object} options
+ * @param {number|null} options.sectionNumber - 空の【】に振るセクション番号（内部用）
  */
-export function parseTextFileForEpub(filePath) {
+export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
   const xhtmlParts = [];
@@ -178,7 +209,11 @@ export function parseTextFileForEpub(filePath) {
 
   let chapterTitle = null;
   if (hasViewpointStart) {
-    const match = contentLines[0].match(/^【(.+?)】/);
+    let firstLine = contentLines[0];
+    if (sectionNumber !== null && /^【】/.test(firstLine)) {
+      firstLine = firstLine.replace(/^【】/, `【${sectionNumber}】`);
+    }
+    const match = firstLine.match(/^【(.+?)】/);
     if (match && match[1]) {
       chapterTitle = match[1];
     }
@@ -203,7 +238,11 @@ export function parseTextFileForEpub(filePath) {
     }
 
     if (isViewpointLine(line)) {
-      xhtmlParts.push(`<p class="viewpoint">${escapeHtml(line, escapeOpts)}</p>`);
+      let viewpointLine = line;
+      if (sectionNumber !== null && /^【】/.test(line)) {
+        viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
+      }
+      xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
       continue;
     }
 
@@ -216,6 +255,22 @@ export function parseTextFileForEpub(filePath) {
     hasViewpointStart,
     hasViewpointEnd,
   };
+}
+
+/**
+ * 複数ファイルをセクション番号付きで一括解析
+ * 空の【】に連番を自動採番する
+ * @param {string[]} filePaths - テキストファイルパスの配列
+ * @param {function} parseFn - parseTextFile または parseTextFileForEpub
+ * @param {object} options - parseFn に渡すオプション（sectionNumber は自動設定）
+ */
+export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
+  let sectionNumber = 1;
+  return filePaths.map(filePath => {
+    const result = parseFn(filePath, { ...options, sectionNumber });
+    if (result.hasViewpointStart) sectionNumber++;
+    return result;
+  });
 }
 
 /**
