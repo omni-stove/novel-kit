@@ -21,9 +21,13 @@ export function isEpigraphLine(line) {
   return line.startsWith('Epigraph:');
 }
 
-// エピグラフ行からテキストを抽出
+// エピグラフ行からテキストを抽出（引用本文と引用元に分割）
 export function parseEpigraphLine(line) {
-  return line.replace(/^Epigraph:\s*/, '');
+  const text = line.replace(/^Epigraph:\s*/, '');
+  const parts = text.split('——');
+  const quote = parts[0].trim();
+  const source = parts.length > 1 ? parts.slice(1).join('——').trim() : null;
+  return { quote, source: source || null };
 }
 
 // 視点行かどうかを判定（【〇〇】形式、空の【】も含む）
@@ -140,7 +144,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
   const endViewpointLine = hasViewpointEnd ? contentLines[contentLines.length - 1] : null;
 
   // エピグラフ行を収集
-  const epigraphTexts = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
+  const epigraphs = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
 
   let lastWasViewpoint = false;
 
@@ -154,7 +158,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
   const escapeOpts = { vertical, separateSymbolClasses };
 
   // エピグラフをプレーンな段落として挿入（PDF公募用：装飾なし）
-  let pendingEpigraphLines = epigraphTexts.length > 0 ? [...epigraphTexts] : null;
+  let pendingEpigraphs = epigraphs.length > 0 ? [...epigraphs] : null;
 
   for (let i = 0; i < processLines.length; i++) {
     const line = processLines[i];
@@ -191,12 +195,16 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       if (sectionNumber !== null && /^【】/.test(line)) {
         viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
       }
-      htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
-      if (pendingEpigraphLines) {
-        for (const t of pendingEpigraphLines) {
-          htmlParts.push(`<p>${escapeHtml(t, escapeOpts)}</p>`);
+      if (pendingEpigraphs) {
+        const epigraphLines = [];
+        for (const { quote, source } of pendingEpigraphs) {
+          epigraphLines.push(`<p class="epigraph-quote">${escapeHtml(quote, escapeOpts)}</p>`);
+          if (source) epigraphLines.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
         }
-        pendingEpigraphLines = null;
+        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>\n${epigraphLines.join('\n')}\n</div>`);
+        pendingEpigraphs = null;
+      } else {
+        htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
       }
       lastWasViewpoint = true;
       continue;
@@ -208,18 +216,24 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
     }
 
     // 視点行がないファイルの場合、先頭の本文前にエピグラフを挿入
-    if (pendingEpigraphLines) {
-      for (const t of pendingEpigraphLines) {
-        htmlParts.push(`<p>${escapeHtml(t, escapeOpts)}</p>`);
+    if (pendingEpigraphs) {
+      const epigraphLines = [];
+      for (const { quote, source } of pendingEpigraphs) {
+        epigraphLines.push(`<p class="epigraph-quote">${escapeHtml(quote, escapeOpts)}</p>`);
+        if (source) epigraphLines.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
       }
+      htmlParts.push(`<div class="epigraph">\n${epigraphLines.join('\n')}\n</div>`);
       htmlParts.push('<p class="empty">&nbsp;</p>');
-      pendingEpigraphLines = null;
+      pendingEpigraphs = null;
     }
 
     htmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
   }
 
-  return { html: htmlParts.join('\n'), hasViewpointStart, hasViewpointEnd };
+  // 空の【】で始まるかどうか（セクション番号の採番に使用）
+  const hasEmptyViewpointStart = hasViewpointStart && /^【】/.test(contentLines[0]);
+
+  return { html: htmlParts.join('\n'), hasViewpointStart, hasViewpointEnd, hasEmptyViewpointStart };
 }
 
 /**
@@ -240,7 +254,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   const endViewpointLine = hasViewpointEnd ? contentLines[contentLines.length - 1] : null;
 
   // エピグラフ行を収集
-  const epigraphTexts = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
+  const epigraphs = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
 
   let chapterTitle = null;
   if (hasViewpointStart) {
@@ -263,8 +277,12 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
 
   // エピグラフHTML（視点行の直後に挿入）
   let pendingEpigraph = null;
-  if (epigraphTexts.length > 0) {
-    const epigraphHtml = epigraphTexts.map(t => `<p>${escapeHtml(t, escapeOpts)}</p>`).join('\n');
+  if (epigraphs.length > 0) {
+    const epigraphHtml = epigraphs.map(({ quote, source }) => {
+      const parts = [`<p class="epigraph-quote">${escapeHtml(quote, escapeOpts)}</p>`];
+      if (source) parts.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
+      return parts.join('\n');
+    }).join('\n');
     pendingEpigraph = `<div class="epigraph">\n${epigraphHtml}\n</div>`;
   }
 
@@ -302,11 +320,15 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
     xhtmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
   }
 
+  // 空の【】で始まるかどうか（セクション番号の採番に使用）
+  const hasEmptyViewpointStart = hasViewpointStart && /^【】/.test(contentLines[0]);
+
   return {
     xhtml: xhtmlParts.join('\n'),
     chapterTitle,
     hasViewpointStart,
     hasViewpointEnd,
+    hasEmptyViewpointStart,
   };
 }
 
@@ -321,7 +343,7 @@ export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
   let sectionNumber = 1;
   return filePaths.map(filePath => {
     const result = parseFn(filePath, { ...options, sectionNumber });
-    if (result.hasViewpointStart) sectionNumber++;
+    if (result.hasEmptyViewpointStart) sectionNumber++;
     return result;
   });
 }
