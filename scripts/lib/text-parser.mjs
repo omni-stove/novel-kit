@@ -16,6 +16,16 @@ export function isMemoLine(line) {
   return line.startsWith('Memo:');
 }
 
+// エピグラフ行かどうかを判定
+export function isEpigraphLine(line) {
+  return line.startsWith('Epigraph:');
+}
+
+// エピグラフ行からテキストを抽出
+export function parseEpigraphLine(line) {
+  return line.replace(/^Epigraph:\s*/, '');
+}
+
 // 視点行かどうかを判定（【〇〇】形式、空の【】も含む）
 export function isViewpointLine(line) {
   return /^【.*】/.test(line);
@@ -124,20 +134,27 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
   const lines = content.split('\n');
   const htmlParts = [];
 
-  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l));
+  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l));
   const hasViewpointStart = contentLines.length > 0 && isViewpointLine(contentLines[0]);
   const hasViewpointEnd = contentLines.length > 0 && isViewpointLine(contentLines[contentLines.length - 1]);
   const endViewpointLine = hasViewpointEnd ? contentLines[contentLines.length - 1] : null;
+
+  // エピグラフ行を収集
+  const epigraphTexts = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
 
   let lastWasViewpoint = false;
 
   const processLines = lines.filter(line => {
     if (isMemoLine(line)) return false;
+    if (isEpigraphLine(line)) return false;
     if (endViewpointLine && line === endViewpointLine) return false;
     return true;
   });
 
   const escapeOpts = { vertical, separateSymbolClasses };
+
+  // エピグラフをプレーンな段落として挿入（PDF公募用：装飾なし）
+  let pendingEpigraphLines = epigraphTexts.length > 0 ? [...epigraphTexts] : null;
 
   for (let i = 0; i < processLines.length; i++) {
     const line = processLines[i];
@@ -175,6 +192,12 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
         viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
       }
       htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
+      if (pendingEpigraphLines) {
+        for (const t of pendingEpigraphLines) {
+          htmlParts.push(`<p>${escapeHtml(t, escapeOpts)}</p>`);
+        }
+        pendingEpigraphLines = null;
+      }
       lastWasViewpoint = true;
       continue;
     }
@@ -182,6 +205,15 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
     if (lastWasViewpoint) {
       htmlParts.push('<p class="empty">&nbsp;</p>');
       lastWasViewpoint = false;
+    }
+
+    // 視点行がないファイルの場合、先頭の本文前にエピグラフを挿入
+    if (pendingEpigraphLines) {
+      for (const t of pendingEpigraphLines) {
+        htmlParts.push(`<p>${escapeHtml(t, escapeOpts)}</p>`);
+      }
+      htmlParts.push('<p class="empty">&nbsp;</p>');
+      pendingEpigraphLines = null;
     }
 
     htmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
@@ -202,10 +234,13 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   const xhtmlParts = [];
   const escapeOpts = { vertical: true, separateSymbolClasses: true };
 
-  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l));
+  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l));
   const hasViewpointStart = contentLines.length > 0 && isViewpointLine(contentLines[0]);
   const hasViewpointEnd = contentLines.length > 0 && isViewpointLine(contentLines[contentLines.length - 1]);
   const endViewpointLine = hasViewpointEnd ? contentLines[contentLines.length - 1] : null;
+
+  // エピグラフ行を収集
+  const epigraphTexts = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
 
   let chapterTitle = null;
   if (hasViewpointStart) {
@@ -221,9 +256,17 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
 
   const processLines = lines.filter(line => {
     if (isMemoLine(line)) return false;
+    if (isEpigraphLine(line)) return false;
     if (endViewpointLine && line === endViewpointLine) return false;
     return true;
   });
+
+  // エピグラフHTML（視点行の直後に挿入）
+  let pendingEpigraph = null;
+  if (epigraphTexts.length > 0) {
+    const epigraphHtml = epigraphTexts.map(t => `<p>${escapeHtml(t, escapeOpts)}</p>`).join('\n');
+    pendingEpigraph = `<div class="epigraph">\n${epigraphHtml}\n</div>`;
+  }
 
   for (let i = 0; i < processLines.length; i++) {
     const line = processLines[i];
@@ -243,7 +286,17 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
         viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
       }
       xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
+      if (pendingEpigraph) {
+        xhtmlParts.push(pendingEpigraph);
+        pendingEpigraph = null;
+      }
       continue;
+    }
+
+    // 視点行がないファイルの場合、先頭の本文前にエピグラフを挿入
+    if (pendingEpigraph) {
+      xhtmlParts.push(pendingEpigraph);
+      pendingEpigraph = null;
     }
 
     xhtmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
