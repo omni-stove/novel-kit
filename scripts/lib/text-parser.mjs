@@ -35,6 +35,11 @@ export function isViewpointLine(line) {
   return /^【.*】/.test(line);
 }
 
+// 行末の【...】を除去（インライン注釈の除去）
+export function stripTrailingBracket(line) {
+  return line.replace(/【[^】]*】$/, '').trimEnd();
+}
+
 /**
  * HTMLエスケープ + ダッシュ処理 + ルビ・傍点処理
  * @param {string} text - エスケープ対象テキスト
@@ -227,7 +232,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       pendingEpigraphs = null;
     }
 
-    htmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
+    htmlParts.push(`<p>${escapeHtml(stripTrailingBracket(line), escapeOpts)}</p>`);
   }
 
   // 空の【】で始まるかどうか（セクション番号の採番に使用）
@@ -317,7 +322,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
       pendingEpigraph = null;
     }
 
-    xhtmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
+    xhtmlParts.push(`<p>${escapeHtml(stripTrailingBracket(line), escapeOpts)}</p>`);
   }
 
   // 空の【】で始まるかどうか（セクション番号の採番に使用）
