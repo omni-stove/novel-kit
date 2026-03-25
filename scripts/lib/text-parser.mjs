@@ -427,6 +427,8 @@ export function getTextFilesFromDir(dirPath, excludeFiles = ['synopsis.txt']) {
  */
 export function countChars(html) {
   const text = html
+    .replace(/<div class="separator-block">.*?<\/div>/gs, '')
+    .replace(/<p class="separator">.*?<\/p>/g, '')
     .replace(/<rt>.*?<\/rt>/g, '')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, '')
