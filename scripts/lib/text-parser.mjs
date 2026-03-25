@@ -356,6 +356,41 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
 }
 
 /**
+ * ファイルからフィルタ済みの行を取得（Memo行・Epigraph行・末尾視点行を除去）
+ * split-chapters.mjs など、HTML変換せずに生テキスト行が必要な場合に使用
+ * @param {string} filePath - テキストファイルのパス
+ * @returns {{ lines: string[], hasViewpointStart: boolean, hasViewpointEnd: boolean }}
+ */
+export function getFilteredLines(filePath) {
+  const content = readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n');
+
+  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l));
+  const hasViewpointStart = contentLines.length > 0 && isViewpointLine(contentLines[0]);
+  const hasViewpointEnd = contentLines.length > 0 && isViewpointLine(contentLines[contentLines.length - 1]);
+
+  let endViewpointLineIndex = -1;
+  if (hasViewpointEnd) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].trim() !== '' && !isMemoLine(lines[i]) && !isEpigraphLine(lines[i])) {
+        endViewpointLineIndex = i;
+        break;
+      }
+    }
+  }
+
+  const filteredLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (isMemoLine(lines[i])) continue;
+    if (isEpigraphLine(lines[i])) continue;
+    if (i === endViewpointLineIndex) continue;
+    filteredLines.push(lines[i]);
+  }
+
+  return { lines: filteredLines, hasViewpointStart, hasViewpointEnd };
+}
+
+/**
  * 複数ファイルをセクション番号付きで一括解析
  * 空の【】に連番を自動採番する
  * @param {string[]} filePaths - テキストファイルパスの配列
@@ -391,7 +426,8 @@ export function getTextFilesFromDir(dirPath, excludeFiles = ['synopsis.txt']) {
  * 本文の文字数カウント（HTML断片から）
  */
 export function countChars(html) {
-  return html
+  const text = html
+    .replace(/<rt>.*?<\/rt>/g, '')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, '')
     .replace(/&#160;/g, '')
@@ -399,6 +435,6 @@ export function countChars(html) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/\s/g, '')
-    .length;
+    .replace(/[\s\u00A0]/g, '');
+  return [...text].length;
 }
