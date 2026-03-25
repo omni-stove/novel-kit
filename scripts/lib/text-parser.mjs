@@ -359,9 +359,11 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
  * ファイルからフィルタ済みの行を取得（Memo行・Epigraph行・末尾視点行を除去）
  * split-chapters.mjs など、HTML変換せずに生テキスト行が必要な場合に使用
  * @param {string} filePath - テキストファイルのパス
+ * @param {object} options
+ * @param {boolean} options.keepEpigraphs - Epigraph行を残す（デフォルト: false）
  * @returns {{ lines: string[], hasViewpointStart: boolean, hasViewpointEnd: boolean }}
  */
-export function getFilteredLines(filePath) {
+export function getFilteredLines(filePath, { keepEpigraphs = false } = {}) {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
 
@@ -382,7 +384,7 @@ export function getFilteredLines(filePath) {
   const filteredLines = [];
   for (let i = 0; i < lines.length; i++) {
     if (isMemoLine(lines[i])) continue;
-    if (isEpigraphLine(lines[i])) continue;
+    if (!keepEpigraphs && isEpigraphLine(lines[i])) continue;
     if (i === endViewpointLineIndex) continue;
     filteredLines.push(lines[i]);
   }
