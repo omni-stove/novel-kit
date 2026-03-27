@@ -51,6 +51,8 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   // （ASCII文字・数字を含まないため、後続の縦中横・ラテン文字処理で破壊されない）
   const phRuby = (i) => `\uE000${String.fromCharCode(0xE010 + i)}\uE000`;
   const phEmphasis = (i) => `\uE001${String.fromCharCode(0xE010 + i)}\uE001`;
+  const sidewaysPlaceholders = [];
+  const phSideways = (i) => `\uE003${String.fromCharCode(0xE010 + i)}\uE003`;
 
   // HTMLエスケープ＋縦書き変換の共通処理
   // ラテン文字・縦中横を先にプレースホルダー化してからダッシュ等のspanタグを生成し、
@@ -70,12 +72,22 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       .replace(/"/g, '&quot;');
     if (vertical) {
       r = r.replace(/-/g, '\uFF0D');
-      // ラテン文字・縦中横を先にプレースホルダーへ（まだHTMLタグを含まない段階）
-      r = r.replace(/\d[\d,.]*\d|\d/g, (match) => {
-        if (/^\d{2}$/.test(match)) return phSpan(`<span class="tcy">${match}</span>`);
-        return match;
+      r = r.replace(/!/g, '！');
+      r = r.replace(/\?/g, '？');
+      r = r.replace(/@/g, '＠');
+      // ！？の連続を縦中横に（！？、？！、！！、？？）
+      r = r.replace(/[！？]{2}/g, (match) => {
+        const hw = match.replace(/！/g, '!').replace(/？/g, '?');
+        return phSpan(`<span class="tcy">${hw}</span>`);
       });
-      r = r.replace(/[a-zA-Z]+/g, (match) => phSpan(`<span class="latin">${match}</span>`));
+      // ラテン文字・縦中横を先にプレースホルダーへ（まだHTMLタグを含まない段階）
+      r = r.replace(/\.?\d[\d,.]*\d|\d/g, (match) => {
+        const converted = match.replace(/\./g, '．').replace(/,/g, '，');
+        if (/^\d{1,2}$/.test(match)) return phSpan(`<span class="tcy">${match}</span>`);
+        return phSpan(`<span class="upright">${converted}</span>`);
+      });
+      r = r.replace(/[a-zA-Z]+(?:\s[a-zA-Z]+)*/g, (match) => phSpan(`<span class="latin">${match}</span>`));
+      r = r.replace(/[\u0370-\u03FF]+/g, (match) => phSpan(`<span class="upright">${match}</span>`));
       // ダッシュ等のspanタグを生成（この時点でラテン文字はもうプレースホルダーなので安全）
       if (separateSymbolClasses) {
         r = r.replace(/([—―\uFF0D]+)/g, '<span class="dash">$1</span>');
@@ -90,8 +102,15 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return r;
   }
 
+  // 横倒し: <<テキスト>>
+  let result = text.replace(/<<(.+?)>>/g, (_, content) => {
+    const idx = sidewaysPlaceholders.length;
+    sidewaysPlaceholders.push(content);
+    return phSideways(idx);
+  });
+
   // 傍点: 《《テキスト》》
-  let result = text.replace(/《《(.+?)》》/g, (_, content) => {
+  result = result.replace(/《《(.+?)》》/g, (_, content) => {
     const idx = emphasisPlaceholders.length;
     emphasisPlaceholders.push(content);
     return phEmphasis(idx);
@@ -116,6 +135,16 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   result = result.replace(/\uE001([\uE010-\uEFFF])\uE001/g, (_, ch) => {
     const content = emphasisPlaceholders[ch.charCodeAt(0) - 0xE010];
     return `<span class="emphasis">${processInnerText(content)}</span>`;
+  });
+
+  // 横倒しプレースホルダーをHTMLに展開（中身のルビ記法も処理）
+  result = result.replace(/\uE003([\uE010-\uEFFF])\uE003/g, (_, ch) => {
+    let content = sidewaysPlaceholders[ch.charCodeAt(0) - 0xE010];
+    // 先にHTMLエスケープ（《》| はHTMLエンティティではないので残る）
+    content = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    // エスケープ後にルビ記法を処理
+    content = content.replace(/\|(.+?)《(.+?)》/g, (_, base, ruby) => `<ruby>${base}<rt>${ruby}</rt></ruby>`);
+    return `<span class="sideways-latin">${content}</span>`;
   });
 
   // spanプレースホルダーをHTMLに展開（tcy, latin）
