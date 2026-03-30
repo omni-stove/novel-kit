@@ -75,6 +75,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       r = r.replace(/!/g, '！');
       r = r.replace(/\?/g, '？');
       r = r.replace(/@/g, '＠');
+      r = r.replace(/\//g, '／');
       // ！？の連続を縦中横に（！？、？！、！！、？？）
       r = r.replace(/[！？]{2}/g, (match) => {
         const hw = match.replace(/！/g, '!').replace(/？/g, '?');
