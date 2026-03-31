@@ -215,7 +215,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
         if (htmlParts.length > 0 && htmlParts[htmlParts.length - 1] === '<p class="empty">&nbsp;</p>') {
           htmlParts.pop();
         }
-        htmlParts.push(`<div class="separator-block"><p class="empty">&nbsp;</p>\n<p class="separator">${escapeHtml(line, escapeOpts)}</p>\n<p class="empty">&nbsp;</p></div>`);
+        htmlParts.push(`<div class="separator-block"><p class="separator">${escapeHtml(line, escapeOpts)}</p></div>`);
         i++;
         lastWasViewpoint = false;
         continue;
