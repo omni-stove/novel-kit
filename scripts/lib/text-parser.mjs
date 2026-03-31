@@ -269,12 +269,15 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       pendingEpigraphs = null;
     }
 
-    // セリフ（「始まり）で推定3行以下ならページ跨ぎを防止
+    // ページ跨ぎ制御: 推定3行以下はbreak-inside:avoid、4行以上はorphans/widows緩和
     const charsPerLine = chars || 30;
-    if (line.startsWith('「') && Math.ceil([...line].length / charsPerLine) <= 3) {
-      htmlParts.push(`<p class="dialogue-short">${escapeHtml(line, escapeOpts)}</p>`);
+    const estimatedLines = Math.ceil([...line].length / charsPerLine);
+    if (estimatedLines <= 3) {
+      const cls = line.startsWith('「') ? 'dialogue-short' : 'paragraph-short';
+      htmlParts.push(`<p class="${cls}">${escapeHtml(line, escapeOpts)}</p>`);
     } else {
-      htmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
+      const cls = line.startsWith('「') ? 'dialogue-long' : 'paragraph-long';
+      htmlParts.push(`<p class="${cls}">${escapeHtml(line, escapeOpts)}</p>`);
     }
   }
 
