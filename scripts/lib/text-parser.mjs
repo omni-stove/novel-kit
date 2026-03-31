@@ -164,7 +164,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
  * @param {boolean} options.separateSymbolClasses - EPUB用シンボルクラス分離
  * @param {number|null} options.sectionNumber - 空の【】に振るセクション番号（内部用）
  */
-export function parseTextFile(filePath, { vertical = true, separateSymbolClasses = false, sectionNumber = null } = {}) {
+export function parseTextFile(filePath, { vertical = true, separateSymbolClasses = false, sectionNumber = null, chars = null } = {}) {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
   const htmlParts = [];
@@ -269,7 +269,13 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       pendingEpigraphs = null;
     }
 
-    htmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
+    // セリフ（「始まり）で推定3行以下ならページ跨ぎを防止
+    const charsPerLine = chars || 30;
+    if (line.startsWith('「') && Math.ceil([...line].length / charsPerLine) <= 3) {
+      htmlParts.push(`<p class="dialogue-short">${escapeHtml(line, escapeOpts)}</p>`);
+    } else {
+      htmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
+    }
   }
 
   // 空の【】で始まるかどうか（セクション番号の採番に使用）
