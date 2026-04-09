@@ -4,7 +4,7 @@
  */
 
 import { readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 
 // 区切り行かどうかを判定
 export function isSeparator(line) {
@@ -466,6 +466,24 @@ export function getTextFilesFromDir(dirPath, excludeFiles = ['synopsis.txt']) {
 /**
  * 本文の文字数カウント（HTML断片から）
  */
+// セクションごとの処理ログを出力し、合計文字数を返す
+export function logSections(sections, inputFiles) {
+  let totalChars = 0;
+  let sectionChars = 0;
+  for (let i = 0; i < inputFiles.length; i++) {
+    const content = sections[i].html || sections[i].xhtml;
+    const chars = countChars(content);
+    totalChars += chars;
+    sectionChars += chars;
+    const startMarker = sections[i].hasViewpointStart ? '\u{1F4D6}' : '  ';
+    const endMarker = sections[i].hasViewpointEnd ? '\u{1F4D5}' : '  ';
+    const sectionTotal = sections[i].hasViewpointEnd ? `  計${sectionChars.toLocaleString()}字` : '';
+    console.log(`${startMarker}${endMarker} 処理中: ${basename(inputFiles[i])} (${chars.toLocaleString()}字)${sectionTotal}`);
+    if (sections[i].hasViewpointEnd) sectionChars = 0;
+  }
+  return totalChars;
+}
+
 export function countChars(html) {
   const text = html
     .replace(/<div class="separator-block">.*?<\/div>/gs, '')
