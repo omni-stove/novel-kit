@@ -329,13 +329,17 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
     }
   }
 
-  const processLines = [];
+  let processLines = [];
   for (let i = 0; i < lines.length; i++) {
     if (isMemoLine(lines[i])) continue;
     if (isEpigraphLine(lines[i])) continue;
     if (i === endViewpointLineIndex) continue;
     processLines.push(lines[i]);
   }
+
+  // 先頭・末尾の空行をトリム（セクション結合時の余分なスペースを防ぐ）
+  while (processLines.length > 0 && processLines[0].trim() === '') processLines.shift();
+  while (processLines.length > 0 && processLines[processLines.length - 1].trim() === '') processLines.pop();
 
   // エピグラフHTML（視点行の直後に挿入）
   let pendingEpigraph = null;
@@ -352,6 +356,15 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
     const line = processLines[i];
 
     if (line.trim() === '') {
+      // 区切り記号や視点行に隣接する空行はスキップ（separator/viewpointのmarginで間隔を確保）
+      const prevLine = i > 0 ? processLines[i - 1] : null;
+      const nextLine = i < processLines.length - 1 ? processLines[i + 1] : null;
+      const adjacentToSpecial =
+        (prevLine !== null && (isSeparator(prevLine) || isViewpointLine(prevLine))) ||
+        (nextLine !== null && (isSeparator(nextLine) || isViewpointLine(nextLine)));
+      if (!adjacentToSpecial) {
+        xhtmlParts.push('<p><br /></p>');
+      }
       continue;
     }
 
