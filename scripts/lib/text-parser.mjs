@@ -21,6 +21,16 @@ export function isEpigraphLine(line) {
   return line.startsWith('Epigraph:');
 }
 
+// POV行かどうかを判定
+export function isPovLine(line) {
+  return line.startsWith('POV:');
+}
+
+// POV行から視点キャラクター名を抽出
+export function parsePovLine(line) {
+  return line.replace(/^POV:\s*/, '').trim();
+}
+
 // エピグラフ行からテキストを抽出（引用本文と引用元に分割）
 export function parseEpigraphLine(line) {
   const text = line.replace(/^Epigraph:\s*/, '');
@@ -169,7 +179,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
   const lines = content.split('\n');
   const htmlParts = [];
 
-  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l));
+  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l) && !isPovLine(l));
   const hasViewpointStart = contentLines.length > 0 && isViewpointLine(contentLines[0]);
   const hasViewpointEnd = contentLines.length > 0 && isViewpointLine(contentLines[contentLines.length - 1]);
 
@@ -177,7 +187,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
   let endViewpointLineIndex = -1;
   if (hasViewpointEnd) {
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim() !== '' && !isMemoLine(lines[i]) && !isEpigraphLine(lines[i])) {
+      if (lines[i].trim() !== '' && !isMemoLine(lines[i]) && !isEpigraphLine(lines[i]) && !isPovLine(lines[i])) {
         endViewpointLineIndex = i;
         break;
       }
@@ -187,12 +197,17 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
   // エピグラフ行を収集
   const epigraphs = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
 
+  // POV行を収集（最初のもののみ採用）
+  const povLine = lines.find(l => isPovLine(l));
+  const pov = povLine ? parsePovLine(povLine) : null;
+
   let lastWasViewpoint = false;
 
   const processLines = [];
   for (let i = 0; i < lines.length; i++) {
     if (isMemoLine(lines[i])) continue;
     if (isEpigraphLine(lines[i])) continue;
+    if (isPovLine(lines[i])) continue;
     if (i === endViewpointLineIndex) continue;
     processLines.push(lines[i]);
   }
@@ -237,16 +252,17 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       if (sectionNumber !== null && /^【】/.test(line)) {
         viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
       }
+      const povHtml = pov ? `\n<p class="pov">POV：${escapeHtml(pov, escapeOpts)}</p>` : '';
       if (pendingEpigraphs) {
         const epigraphLines = [];
         for (const { quote, source } of pendingEpigraphs) {
           epigraphLines.push(`<p class="epigraph-quote">${escapeHtml(quote, escapeOpts)}</p>`);
           if (source) epigraphLines.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
         }
-        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>\n${epigraphLines.join('\n')}\n</div>`);
+        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>${povHtml}\n${epigraphLines.join('\n')}\n</div>`);
         pendingEpigraphs = null;
       } else {
-        htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
+        htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>${povHtml}`);
       }
       lastWasViewpoint = true;
       continue;
@@ -284,7 +300,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
   // 空の【】で始まるかどうか（セクション番号の採番に使用）
   const hasEmptyViewpointStart = hasViewpointStart && /^【】/.test(contentLines[0]);
 
-  return { html: htmlParts.join('\n'), hasViewpointStart, hasViewpointEnd, hasEmptyViewpointStart };
+  return { html: htmlParts.join('\n'), hasViewpointStart, hasViewpointEnd, hasEmptyViewpointStart, pov };
 }
 
 /**
@@ -299,7 +315,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   const xhtmlParts = [];
   const escapeOpts = { vertical: true, separateSymbolClasses: true };
 
-  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l));
+  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l) && !isPovLine(l));
   const hasViewpointStart = contentLines.length > 0 && isViewpointLine(contentLines[0]);
   const hasViewpointEnd = contentLines.length > 0 && isViewpointLine(contentLines[contentLines.length - 1]);
 
@@ -307,7 +323,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   let endViewpointLineIndex = -1;
   if (hasViewpointEnd) {
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim() !== '' && !isMemoLine(lines[i]) && !isEpigraphLine(lines[i])) {
+      if (lines[i].trim() !== '' && !isMemoLine(lines[i]) && !isEpigraphLine(lines[i]) && !isPovLine(lines[i])) {
         endViewpointLineIndex = i;
         break;
       }
@@ -316,6 +332,10 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
 
   // エピグラフ行を収集
   const epigraphs = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
+
+  // POV行を収集（最初のもののみ採用）
+  const povLine = lines.find(l => isPovLine(l));
+  const pov = povLine ? parsePovLine(povLine) : null;
 
   let chapterTitle = null;
   if (hasViewpointStart) {
@@ -333,6 +353,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   for (let i = 0; i < lines.length; i++) {
     if (isMemoLine(lines[i])) continue;
     if (isEpigraphLine(lines[i])) continue;
+    if (isPovLine(lines[i])) continue;
     if (i === endViewpointLineIndex) continue;
     processLines.push(lines[i]);
   }
@@ -379,6 +400,9 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
         viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
       }
       xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
+      if (pov) {
+        xhtmlParts.push(`<p class="pov">POV：${escapeHtml(pov, escapeOpts)}</p>`);
+      }
       if (pendingEpigraph) {
         xhtmlParts.push(pendingEpigraph);
         pendingEpigraph = null;
@@ -404,6 +428,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
     hasViewpointStart,
     hasViewpointEnd,
     hasEmptyViewpointStart,
+    pov,
   };
 }
 
@@ -419,29 +444,33 @@ export function getFilteredLines(filePath, { keepEpigraphs = false } = {}) {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
 
-  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l));
+  const contentLines = lines.filter(l => l.trim() !== '' && !isMemoLine(l) && !isEpigraphLine(l) && !isPovLine(l));
   const hasViewpointStart = contentLines.length > 0 && isViewpointLine(contentLines[0]);
   const hasViewpointEnd = contentLines.length > 0 && isViewpointLine(contentLines[contentLines.length - 1]);
 
   let endViewpointLineIndex = -1;
   if (hasViewpointEnd) {
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim() !== '' && !isMemoLine(lines[i]) && !isEpigraphLine(lines[i])) {
+      if (lines[i].trim() !== '' && !isMemoLine(lines[i]) && !isEpigraphLine(lines[i]) && !isPovLine(lines[i])) {
         endViewpointLineIndex = i;
         break;
       }
     }
   }
 
+  const povLine = lines.find(l => isPovLine(l));
+  const pov = povLine ? parsePovLine(povLine) : null;
+
   const filteredLines = [];
   for (let i = 0; i < lines.length; i++) {
     if (isMemoLine(lines[i])) continue;
     if (!keepEpigraphs && isEpigraphLine(lines[i])) continue;
+    if (isPovLine(lines[i])) continue;
     if (i === endViewpointLineIndex) continue;
     filteredLines.push(lines[i]);
   }
 
-  return { lines: filteredLines, hasViewpointStart, hasViewpointEnd };
+  return { lines: filteredLines, hasViewpointStart, hasViewpointEnd, pov };
 }
 
 /**
