@@ -252,17 +252,17 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       if (sectionNumber !== null && /^【】/.test(line)) {
         viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
       }
-      const povHtml = pov ? `\n<p class="pov">POV：${escapeHtml(pov, escapeOpts)}</p>` : '';
+      const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
       if (pendingEpigraphs) {
         const epigraphLines = [];
         for (const { quote, source } of pendingEpigraphs) {
           epigraphLines.push(`<p class="epigraph-quote">${escapeHtml(quote, escapeOpts)}</p>`);
           if (source) epigraphLines.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
         }
-        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>${povHtml}\n${epigraphLines.join('\n')}\n</div>`);
+        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>\n${epigraphLines.join('\n')}\n</div>`);
         pendingEpigraphs = null;
       } else {
-        htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>${povHtml}`);
+        htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
       }
       lastWasViewpoint = true;
       continue;
@@ -399,10 +399,8 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
       if (sectionNumber !== null && /^【】/.test(line)) {
         viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
       }
-      xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
-      if (pov) {
-        xhtmlParts.push(`<p class="pov">POV：${escapeHtml(pov, escapeOpts)}</p>`);
-      }
+      const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
+      xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
       if (pendingEpigraph) {
         xhtmlParts.push(pendingEpigraph);
         pendingEpigraph = null;
