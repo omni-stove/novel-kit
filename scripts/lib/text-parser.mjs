@@ -436,9 +436,10 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
  * @param {string} filePath - テキストファイルのパス
  * @param {object} options
  * @param {boolean} options.keepEpigraphs - Epigraph行を残す（デフォルト: false）
+ * @param {boolean} options.keepPov - POV行を残す（デフォルト: false）
  * @returns {{ lines: string[], hasViewpointStart: boolean, hasViewpointEnd: boolean }}
  */
-export function getFilteredLines(filePath, { keepEpigraphs = false } = {}) {
+export function getFilteredLines(filePath, { keepEpigraphs = false, keepPov = false } = {}) {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
 
@@ -463,7 +464,7 @@ export function getFilteredLines(filePath, { keepEpigraphs = false } = {}) {
   for (let i = 0; i < lines.length; i++) {
     if (isMemoLine(lines[i])) continue;
     if (!keepEpigraphs && isEpigraphLine(lines[i])) continue;
-    if (isPovLine(lines[i])) continue;
+    if (!keepPov && isPovLine(lines[i])) continue;
     if (i === endViewpointLineIndex) continue;
     filteredLines.push(lines[i]);
   }
