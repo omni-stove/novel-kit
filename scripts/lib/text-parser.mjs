@@ -480,9 +480,14 @@ export function getFilteredLines(filePath, { keepEpigraphs = false, keepPov = fa
  * @param {object} options - parseFn に渡すオプション（sectionNumber は自動設定）
  */
 export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
+  const { partFirstIndices = null, ...restOptions } = options;
+  const resetSet = partFirstIndices ? new Set(partFirstIndices) : null;
   let sectionNumber = 1;
-  return filePaths.map(filePath => {
-    const result = parseFn(filePath, { ...options, sectionNumber });
+  return filePaths.map((filePath, idx) => {
+    if (resetSet && idx > 0 && resetSet.has(idx)) {
+      sectionNumber = 1;
+    }
+    const result = parseFn(filePath, { ...restOptions, sectionNumber });
     if (result.hasEmptyViewpointStart) sectionNumber++;
     return result;
   });
