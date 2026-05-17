@@ -249,8 +249,10 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
 
     if (isViewpointLine(line)) {
       let viewpointLine = line;
-      if (sectionNumber !== null && /^【】/.test(line)) {
-        viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
+      if (sectionNumber !== null) {
+        const match = line.match(/^【(.*)】/);
+        const title = match ? match[1].trim() : '';
+        viewpointLine = title ? line.replace(/^【.*】/, `【${sectionNumber}　${title}】`) : line.replace(/^【】/, `【${sectionNumber}】`);
       }
       const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
       if (pendingEpigraphs) {
@@ -340,8 +342,10 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   let chapterTitle = null;
   if (hasViewpointStart) {
     let firstLine = contentLines[0];
-    if (sectionNumber !== null && /^【】/.test(firstLine)) {
-      firstLine = firstLine.replace(/^【】/, `【${sectionNumber}】`);
+    if (sectionNumber !== null) {
+      const match = firstLine.match(/^【(.*)】/);
+      const title = match ? match[1].trim() : '';
+      firstLine = title ? firstLine.replace(/^【.*】/, `【${sectionNumber}　${title}】`) : firstLine.replace(/^【】/, `【${sectionNumber}】`);
     }
     const match = firstLine.match(/^【(.+?)】/);
     if (match && match[1]) {
@@ -396,8 +400,10 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
 
     if (isViewpointLine(line)) {
       let viewpointLine = line;
-      if (sectionNumber !== null && /^【】/.test(line)) {
-        viewpointLine = line.replace(/^【】/, `【${sectionNumber}】`);
+      if (sectionNumber !== null) {
+        const match = line.match(/^【(.*)】/);
+        const title = match ? match[1].trim() : '';
+        viewpointLine = title ? line.replace(/^【.*】/, `【${sectionNumber}　${title}】`) : line.replace(/^【】/, `【${sectionNumber}】`);
       }
       const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
       xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
@@ -474,7 +480,7 @@ export function getFilteredLines(filePath, { keepEpigraphs = false, keepPov = fa
 
 /**
  * 複数ファイルをセクション番号付きで一括解析
- * 空の【】に連番を自動採番する
+ * 空の【】に連番を自動採番する（「章-セクション」形式）
  * @param {string[]} filePaths - テキストファイルパスの配列
  * @param {function} parseFn - parseTextFile または parseTextFileForEpub
  * @param {object} options - parseFn に渡すオプション（sectionNumber は自動設定）
@@ -482,13 +488,16 @@ export function getFilteredLines(filePath, { keepEpigraphs = false, keepPov = fa
 export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
   const { partFirstIndices = null, ...restOptions } = options;
   const resetSet = partFirstIndices ? new Set(partFirstIndices) : null;
+  let partNumber = 1;
   let sectionNumber = 1;
   return filePaths.map((filePath, idx) => {
     if (resetSet && idx > 0 && resetSet.has(idx)) {
+      partNumber++;
       sectionNumber = 1;
     }
-    const result = parseFn(filePath, { ...restOptions, sectionNumber });
-    if (result.hasEmptyViewpointStart) sectionNumber++;
+    const sectionLabel = resetSet ? `${partNumber}-${sectionNumber}` : String(sectionNumber);
+    const result = parseFn(filePath, { ...restOptions, sectionNumber: sectionLabel });
+    if (result.hasViewpointStart) sectionNumber++;
     return result;
   });
 }
