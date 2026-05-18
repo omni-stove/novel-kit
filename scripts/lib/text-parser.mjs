@@ -11,6 +11,7 @@ export function isSeparator(line) {
   return /^[◇◆□■○●◎※＊*]+$/.test(line);
 }
 
+
 // Memo行かどうかを判定
 export function isMemoLine(line) {
   return line.startsWith('Memo:');
@@ -43,6 +44,21 @@ export function parseEpigraphLine(line) {
 // 視点行かどうかを判定（【〇〇】形式、空の【】も含む）
 export function isViewpointLine(line) {
   return /^【.*】/.test(line);
+}
+
+/**
+ * 視点行に採番ラベルを適用する
+ *   - 空の【】     → 【label】
+ *   - 【title】    → 【label　title】（titleは全角space区切りで保持）
+ * @param {string} line - 視点行
+ * @param {string|number} label - 採番ラベル（例: "1-2" や 5）
+ */
+export function applyViewpointLabel(line, label) {
+  const match = line.match(/^【(.*)】/);
+  const title = match ? match[1].trim() : '';
+  return title
+    ? line.replace(/^【.*】/, `【${label}　${title}】`)
+    : line.replace(/^【】/, `【${label}】`);
 }
 
 
@@ -81,7 +97,11 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
     if (vertical) {
+      r = r.replace(/\b(?=[IVXLCDM]*I)[IVXLCDM]{2,}\b/g, (match) => phSpan(`<span class="tcy-roman">${match}</span>`));
+      r = r.replace(/[\u2160-\u216B\u2170-\u217B]+/g, (match) => phSpan(`<span class="tcy-roman">${match}</span>`));
+      r = r.replace(/\+[-\u2212]/g, '\u00B1');
       r = r.replace(/-/g, '\uFF0D');
+      r = r.replace(/\+/g, '\uFF0B');
       r = r.replace(/!/g, '！');
       r = r.replace(/\?/g, '？');
       r = r.replace(/@/g, '＠');
@@ -248,12 +268,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
     }
 
     if (isViewpointLine(line)) {
-      let viewpointLine = line;
-      if (sectionNumber !== null) {
-        const match = line.match(/^【(.*)】/);
-        const title = match ? match[1].trim() : '';
-        viewpointLine = title ? line.replace(/^【.*】/, `【${sectionNumber}　${title}】`) : line.replace(/^【】/, `【${sectionNumber}】`);
-      }
+      const viewpointLine = sectionNumber !== null ? applyViewpointLabel(line, sectionNumber) : line;
       const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
       if (pendingEpigraphs) {
         const epigraphLines = [];
@@ -343,9 +358,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   if (hasViewpointStart) {
     let firstLine = contentLines[0];
     if (sectionNumber !== null) {
-      const match = firstLine.match(/^【(.*)】/);
-      const title = match ? match[1].trim() : '';
-      firstLine = title ? firstLine.replace(/^【.*】/, `【${sectionNumber}　${title}】`) : firstLine.replace(/^【】/, `【${sectionNumber}】`);
+      firstLine = applyViewpointLabel(firstLine, sectionNumber);
     }
     const match = firstLine.match(/^【(.+?)】/);
     if (match && match[1]) {
@@ -399,12 +412,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
     }
 
     if (isViewpointLine(line)) {
-      let viewpointLine = line;
-      if (sectionNumber !== null) {
-        const match = line.match(/^【(.*)】/);
-        const title = match ? match[1].trim() : '';
-        viewpointLine = title ? line.replace(/^【.*】/, `【${sectionNumber}　${title}】`) : line.replace(/^【】/, `【${sectionNumber}】`);
-      }
+      const viewpointLine = sectionNumber !== null ? applyViewpointLabel(line, sectionNumber) : line;
       const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
       xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
       if (pendingEpigraph) {
