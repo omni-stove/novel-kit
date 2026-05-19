@@ -1,6 +1,6 @@
 /**
  * テキスト解析の共通ユーティリティ
- * txt-to-pdf.mjs, txt-to-novel-pdf.mjs, txt-to-epub.mjs で共有
+ * txt-to-pdf.mts, txt-to-novel-pdf.mts, txt-to-epub.mts で共有
  */
 
 import { readFileSync, readdirSync } from 'fs';
@@ -446,7 +446,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
 
 /**
  * ファイルからフィルタ済みの行を取得（Memo行・Epigraph行・末尾視点行を除去）
- * split-chapters.mjs など、HTML変換せずに生テキスト行が必要な場合に使用
+ * split-chapters.mts など、HTML変換せずに生テキスト行が必要な場合に使用
  * @param {string} filePath - テキストファイルのパス
  * @param {object} options
  * @param {boolean} options.keepEpigraphs - Epigraph行を残す（デフォルト: false）
@@ -561,4 +561,153 @@ export function countChars(html) {
     .replace(/&quot;/g, '"')
     .replace(/[\s\u00A0]/g, '');
   return [...text].length;
+}
+
+if (import.meta.vitest) {
+  const { describe, test, expect } = import.meta.vitest;
+
+  describe('isSeparator', () => {
+    test('\u25C7\u306E\u307F\u3067\u69CB\u6210\u3055\u308C\u308B\u884C\u306Ftrue', () => {
+      expect(isSeparator('\u25C7')).toBe(true);
+      expect(isSeparator('\u25C7\u25C7\u25C7')).toBe(true);
+    });
+    test('\u591A\u69D8\u306A\u533A\u5207\u308A\u8A18\u53F7\u3082true', () => {
+      expect(isSeparator('\u25C6\u25C6')).toBe(true);
+      expect(isSeparator('\u25A1')).toBe(true);
+      expect(isSeparator('\u25A0\u25A0\u25A0')).toBe(true);
+      expect(isSeparator('\u25CB\u25CF\u25CE')).toBe(true);
+      expect(isSeparator('\u203B\u203B')).toBe(true);
+      expect(isSeparator('\uFF0A')).toBe(true);
+      expect(isSeparator('***')).toBe(true);
+    });
+    test('\u6587\u5B57\u304C\u6DF7\u3056\u308B\u3068false', () => {
+      expect(isSeparator('\u25C7\u3042')).toBe(false);
+      expect(isSeparator('\u3042\u25C7')).toBe(false);
+      expect(isSeparator('')).toBe(false);
+      expect(isSeparator('\u672C\u6587')).toBe(false);
+    });
+  });
+
+  describe('isMemoLine / isEpigraphLine / isPovLine', () => {
+    test('\u30D7\u30EC\u30D5\u30A3\u30C3\u30AF\u30B9\u4E00\u81F4\u3067true', () => {
+      expect(isMemoLine('Memo: \u306A\u306B\u304B')).toBe(true);
+      expect(isEpigraphLine('Epigraph: \u5F15\u7528')).toBe(true);
+      expect(isPovLine('POV: \u4E3B\u4EBA\u516C')).toBe(true);
+    });
+    test('\u30D7\u30EC\u30D5\u30A3\u30C3\u30AF\u30B9\u304C\u306A\u3051\u308C\u3070false', () => {
+      expect(isMemoLine('memo: \u5C0F\u6587\u5B57')).toBe(false);
+      expect(isEpigraphLine(' Epigraph: \u5148\u982D\u7A7A\u767D')).toBe(false);
+      expect(isPovLine('\u672C\u6587')).toBe(false);
+    });
+  });
+
+  describe('parsePovLine', () => {
+    test('POV: \u306E\u5F8C\u306E\u540D\u524D\u3092\u8FD4\u3059', () => {
+      expect(parsePovLine('POV: \u4E3B\u4EBA\u516C')).toBe('\u4E3B\u4EBA\u516C');
+      expect(parsePovLine('POV:\u4E3B\u4EBA\u516C')).toBe('\u4E3B\u4EBA\u516C');
+      expect(parsePovLine('POV:   \u592A\u90CE  ')).toBe('\u592A\u90CE');
+    });
+  });
+
+  describe('parseEpigraphLine', () => {
+    test('\u5F15\u7528\u672C\u6587\u3068\u5F15\u7528\u5143\u3092 \u2014\u2014\u3067\u5206\u5272', () => {
+      expect(parseEpigraphLine('Epigraph: \u6211\u601D\u3046\u3001\u3086\u3048\u306B\u6211\u3042\u308A\u2014\u2014\u30C7\u30AB\u30EB\u30C8')).toEqual({
+        quote: '\u6211\u601D\u3046\u3001\u3086\u3048\u306B\u6211\u3042\u308A',
+        source: '\u30C7\u30AB\u30EB\u30C8',
+      });
+    });
+    test('\u5F15\u7528\u5143\u304C\u306A\u3051\u308C\u3070source\u306Fnull', () => {
+      expect(parseEpigraphLine('Epigraph: \u5F15\u7528\u306E\u307F')).toEqual({
+        quote: '\u5F15\u7528\u306E\u307F',
+        source: null,
+      });
+    });
+    test('\u2014\u2014\u304C\u8907\u6570\u3042\u308C\u3070\u6700\u521D\u306E\u2014\u2014\u3067\u5206\u5272\u3057\u6B8B\u308A\u3092\u7D50\u5408', () => {
+      expect(parseEpigraphLine('Epigraph: \u5F15\u7528\u2014\u2014\u51FA\u51781\u2014\u2014\u51FA\u51782')).toEqual({
+        quote: '\u5F15\u7528',
+        source: '\u51FA\u51781\u2014\u2014\u51FA\u51782',
+      });
+    });
+  });
+
+  describe('isViewpointLine', () => {
+    test('\u3010name\u3011\u5F62\u5F0F\u306Ftrue', () => {
+      expect(isViewpointLine('\u3010\u592A\u90CE\u3011')).toBe(true);
+      expect(isViewpointLine('\u3010\u3011')).toBe(true);
+      expect(isViewpointLine('\u3010\u592A\u90CE\u3011\u5F8C\u7D9A\u30C6\u30AD\u30B9\u30C8')).toBe(true);
+    });
+    test('\u3010\u3011\u304C\u5148\u982D\u3067\u306A\u3051\u308C\u3070false', () => {
+      expect(isViewpointLine(' \u3010\u592A\u90CE\u3011')).toBe(false);
+      expect(isViewpointLine('\u672C\u6587\u3010\u592A\u90CE\u3011')).toBe(false);
+      expect(isViewpointLine('\u300C\u30BB\u30EA\u30D5\u300D')).toBe(false);
+    });
+  });
+
+  describe('applyViewpointLabel', () => {
+    test('\u7A7A\u306E\u3010\u3011\u306F\u30E9\u30D9\u30EB\u3060\u3051\u304C\u5165\u308B', () => {
+      expect(applyViewpointLabel('\u3010\u3011', '1-2')).toBe('\u30101-2\u3011');
+      expect(applyViewpointLabel('\u3010\u3011', 5)).toBe('\u30105\u3011');
+    });
+    test('\u3010title\u3011\u306F\u30E9\u30D9\u30EB\u3068title\u304C\u5168\u89D2space\u533A\u5207\u308A', () => {
+      expect(applyViewpointLabel('\u3010\u592A\u90CE\u3011', '1-2')).toBe('\u30101-2\u3000\u592A\u90CE\u3011');
+      expect(applyViewpointLabel('\u3010\u592A\u90CE\u3011 \u30BB\u30EA\u30D5', '3')).toBe('\u30103\u3000\u592A\u90CE\u3011 \u30BB\u30EA\u30D5');
+    });
+  });
+
+  describe('escapeHtml', () => {
+    test('HTML\u7279\u6B8A\u6587\u5B57\u3092\u30A8\u30B9\u30B1\u30FC\u30D7\uFF08\u6A2A\u66F8\u304D\u30E2\u30FC\u30C9\uFF09', () => {
+      expect(escapeHtml('<p>"a & b"</p>', { vertical: false })).toBe('&lt;p&gt;&quot;a &amp; b&quot;&lt;/p&gt;');
+    });
+    test('\u7E26\u66F8\u304D\u30E2\u30FC\u30C9\u3067\u306F\u6570\u5B57\u3092\u7E26\u4E2D\u6A2A/upright\u306B\u3001\u30CF\u30A4\u30D5\u30F3\u3092\u5168\u89D2\u5316', () => {
+      expect(escapeHtml('5', { vertical: true })).toBe('<span class="tcy">5</span>');
+      expect(escapeHtml('99', { vertical: true })).toBe('<span class="tcy">99</span>');
+      expect(escapeHtml('100', { vertical: true })).toBe('<span class="upright">100</span>');
+      expect(escapeHtml('1,234', { vertical: true })).toBe('<span class="upright">1\uFF0C234</span>');
+      expect(escapeHtml('a-b', { vertical: true })).toBe('<span class="latin">a</span><span class="dash">\uFF0D</span><span class="latin">b</span>');
+    });
+    test('\u7E26\u66F8\u304D\u3067 !? \u3092\u5168\u89D2\u306B\u3001!? \u306E\u9023\u7D9A\u306F\u7E26\u4E2D\u6A2A\u306B\u307E\u3068\u3081\u308B', () => {
+      expect(escapeHtml('\u3042!', { vertical: true })).toBe('\u3042\uFF01');
+      expect(escapeHtml('\u3042?', { vertical: true })).toBe('\u3042\uFF1F');
+      expect(escapeHtml('!?', { vertical: true })).toBe('<span class="tcy">!?</span>');
+      expect(escapeHtml('\uFF01\uFF01', { vertical: true })).toBe('<span class="tcy">!!</span>');
+    });
+    test('\u30EB\u30D3 |\u89AA\u300A\u3075\u308A\u300B \u3092 <ruby> \u306B\u5909\u63DB', () => {
+      expect(escapeHtml('|\u6F22\u5B57\u300A\u304B\u3093\u3058\u300B', { vertical: false })).toBe('<ruby>\u6F22\u5B57<rt>\u304B\u3093\u3058</rt></ruby>');
+    });
+    test('\u508D\u70B9 \u300A\u300Atext\u300B\u300B \u3092 span.emphasis \u306B\u5909\u63DB', () => {
+      expect(escapeHtml('\u300A\u300A\u5F37\u8ABF\u300B\u300B', { vertical: false })).toBe('<span class="emphasis">\u5F37\u8ABF</span>');
+    });
+    test('\u6A2A\u5012\u3057 <<text>> \u3092 span.sideways-latin \u306B\u5909\u63DB', () => {
+      expect(escapeHtml('<<ABC>>', { vertical: false })).toBe('<span class="sideways-latin">ABC</span>');
+    });
+    test('separateSymbolClasses=true \u3067\u30C0\u30C3\u30B7\u30E5/\u4E09\u70B9/\u6CE2\u30C0\u30C3\u30B7\u30E5\u304C\u5225\u30AF\u30E9\u30B9\u306B', () => {
+      expect(escapeHtml('\u2014', { vertical: true, separateSymbolClasses: true })).toBe('<span class="dash">\u2014</span>');
+      expect(escapeHtml('\u2026', { vertical: true, separateSymbolClasses: true })).toBe('<span class="ellipsis">\u2026</span>');
+      expect(escapeHtml('\uFF5E', { vertical: true, separateSymbolClasses: true })).toBe('<span class="wave-dash">\uFF5E</span>');
+    });
+    test('\u65E2\u5B9A (separateSymbolClasses=false) \u3067\u306F\u5168\u90E8 dash \u30AF\u30E9\u30B9', () => {
+      expect(escapeHtml('\u2026', { vertical: true })).toBe('<span class="dash">\u2026</span>');
+      expect(escapeHtml('\uFF5E', { vertical: true })).toBe('<span class="dash">\uFF5E</span>');
+    });
+  });
+
+  describe('countChars', () => {
+    test('HTML\u30BF\u30B0\u3092\u9664\u53BB\u3057\u3066\u6587\u5B57\u6570\u3092\u6570\u3048\u308B', () => {
+      expect(countChars('<p>\u672C\u6587</p>')).toBe(2);
+    });
+    test('\u30EB\u30D3\u306E rt \u306F\u9664\u5916', () => {
+      expect(countChars('<p><ruby>\u6F22\u5B57<rt>\u304B\u3093\u3058</rt></ruby></p>')).toBe(2);
+    });
+    test('separator-block \u3068 p.separator \u306F\u9664\u5916', () => {
+      expect(countChars('<p>\u672C\u6587</p>\n<p class="separator">\u25C7\u25C7\u25C7</p>')).toBe(2);
+      expect(countChars('<p>\u672C\u6587</p>\n<div class="separator-block"><p class="separator">\u25C7</p></div>')).toBe(2);
+    });
+    test('&nbsp; \u3084 &amp; \u306A\u3069\u306E\u30A8\u30F3\u30C6\u30A3\u30C6\u30A3\u306F\u4E2D\u8EAB\u306B\u5C55\u958B\u305B\u305A\u7A7A\u767D\u6271\u3044', () => {
+      expect(countChars('<p>&nbsp;</p>')).toBe(0);
+      expect(countChars('<p>a&amp;b</p>')).toBe(3);
+    });
+    test('\u7A7A\u767D\u30FB\u5168\u89D2\u7A7A\u767D\u306F\u9664\u5916', () => {
+      expect(countChars('<p>\u3042 \u3044\u3000\u3046</p>')).toBe(3);
+    });
+  });
 }
