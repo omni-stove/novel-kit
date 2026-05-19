@@ -97,8 +97,14 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
     if (vertical) {
-      r = r.replace(/\b(?=[IVXLCDM]*I)[IVXLCDM]{2,}\b/g, (match) => phSpan(`<span class="tcy-roman">${match}</span>`));
-      r = r.replace(/[\u2160-\u216B\u2170-\u217B]+/g, (match) => phSpan(`<span class="tcy-roman">${match}</span>`));
+      // ASCII\u30ED\u30FC\u30DE\u6570\u5B57\uFF08II\u301CXII\uFF09\u306FUnicode\u306E\u5358\u4E00\u30B3\u30FC\u30C9\u30DD\u30A4\u30F3\u30C8\u306B\u6B63\u898F\u5316\u3057\u3066upright\u3067\u7ACB\u3066\u308B\u3002
+      // text-combine-upright: all \u306FChromium/Vivliostyle\u3067\u5B57\u5E45\u5DEE\u306E\u3042\u308B\u7D44\uFF08IV\u7B49\uFF09\u304C\u53F3\u306B\u5BC4\u308B\u305F\u3081\u4F7F\u308F\u306A\u3044\u3002
+      const asciiRomanMap = {
+        'II': '\u2161', 'III': '\u2162', 'IV': '\u2163', 'VI': '\u2165',
+        'VII': '\u2166', 'VIII': '\u2167', 'IX': '\u2168', 'XI': '\u216A', 'XII': '\u216B',
+      };
+      r = r.replace(/\b(XII|XI|VIII|VII|VI|IX|IV|III|II)\b/g, (match) => phSpan(`<span class="upright">${asciiRomanMap[match]}</span>`));
+      r = r.replace(/[\u2160-\u216B\u2170-\u217B]+/g, (match) => phSpan(`<span class="upright">${match}</span>`));
       r = r.replace(/\+[-\u2212]/g, '\u00B1');
       r = r.replace(/-/g, '\uFF0D');
       r = r.replace(/\+/g, '\uFF0B');

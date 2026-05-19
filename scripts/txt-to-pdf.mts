@@ -374,7 +374,7 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
       text-orientation: upright;
     }
 
-    .tcy, .tcy-roman {
+    .tcy {
       text-combine-upright: all;
       -webkit-text-combine: horizontal;
     }
