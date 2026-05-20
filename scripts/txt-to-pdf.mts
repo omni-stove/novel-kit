@@ -25,6 +25,8 @@
  *   --open               生成後にプレビューを開く
  *   --count-only         原稿用紙換算（文字数・行数・枚数）のみを表示して終了
  *                        --size 未指定時は 20x20（400字詰め原稿用紙）
+ *   --review             下読み用モード。表紙・梗概・人物紹介・部構成（--part）をすべて無視し、
+ *                        先頭から約2万字に最も近いファイル境界までをスライスして1本のPDFを生成する。
  */
 
 import { PDFDocument, PDFName, rgb } from 'pdf-lib';
@@ -69,6 +71,26 @@ function countManuscript(inputFiles, charsPerLine) {
     }
   }
   return { totalLines, totalChars };
+}
+
+// 各要素の文字数を順に累積し、累積値が targetChars に最も近くなる「区切り目（1始まりの末尾位置）」を返す。
+// 累積が targetChars 以上に達した時点で打ち切る（同じ差分なら、より多く含む側を優先）。
+// charCounts が空なら 0、長さ1なら 1 を返す。
+export function selectReviewBoundary(charCounts, targetChars) {
+  if (charCounts.length === 0) return 0;
+  let cum = 0;
+  let bestEnd = 1;
+  let bestDiff = Infinity;
+  for (let i = 0; i < charCounts.length; i++) {
+    cum += charCounts[i];
+    const diff = Math.abs(cum - targetChars);
+    if (diff <= bestDiff) {
+      bestDiff = diff;
+      bestEnd = i + 1;
+    }
+    if (cum >= targetChars) break;
+  }
+  return bestEnd;
 }
 
 const SYNOPSIS_FILENAME = 'synopsis.txt';
@@ -142,6 +164,7 @@ function parseArgs(args) {
     lines: null,
     countOnly: false,
     parts: null,
+    review: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -177,6 +200,8 @@ function parseArgs(args) {
     } else if (arg.startsWith('--part=') || arg.startsWith('--parts=')) {
       const val = arg.slice(arg.indexOf('=') + 1);
       result.parts = val.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    } else if (arg === '--review') {
+      result.review = true;
     } else if (!arg.startsWith('-')) {
       result.files.push(arg);
     }
@@ -625,6 +650,24 @@ async function main() {
 
   console.log(`入力ファイル: ${inputFiles.length}件`);
 
+  // --review: 表紙・梗概・人物紹介・部構成をoverrideし、先頭から約2万字に最も近い
+  // ファイル境界までを切り出して1本のPDFを生成
+  // --title / --author が指定されていれば coverless 形式で本文先頭に出す
+  if (args.review) {
+    args.coverless = true;
+    args.synopsisOnTitle = false;
+    args.parts = null;
+
+    const targetChars = 20000;
+    const charsPerLine = args.chars || 30;
+    const charCounts = inputFiles.map(f => countManuscript([f], charsPerLine).totalChars);
+    const bestEnd = selectReviewBoundary(charCounts, targetChars);
+    const slice = inputFiles.slice(0, bestEnd);
+    const { totalChars: sliceChars } = countManuscript(slice, charsPerLine);
+    console.log(`下読みモード: ${basename(inputFiles[0])} 〜 ${basename(inputFiles[bestEnd - 1])} (${slice.length}ファイル, ${sliceChars.toLocaleString()}字)`);
+    inputFiles = slice;
+  }
+
   // --part の値（ファイル名プレフィックス or 1始まりインデックス）を 1始まりインデックスに正規化
   if (args.parts && args.parts.length > 0) {
     const resolved = [];
@@ -662,8 +705,8 @@ async function main() {
     return;
   }
 
-  // 梗概ファイルを探す
-  const synopsisPath = findSynopsisFile(inputFiles, args.files);
+  // 梗概ファイルを探す（--review時はスキップ）
+  const synopsisPath = args.review ? null : findSynopsisFile(inputFiles, args.files);
   let synopsisHtml = null;
   let synopsisCharCount = 0;
   if (synopsisPath) {
@@ -678,8 +721,8 @@ async function main() {
     synopsisHtml = parseSynopsisFile(synopsisPath, args.vertical);
   }
 
-  // 人物紹介ファイルを探す
-  const charactersPath = findCharactersFile(inputFiles, args.files);
+  // 人物紹介ファイルを探す（--review時はスキップ）
+  const charactersPath = args.review ? null : findCharactersFile(inputFiles, args.files);
   let charactersHtml = null;
   if (charactersPath) {
     console.log(`人物紹介: ${basename(charactersPath)}`);
@@ -950,5 +993,37 @@ if (import.meta.vitest) {
 
     expect(html).toMatch(/<p class="coverless-title">タイトル<\/p>\n<p>1部本文<\/p>/);
     expect(html).not.toMatch(/<p class="coverless-title">タイトル<\/p>\n<p class="empty">/);
+  });
+
+  test('selectReviewBoundary: 空配列は0', () => {
+    expect(selectReviewBoundary([], 20000)).toBe(0);
+  });
+
+  test('selectReviewBoundary: 全部足してもtargetに届かない場合は全件', () => {
+    expect(selectReviewBoundary([3000, 4000, 5000], 20000)).toBe(3);
+  });
+
+  test('selectReviewBoundary: targetを最初に超えた境界が最も近ければそこで止まる', () => {
+    // 累積: 5000, 12000, 21000 → target=20000 との差は |5000-20000|=15000, 8000, 1000
+    expect(selectReviewBoundary([5000, 7000, 9000], 20000)).toBe(3);
+  });
+
+  test('selectReviewBoundary: targetを超える前の方がtargetに近ければ手前で止まる', () => {
+    // 累積: 19500, 30000 → 差は 500, 10000 → bestEndは1（19500の方が近い）
+    expect(selectReviewBoundary([19500, 10500], 20000)).toBe(1);
+  });
+
+  test('selectReviewBoundary: 累積がちょうど一致する境界を選ぶ', () => {
+    // 累積: 10000, 20000, 30000 → 差は 10000, 0, 10000 → bestEnd=2
+    expect(selectReviewBoundary([10000, 10000, 10000], 20000)).toBe(2);
+  });
+
+  test('selectReviewBoundary: 差が同じなら多く含む方（後ろ）を採用', () => {
+    // 累積: 15000, 25000 → 差は 5000, 5000 → <= で更新するので bestEnd=2
+    expect(selectReviewBoundary([15000, 10000], 20000)).toBe(2);
+  });
+
+  test('selectReviewBoundary: 最初の1ファイルでtargetを大幅超過してもそれを返す', () => {
+    expect(selectReviewBoundary([50000, 1000], 20000)).toBe(1);
   });
 }
