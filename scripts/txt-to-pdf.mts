@@ -384,7 +384,8 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
     }
 
     .latin {
-      text-orientation: upright;
+      text-combine-upright: all;
+      -webkit-text-combine: horizontal;
     }
 
     .sideways-latin {
@@ -396,7 +397,8 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
     }
 
     .upright {
-      text-orientation: upright;
+      text-combine-upright: all;
+      -webkit-text-combine: horizontal;
     }
 
     .tcy {

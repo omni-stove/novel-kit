@@ -104,7 +104,9 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
         'VII': '\u2166', 'VIII': '\u2167', 'IX': '\u2168', 'XI': '\u216A', 'XII': '\u216B',
       };
       r = r.replace(/\b(XII|XI|VIII|VII|VI|IX|IV|III|II)\b/g, (match) => phSpan(`<span class="upright">${asciiRomanMap[match]}</span>`));
-      r = r.replace(/[\u2160-\u216B\u2170-\u217B]+/g, (match) => phSpan(`<span class="upright">${match}</span>`));
+      r = r.replace(/[\u2160-\u216B\u2170-\u217B]+/g, (match) => {
+        return [...match].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
+      });
       r = r.replace(/\+[-\u2212]/g, '\u00B1');
       r = r.replace(/-/g, '\uFF0D');
       r = r.replace(/\+/g, '\uFF0B');
@@ -121,10 +123,21 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       r = r.replace(/\.?\d[\d,.]*\d|\d/g, (match) => {
         const converted = match.replace(/\./g, '．').replace(/,/g, '，');
         if (/^\d{1,2}$/.test(match)) return phSpan(`<span class="tcy">${match}</span>`);
-        return phSpan(`<span class="upright">${converted}</span>`);
+        // 3桁以上の数字も1文字ずつ独立した正方セルへ（text-combine-upright: all で中央寄せ）
+        return [...converted].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
       });
-      r = r.replace(/[a-zA-Z]+(?:\s[a-zA-Z]+)*/g, (match) => phSpan(`<span class="latin">${match}</span>`));
-      r = r.replace(/[\u0370-\u03FF]+/g, (match) => phSpan(`<span class="upright">${match}</span>`));
+      // 拡張ラテン文字（À–ɏ, Ḁ–1EFF）も含めて upright 化。
+      // U+00D7（×）と U+00F7（÷）は数学記号なので除外。
+      const latinChar = 'a-zA-Z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u024F\\u1E00-\\u1EFF';
+      const latinRe = new RegExp(`[${latinChar}]+(?:\\s[${latinChar}]+)*`, 'g');
+      // 1\u6587\u5B57\u305A\u3064\u72EC\u7ACB\u3057\u305F\u6B63\u65B9\u30BB\u30EB\u306B\u53CE\u3081\u308B\u3053\u3068\u3067\u3001y/g/p/j \u306E\u30C7\u30A3\u30BB\u30F3\u30C0\u304C\u30D9\u30FC\u30B9\u30E9\u30A4\u30F3\u3067
+      // \u4E0B\u306B\u305A\u308C\u306A\u3044\u3088\u3046\u306B\u3059\u308B\uFF08CSS .latin \u5074\u3067 text-combine-upright: all \u3092\u9069\u7528\uFF09\u3002
+      r = r.replace(latinRe, (match) => {
+        return [...match].map(c => /\s/.test(c) ? c : phSpan(`<span class="latin">${c}</span>`)).join('');
+      });
+      r = r.replace(/[\u0370-\u03FF]+/g, (match) => {
+        return [...match].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
+      });
       // ダッシュ等のspanタグを生成（この時点でラテン文字はもうプレースホルダーなので安全）
       if (separateSymbolClasses) {
         r = r.replace(/([—―\uFF0D]+)/g, '<span class="dash">$1</span>');
@@ -667,9 +680,17 @@ if (import.meta.vitest) {
     test('\u7E26\u66F8\u304D\u30E2\u30FC\u30C9\u3067\u306F\u6570\u5B57\u3092\u7E26\u4E2D\u6A2A/upright\u306B\u3001\u30CF\u30A4\u30D5\u30F3\u3092\u5168\u89D2\u5316', () => {
       expect(escapeHtml('5', { vertical: true })).toBe('<span class="tcy">5</span>');
       expect(escapeHtml('99', { vertical: true })).toBe('<span class="tcy">99</span>');
-      expect(escapeHtml('100', { vertical: true })).toBe('<span class="upright">100</span>');
-      expect(escapeHtml('1,234', { vertical: true })).toBe('<span class="upright">1\uFF0C234</span>');
+      expect(escapeHtml('100', { vertical: true })).toBe('<span class="upright">1</span><span class="upright">0</span><span class="upright">0</span>');
+      expect(escapeHtml('1,234', { vertical: true })).toBe('<span class="upright">1</span><span class="upright">\uFF0C</span><span class="upright">2</span><span class="upright">3</span><span class="upright">4</span>');
       expect(escapeHtml('a-b', { vertical: true })).toBe('<span class="latin">a</span><span class="dash">\uFF0D</span><span class="latin">b</span>');
+      expect(escapeHtml('ab', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>');
+    });
+    test('\u7E26\u66F8\u304D\u3067\u30A2\u30AF\u30BB\u30F3\u30C8\u4ED8\u304D\u30E9\u30C6\u30F3\u6587\u5B57\u3082 latin \u30AF\u30E9\u30B9\u3067\u7ACB\u3066\u308B', () => {
+      // 1\u6587\u5B57\u305A\u3064\u72EC\u7ACB\u3057\u305F span \u306B\u5206\u3051\u3066\u3001\u5404\u6587\u5B57\u3092 text-combine-upright \u3067\u6B63\u65B9\u30BB\u30EB\u306B\u53CE\u3081\u308B
+      expect(escapeHtml('ab', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>');
+      expect(escapeHtml('C\u00F4te', { vertical: true })).toBe('<span class="latin">C</span><span class="latin">\u00F4</span><span class="latin">t</span><span class="latin">e</span>');
+      expect(escapeHtml('\u00DCber', { vertical: true })).toBe('<span class="latin">\u00DC</span><span class="latin">b</span><span class="latin">e</span><span class="latin">r</span>');
+      expect(escapeHtml('\u0110\u00E0', { vertical: true })).toBe('<span class="latin">\u0110</span><span class="latin">\u00E0</span>');
     });
     test('\u7E26\u66F8\u304D\u3067 !? \u3092\u5168\u89D2\u306B\u3001!? \u306E\u9023\u7D9A\u306F\u7E26\u4E2D\u6A2A\u306B\u307E\u3068\u3081\u308B', () => {
       expect(escapeHtml('\u3042!', { vertical: true })).toBe('\u3042\uFF01');
