@@ -11,6 +11,8 @@
  *   -o, --output <file>  出力ファイル名（必須）
  *   --title <text>       タイトル（1ページ目にタイトルのみ表示）
  *   --no-page-break      ファイル間のページブレークを無効化
+ *   --no-chapter-break   章（視点切替）ごとの改ページを無効化。章境界は空行1つで連結し、
+ *                        同一章内のファイル境界には区切り字「◇◇◇」を挟む（--part 非指定時のみ有効）
  *   --horizontal         横書きモード
  *   --size WxH           1ページの文字数（例: --size 40x40 → 40字×40行）
  *   --limit <n>          先頭からn個のファイルのみ処理
@@ -155,6 +157,7 @@ function parseArgs(args) {
     author: null,
     files: [],
     pageBreak: true,
+    chapterBreak: true,
     vertical: true,
     open: false,
     synopsisOnTitle: false,
@@ -177,6 +180,8 @@ function parseArgs(args) {
       result.author = args[++i];
     } else if (arg === '--no-page-break') {
       result.pageBreak = false;
+    } else if (arg === '--no-chapter-break') {
+      result.chapterBreak = false;
     } else if (arg === '--horizontal') {
       result.vertical = false;
     } else if (arg === '--size') {
@@ -274,6 +279,21 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
     }
 
     const prevEndsViewpoint = i > 0 && sections[i - 1].hasViewpointEnd;
+
+    // --no-chapter-break: 章ごとの改ページをせず、章境界は空行1つ、
+    // 同一章内のファイル境界は◇◇◇で連結する
+    if (options.chapterBreak === false) {
+      if (i === 0) {
+        return `<div class="section">\n${trimmedHtml}\n</div>`;
+      }
+      const isChapterBoundary = s.hasViewpointStart || prevEndsViewpoint;
+      const html = stripLeadingEmpties(trimmedHtml);
+      if (isChapterBoundary) {
+        return `<div class="section">\n<p class="empty">&nbsp;</p>\n${html}\n</div>`;
+      }
+      return `<div class="section">\n${separatorBlock}${html}\n</div>`;
+    }
+
     const needsPageBreak = i === 0 || s.hasViewpointStart || prevEndsViewpoint;
     const className = (needsPageBreak && i > 0) ? 'section page-break' : 'section';
 
@@ -995,6 +1015,37 @@ if (import.meta.vitest) {
 
     expect(html).toMatch(/<p class="coverless-title">タイトル<\/p>\n<p>1部本文<\/p>/);
     expect(html).not.toMatch(/<p class="coverless-title">タイトル<\/p>\n<p class="empty">/);
+  });
+
+  test('--no-chapter-break: 章境界でも改ページせず空行1つで連結', () => {
+    const sections = [
+      makeSection({ html: '<p>1ファイル目</p>' }),
+      makeSection({ html: '<p>2ファイル目</p>' }),
+      makeSection({
+        html: '<p class="viewpoint">【視点】</p>\n<p>3ファイル目</p>',
+        hasViewpointStart: true,
+      }),
+    ];
+    const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
+
+    // 改ページ用のクラスは一切付かない
+    expect(html.includes('<div class="section page-break')).toBe(false);
+    // 同一章内のファイル境界には◇◇◇
+    expect((html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length).toBe(1);
+    // 章境界（視点切替）は空行1つで連結
+    expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p class="viewpoint">【視点】<\/p>/);
+  });
+
+  test('--no-chapter-break: 前ファイルが【】で終わる章境界も空行1つで連結', () => {
+    const sections = [
+      makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
+      makeSection({ html: '<p>2ファイル目</p>' }),
+    ];
+    const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
+
+    expect(html.includes('<div class="section page-break')).toBe(false);
+    expect(html.includes('◇◇◇')).toBe(false);
+    expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p>2ファイル目<\/p>/);
   });
 
   test('selectReviewBoundary: 空配列は0', () => {

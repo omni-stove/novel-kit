@@ -3,8 +3,9 @@
  * txt-to-pdf.mts, txt-to-novel-pdf.mts, txt-to-epub.mts で共有
  */
 
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync, readdirSync, writeFileSync, unlinkSync } from 'fs';
 import { basename, join } from 'path';
+import { tmpdir } from 'os';
 
 // 区切り行かどうかを判定
 export function isSeparator(line) {
@@ -297,10 +298,12 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
         }
         htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>\n${epigraphLines.join('\n')}\n</div>`);
         pendingEpigraphs = null;
+        // エピグラフページの直後には空行を入れず、本文をページ先頭から始める
+        lastWasViewpoint = false;
       } else {
         htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
+        lastWasViewpoint = true;
       }
-      lastWasViewpoint = true;
       continue;
     }
 
@@ -317,7 +320,6 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
         if (source) epigraphLines.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
       }
       htmlParts.push(`<div class="epigraph">\n${epigraphLines.join('\n')}\n</div>`);
-      htmlParts.push('<p class="empty">&nbsp;</p>');
       pendingEpigraphs = null;
     }
 
@@ -715,6 +717,34 @@ if (import.meta.vitest) {
     test('\u65E2\u5B9A (separateSymbolClasses=false) \u3067\u306F\u5168\u90E8 dash \u30AF\u30E9\u30B9', () => {
       expect(escapeHtml('\u2026', { vertical: true })).toBe('<span class="dash">\u2026</span>');
       expect(escapeHtml('\uFF5E', { vertical: true })).toBe('<span class="dash">\uFF5E</span>');
+    });
+  });
+
+  describe('parseTextFile epigraph', () => {
+    test('視点行＋エピグラフの直後には空行を入れない', () => {
+      const tmp = join(tmpdir(), `epi-vp-${Date.now()}.txt`);
+      writeFileSync(tmp, 'Epigraph: 引用——出典\n【】\n本文1行目\n');
+      try {
+        const { html } = parseTextFile(tmp, { vertical: false });
+        expect(html).toContain('epigraph-page');
+        // エピグラフページdivの直後に本文が来る（空行<p class="empty">を挟まない）
+        expect(html).toMatch(/<\/div>\n<p[^>]*>本文1行目<\/p>/);
+        expect(html).not.toMatch(/<\/div>\n<p class="empty">/);
+      } finally {
+        unlinkSync(tmp);
+      }
+    });
+
+    test('視点行なしでもエピグラフの直後には空行を入れない', () => {
+      const tmp = join(tmpdir(), `epi-novp-${Date.now()}.txt`);
+      writeFileSync(tmp, 'Epigraph: 引用——出典\n本文1行目\n');
+      try {
+        const { html } = parseTextFile(tmp, { vertical: false });
+        expect(html).toMatch(/<div class="epigraph">[\s\S]*?<\/div>\n<p[^>]*>本文1行目<\/p>/);
+        expect(html).not.toMatch(/<\/div>\n<p class="empty">/);
+      } finally {
+        unlinkSync(tmp);
+      }
     });
   });
 
