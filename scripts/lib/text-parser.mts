@@ -140,12 +140,14 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
         return [...match].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
       });
       // ダッシュ等のspanタグを生成（この時点でラテン文字はもうプレースホルダーなので安全）
+      // ＝（全角イコール＝外国人名の二重ハイフン）もダッシュ扱いで横倒しし、縦書きでは
+      // 中央寄せの縦二重線にする。未指定だと mixed のまま横倒しの二本線が左へズレる。
       if (separateSymbolClasses) {
-        r = r.replace(/([—―\uFF0D]+)/g, '<span class="dash">$1</span>');
+        r = r.replace(/([—―\uFF0D\uFF1D]+)/g, '<span class="dash">$1</span>');
         r = r.replace(/([…‥]+)/g, '<span class="ellipsis">$1</span>');
         r = r.replace(/([～〜]+)/g, '<span class="wave-dash">$1</span>');
       } else {
-        r = r.replace(/([—―\uFF0D]+)/g, '<span class="dash">$1</span>');
+        r = r.replace(/([—―\uFF0D\uFF1D]+)/g, '<span class="dash">$1</span>');
         r = r.replace(/([…‥]+)/g, '<span class="dash">$1</span>');
         r = r.replace(/([～〜]+)/g, '<span class="dash">$1</span>');
       }

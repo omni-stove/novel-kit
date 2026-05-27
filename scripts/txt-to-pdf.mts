@@ -401,6 +401,7 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
 
     .dash {
       text-orientation: sideways;
+      vertical-align: central;
     }
 
     .latin {
