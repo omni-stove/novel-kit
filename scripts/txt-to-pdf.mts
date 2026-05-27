@@ -422,9 +422,44 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
       -webkit-text-combine: horizontal;
     }
 
+    /* 縦中横（1〜2桁の数字・!?等）。
+       text-combine-upright: all は Chromium/Vivliostyle で合成結果が
+       1em より狭いと中央に揃わず左へ寄る（例: 【+42Y】の「42」だけが左寄り）。
+       txt-to-novel-pdf.mts と同様に、横書きの inline-block を 1em 幅で
+       中央寄せして確実にセンタリングする。 */
     .tcy {
-      text-combine-upright: all;
-      -webkit-text-combine: horizontal;
+      display: inline-block;
+      writing-mode: horizontal-tb;
+      text-orientation: initial;
+      width: 1em;
+      text-align: center;
+      line-height: 1em;
+    }
+
+    /* 単独の全角ハイフン（章番号「1-1」の区切り等）。
+       .dash の sideways や glyph の rotate ではフォントのインク位置の都合で列の中央より
+       左へずれるため、tcy と同じ 1em の正方セル（配置が確実）にグリフを透明で残して
+       文字数カウントを保ちつつ、::before でセル中央に縦向きの短い棒を実描画する。 */
+    .hyphen {
+      display: inline-block;
+      writing-mode: horizontal-tb;
+      text-orientation: initial;
+      width: 1em;
+      text-align: center;
+      line-height: 1em;
+      position: relative;
+      color: transparent;
+    }
+
+    .hyphen::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0.07em;
+      height: 0.8em;
+      transform: translate(-50%, -50%);
+      background: #000;
     }
 
     .title-page {

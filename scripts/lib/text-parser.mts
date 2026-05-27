@@ -97,6 +97,10 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+    // 半角スペースを全角スペース(U+3000)に変換し、半角・全角どちらも一文字分の幅で保持する。
+    // U+3000 はHTMLの連続空白コラプス対象外なので、複数スペースや行頭・行末でも潰れない
+    // （CSSの text-spacing-trim: space-all により全角スペースは行頭でもトリムされない）。
+    r = r.replace(/ /g, '　');
     if (vertical) {
       // ASCII\u30ED\u30FC\u30DE\u6570\u5B57\uFF08II\u301CXII\uFF09\u306FUnicode\u306E\u5358\u4E00\u30B3\u30FC\u30C9\u30DD\u30A4\u30F3\u30C8\u306B\u6B63\u898F\u5316\u3057\u3066upright\u3067\u7ACB\u3066\u308B\u3002
       // text-combine-upright: all \u306FChromium/Vivliostyle\u3067\u5B57\u5E45\u5DEE\u306E\u3042\u308B\u7D44\uFF08IV\u7B49\uFF09\u304C\u53F3\u306B\u5BC4\u308B\u305F\u3081\u4F7F\u308F\u306A\u3044\u3002
@@ -147,7 +151,11 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
         r = r.replace(/([…‥]+)/g, '<span class="ellipsis">$1</span>');
         r = r.replace(/([～〜]+)/g, '<span class="wave-dash">$1</span>');
       } else {
-        r = r.replace(/([—―\uFF0D\uFF1D]+)/g, '<span class="dash">$1</span>');
+        // 単独の全角ハイフンマイナス（章番号「1-1」の区切り等）は sideways 回転だと
+        // グリフが列の中央より左へずれるため、tcy方式（1emボックス＋rotate）で中央寄せする。
+        // 連続ダッシュ（——）や全角イコール（＝）は縦長の線として dash のまま縦倒しにする。
+        r = r.replace(/([—―－＝]+)/g, (m) =>
+          m === '－' ? `<span class="hyphen">${m}</span>` : `<span class="dash">${m}</span>`);
         r = r.replace(/([…‥]+)/g, '<span class="dash">$1</span>');
         r = r.replace(/([～〜]+)/g, '<span class="dash">$1</span>');
       }
@@ -679,15 +687,25 @@ if (import.meta.vitest) {
 
   describe('escapeHtml', () => {
     test('HTML\u7279\u6B8A\u6587\u5B57\u3092\u30A8\u30B9\u30B1\u30FC\u30D7\uFF08\u6A2A\u66F8\u304D\u30E2\u30FC\u30C9\uFF09', () => {
-      expect(escapeHtml('<p>"a & b"</p>', { vertical: false })).toBe('&lt;p&gt;&quot;a &amp; b&quot;&lt;/p&gt;');
+      expect(escapeHtml('<p>"a & b"</p>', { vertical: false })).toBe('&lt;p&gt;&quot;a　&amp;　b&quot;&lt;/p&gt;');
     });
     test('\u7E26\u66F8\u304D\u30E2\u30FC\u30C9\u3067\u306F\u6570\u5B57\u3092\u7E26\u4E2D\u6A2A/upright\u306B\u3001\u30CF\u30A4\u30D5\u30F3\u3092\u5168\u89D2\u5316', () => {
       expect(escapeHtml('5', { vertical: true })).toBe('<span class="tcy">5</span>');
       expect(escapeHtml('99', { vertical: true })).toBe('<span class="tcy">99</span>');
       expect(escapeHtml('100', { vertical: true })).toBe('<span class="upright">1</span><span class="upright">0</span><span class="upright">0</span>');
       expect(escapeHtml('1,234', { vertical: true })).toBe('<span class="upright">1</span><span class="upright">\uFF0C</span><span class="upright">2</span><span class="upright">3</span><span class="upright">4</span>');
-      expect(escapeHtml('a-b', { vertical: true })).toBe('<span class="latin">a</span><span class="dash">\uFF0D</span><span class="latin">b</span>');
+      expect(escapeHtml('a-b', { vertical: true })).toBe('<span class="latin">a</span><span class="hyphen">\uFF0D</span><span class="latin">b</span>');
       expect(escapeHtml('ab', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>');
+    });
+    test('単独の全角ハイフンは hyphen クラス、連続ダッシュ・全角イコールは dash クラス', () => {
+      // 章番号「1-1」の区切り等。sideways だと左へずれるため tcy 方式で中央寄せする
+      expect(escapeHtml('1-1', { vertical: true })).toBe('<span class="tcy">1</span><span class="hyphen">\uFF0D</span><span class="tcy">1</span>');
+      // 連続ダッシュ（——）は縦長の線なので dash のまま
+      expect(escapeHtml('\u2014\u2014', { vertical: true })).toBe('<span class="dash">\u2014\u2014</span>');
+      // ハイフン2つ並びも dash（単独ではない）
+      expect(escapeHtml('1--2', { vertical: true })).toBe('<span class="tcy">1</span><span class="dash">\uFF0D\uFF0D</span><span class="tcy">2</span>');
+      // EPUB（separateSymbolClasses=true）では従来どおり dash のまま
+      expect(escapeHtml('1-1', { vertical: true, separateSymbolClasses: true })).toBe('<span class="tcy">1</span><span class="dash">\uFF0D</span><span class="tcy">1</span>');
     });
     test('\u7E26\u66F8\u304D\u3067\u30A2\u30AF\u30BB\u30F3\u30C8\u4ED8\u304D\u30E9\u30C6\u30F3\u6587\u5B57\u3082 latin \u30AF\u30E9\u30B9\u3067\u7ACB\u3066\u308B', () => {
       // 1\u6587\u5B57\u305A\u3064\u72EC\u7ACB\u3057\u305F span \u306B\u5206\u3051\u3066\u3001\u5404\u6587\u5B57\u3092 text-combine-upright \u3067\u6B63\u65B9\u30BB\u30EB\u306B\u53CE\u3081\u308B
@@ -719,6 +737,17 @@ if (import.meta.vitest) {
     test('\u65E2\u5B9A (separateSymbolClasses=false) \u3067\u306F\u5168\u90E8 dash \u30AF\u30E9\u30B9', () => {
       expect(escapeHtml('\u2026', { vertical: true })).toBe('<span class="dash">\u2026</span>');
       expect(escapeHtml('\uFF5E', { vertical: true })).toBe('<span class="dash">\uFF5E</span>');
+    });
+    test('\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u306F\u5168\u89D2\u30B9\u30DA\u30FC\u30B9(U+3000)\u306B\u5909\u63DB\u3055\u308C\u3001\u4E00\u6587\u5B57\u5206\u306E\u5E45\u3092\u4FDD\u3064', () => {
+      expect(escapeHtml('\u3042 \u3044', { vertical: true })).toBe('\u3042\u3000\u3044');
+      expect(escapeHtml('\u3042 \u3044', { vertical: false })).toBe('\u3042\u3000\u3044');
+      // \u9023\u7D9A\u3059\u308B\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u3082\u305D\u308C\u305E\u308C\u4E00\u6587\u5B57\u5206\u306B\uFF08\u30B3\u30E9\u30D7\u30B9\u3057\u306A\u3044\uFF09
+      expect(escapeHtml('\u3042  \u3044', { vertical: true })).toBe('\u3042\u3000\u3000\u3044');
+      // \u65E2\u5B58\u306E\u5168\u89D2\u30B9\u30DA\u30FC\u30B9\u306F\u305D\u306E\u307E\u307E
+      expect(escapeHtml('\u3042\u3000\u3044', { vertical: true })).toBe('\u3042\u3000\u3044');
+    });
+    test('\u30E9\u30C6\u30F3\u8A9E\u9593\u306E\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u3082\u5168\u89D2\u5316\u3055\u308C\u5358\u8A9E\u9023\u7D50\u306F\u7DAD\u6301\u3055\u308C\u308B', () => {
+      expect(escapeHtml('ab cd', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>\u3000<span class="latin">c</span><span class="latin">d</span>');
     });
   });
 
