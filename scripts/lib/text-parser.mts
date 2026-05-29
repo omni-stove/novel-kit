@@ -143,6 +143,10 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       r = r.replace(/[\u0370-\u03FF]+/g, (match) => {
         return [...match].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
       });
+      // 単独のASCIIピリオド（略語 O.M. / U.S.A. 等の区切り）。mixed のままだと
+      // グリフがセルの左下へ寄り列の中央からずれるため、hyphen と同様に 1em の
+      // 正方セル中央へ実描画する。数字内の小数点は既に全角「．」へ変換済みで対象外。
+      r = r.replace(/\./g, () => phSpan('<span class="dot">.</span>'));
       // ダッシュ等のspanタグを生成（この時点でラテン文字はもうプレースホルダーなので安全）
       // ＝（全角イコール＝外国人名の二重ハイフン）もダッシュ扱いで横倒しし、縦書きでは
       // 中央寄せの縦二重線にする。未指定だと mixed のまま横倒しの二本線が左へズレる。

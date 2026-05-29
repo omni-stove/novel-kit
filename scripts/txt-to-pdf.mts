@@ -29,6 +29,10 @@
  *                        --size 未指定時は 20x20（400字詰め原稿用紙）
  *   --review             下読み用モード。表紙・梗概・人物紹介・部構成（--part）をすべて無視し、
  *                        先頭から約2万字に最も近いファイル境界までをスライスして1本のPDFを生成する。
+ *   --pages 42,50-53     指定した本文ページだけを抜き出したPDFを出力する（修正差し替え用）。
+ *                        指定は本文ノンブル基準（前付の i,ii… を除いた 1,2,3…）。カンマ区切り＋範囲（a-b）対応。
+ *                        全ページにノンブルを振り切ってから指定外を削除するため、抜き出したページの
+ *                        番号は全体版と完全に一致する。
  */
 
 import { PDFDocument, PDFName, rgb } from 'pdf-lib';
@@ -93,6 +97,32 @@ export function selectReviewBoundary(charCounts, targetChars) {
     if (cum >= targetChars) break;
   }
   return bestEnd;
+}
+
+// --pages の指定文字列を範囲リストに変換する。
+//   "42"            → [[42, 42]]
+//   "42-45"         → [[42, 45]]
+//   "42,50,60-62"   → [[42, 42], [50, 50], [60, 62]]
+// 不正な指定は null を返す（呼び出し側でエラー終了する）。
+export function parsePageSpec(spec) {
+  if (spec == null) return null;
+  const ranges = [];
+  for (const part of String(spec).split(',')) {
+    const t = part.trim();
+    if (t === '') continue;
+    const m = t.match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) return null;
+    const a = parseInt(m[1], 10);
+    const b = m[2] != null ? parseInt(m[2], 10) : a;
+    if (a < 1 || b < 1) return null;
+    ranges.push([Math.min(a, b), Math.max(a, b)]);
+  }
+  return ranges.length > 0 ? ranges : null;
+}
+
+// ページ番号 n がいずれかの範囲に含まれるか
+export function pageInRanges(n, ranges) {
+  return ranges.some(([s, e]) => n >= s && n <= e);
 }
 
 const SYNOPSIS_FILENAME = 'synopsis.txt';
@@ -168,6 +198,7 @@ function parseArgs(args) {
     countOnly: false,
     parts: null,
     review: false,
+    pages: null,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -207,6 +238,8 @@ function parseArgs(args) {
       result.parts = val.split(',').map(s => s.trim()).filter(s => s.length > 0);
     } else if (arg === '--review') {
       result.review = true;
+    } else if (arg === '--pages') {
+      result.pages = parsePageSpec(args[++i]);
     } else if (!arg.startsWith('-')) {
       result.files.push(arg);
     }
@@ -462,6 +495,20 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
       background: #000;
     }
 
+    /* 略語の区切りピリオド（O.M. / U.S.A. 等）。素の「.」は mixed のまま
+       セルの左下へ寄ってずれる。縦書きの句点と同じく、1em セルの右上へ
+       フォント本来のピリオド字形のまま寄せる（前の文字の直後にまとまって読める）。 */
+    .dot {
+      display: inline-flex;
+      writing-mode: horizontal-tb;
+      text-orientation: initial;
+      width: 1em;
+      height: 1em;
+      align-items: flex-start;
+      justify-content: flex-end;
+      line-height: 0;
+    }
+
     .title-page {
       display: flex;
       align-items: center;
@@ -680,6 +727,11 @@ async function main() {
     process.exit(1);
   }
 
+  if (args.pages === null && process.argv.includes('--pages')) {
+    console.error('エラー: --pages の指定が不正です（例: --pages 42 / 42-45 / 42,50,60-62）');
+    process.exit(1);
+  }
+
   if (args.files.length === 0) {
     console.error('エラー: 入力ファイルまたはディレクトリを指定してください');
     process.exit(1);
@@ -858,6 +910,26 @@ async function main() {
     });
   }
 
+  // --pages: ノンブルを振り切った後で、本文ノンブルが指定範囲に入らないページを削除する。
+  // ノンブルは全体版と同じ計算で描画済みなので、抜き出したページの番号は全体版と一致する（差し替え用）。
+  let extractedBodyNums = null;
+  if (args.pages) {
+    const keep = [];
+    for (let i = 0; i < pageCount; i++) {
+      const bodyNum = (i + 1) - frontMatterPages;
+      if (bodyNum >= 1 && pageInRanges(bodyNum, args.pages)) keep.push(i);
+    }
+    if (keep.length === 0) {
+      console.error('エラー: --pages の指定に該当する本文ページがありません');
+      process.exit(1);
+    }
+    const keepSet = new Set(keep);
+    for (let i = pageCount - 1; i >= 0; i--) {
+      if (!keepSet.has(i)) pdfDoc.removePage(i);
+    }
+    extractedBodyNums = keep.map(i => (i + 1) - frontMatterPages);
+  }
+
   // 縦書き時はページ方向を右→左に設定
   if (args.vertical) {
     const viewerPrefs = pdfDoc.catalog.getOrCreateViewerPreferences();
@@ -867,15 +939,20 @@ async function main() {
   const finalPdf = await pdfDoc.save();
   writeFileSync(args.output, finalPdf);
 
-  const totalChars = sections.reduce((sum, s) => sum + countChars(s.html), 0);
   console.log(`\nPDF出力: ${args.output}`);
-  console.log(`文字数: ${totalChars.toLocaleString()}字`);
-  const chapterCount = sections.filter(s => s.hasViewpointStart).length;
-  console.log(`章数: ${chapterCount}章`);
-  if (frontMatterPages > 0) {
-    console.log(`枚数: タイトル・梗概 ${frontMatterPages}枚 ＋ 本文 ${pageCount - frontMatterPages}枚 ＝ 計${pageCount}枚`);
+  if (extractedBodyNums) {
+    console.log(`抽出ページ（本文ノンブル）: ${extractedBodyNums.join(', ')}（計${extractedBodyNums.length}頁）`);
+    console.log(`ノンブルは全体版（計${pageCount - frontMatterPages}頁）と一致しています`);
   } else {
-    console.log(`枚数: ${pageCount}枚`);
+    const totalChars = sections.reduce((sum, s) => sum + countChars(s.html), 0);
+    console.log(`文字数: ${totalChars.toLocaleString()}字`);
+    const chapterCount = sections.filter(s => s.hasViewpointStart).length;
+    console.log(`章数: ${chapterCount}章`);
+    if (frontMatterPages > 0) {
+      console.log(`枚数: タイトル・梗概 ${frontMatterPages}枚 ＋ 本文 ${pageCount - frontMatterPages}枚 ＝ 計${pageCount}枚`);
+    } else {
+      console.log(`枚数: ${pageCount}枚`);
+    }
   }
 
   if (args.open) {
@@ -1114,5 +1191,36 @@ if (import.meta.vitest) {
 
   test('selectReviewBoundary: 最初の1ファイルでtargetを大幅超過してもそれを返す', () => {
     expect(selectReviewBoundary([50000, 1000], 20000)).toBe(1);
+  });
+
+  test('parsePageSpec: 単一ページ', () => {
+    expect(parsePageSpec('42')).toEqual([[42, 42]]);
+  });
+
+  test('parsePageSpec: 範囲指定', () => {
+    expect(parsePageSpec('42-45')).toEqual([[42, 45]]);
+  });
+
+  test('parsePageSpec: カンマ区切り＋範囲の混在（空白も許容）', () => {
+    expect(parsePageSpec('42, 50, 60-62')).toEqual([[42, 42], [50, 50], [60, 62]]);
+  });
+
+  test('parsePageSpec: 逆順の範囲は昇順に正規化', () => {
+    expect(parsePageSpec('45-42')).toEqual([[42, 45]]);
+  });
+
+  test('parsePageSpec: 不正な指定は null', () => {
+    expect(parsePageSpec('abc')).toBeNull();
+    expect(parsePageSpec('0')).toBeNull();
+    expect(parsePageSpec('1-')).toBeNull();
+    expect(parsePageSpec('')).toBeNull();
+  });
+
+  test('pageInRanges: 範囲内外を判定', () => {
+    const ranges = [[42, 42], [50, 50], [60, 62]];
+    expect(pageInRanges(42, ranges)).toBe(true);
+    expect(pageInRanges(61, ranges)).toBe(true);
+    expect(pageInRanges(43, ranges)).toBe(false);
+    expect(pageInRanges(63, ranges)).toBe(false);
   });
 }
