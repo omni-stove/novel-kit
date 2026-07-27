@@ -37,19 +37,19 @@
 
 import { PDFDocument, PDFName, rgb } from 'pdf-lib';
 import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync } from 'fs';
-import { basename, resolve, dirname } from 'path';
+import { basename, dirname, join } from 'path';
 import { inflateSync } from 'zlib';
-import { execSync } from 'child_process';
-import { join } from 'path';
-import { escapeHtml, parseTextFile, parseWithSectionNumbering, getTextFilesFromDir, getFilteredLines, isMemoLine, isSeparator, isViewpointLine, countChars, logSections } from './lib/text-parser.mts';
+import { escapeHtml, parseTextFile, parseWithSectionNumbering, getFilteredLines, isSeparator, isViewpointLine, countChars, logSections, stripInlineMarkup, collectInputFiles, resolvePartIndices } from './lib/text-parser.mts';
+import { parseCliArgs, parseList, fail, vivliostyleBuild, openFile } from './lib/cli.mts';
 
-// 本文の消費行数と文字数を text-parser ベースで集計
 function countManuscript(inputFiles, charsPerLine) {
-  const cap = charsPerLine * 2;
-  const stripMarkup = (line) => line
-    .replace(/\|(.+?)《(.+?)》/g, '$1')
-    .replace(/《《(.+?)》》/g, '$1')
-    .replace(/<<(.+?)>>/g, '$1');
+  // 半角英数は0.5文字幅で詰まるため、1行の容量を半角単位で持って行数を見積もる
+  const unitsPerLine = charsPerLine * 2;
+  const rowsFor = (line) => {
+    let units = 0;
+    for (const ch of line) units += /[0-9A-Za-z]/.test(ch) ? 1 : 2;
+    return Math.ceil(units / unitsPerLine);
+  };
 
   let totalLines = 0;
   let totalChars = 0;
@@ -57,31 +57,24 @@ function countManuscript(inputFiles, charsPerLine) {
     const { lines } = getFilteredLines(filePath);
     let lastWasViewpoint = false;
     for (const line of lines) {
-      if (line.trim() === '') { totalLines += 1; lastWasViewpoint = false; continue; }
-      if (isSeparator(line)) { totalLines += 1; lastWasViewpoint = false; continue; }
-      if (isViewpointLine(line)) {
-        const processed = stripMarkup(line);
-        totalChars += [...processed].length;
-        let units = 0;
-        for (const ch of processed) units += /[0-9A-Za-z]/.test(ch) ? 1 : 2;
-        totalLines += Math.ceil(units / cap);
-        lastWasViewpoint = true;
+      if (line.trim() === '' || isSeparator(line)) {
+        totalLines += 1;
+        lastWasViewpoint = false;
         continue;
       }
-      if (lastWasViewpoint) { totalLines += 1; lastWasViewpoint = false; }
-      const processed = stripMarkup(line);
+      // 視点行の直後の本文行は、視点行との間の空行1つ分を加算する
+      if (lastWasViewpoint && !isViewpointLine(line)) totalLines += 1;
+      const processed = stripInlineMarkup(line);
       totalChars += [...processed].length;
-      let units = 0;
-      for (const ch of processed) units += /[0-9A-Za-z]/.test(ch) ? 1 : 2;
-      totalLines += Math.ceil(units / cap);
+      totalLines += rowsFor(processed);
+      lastWasViewpoint = isViewpointLine(line);
     }
   }
   return { totalLines, totalChars };
 }
 
-// 各要素の文字数を順に累積し、累積値が targetChars に最も近くなる「区切り目（1始まりの末尾位置）」を返す。
-// 累積が targetChars 以上に達した時点で打ち切る（同じ差分なら、より多く含む側を優先）。
-// charCounts が空なら 0、長さ1なら 1 を返す。
+// 累積が targetChars 以上に達した時点で打ち切る。差分比較を <= にしているのは、
+// 同じ差分なら、より多く含む側を優先するため
 export function selectReviewBoundary(charCounts, targetChars) {
   if (charCounts.length === 0) return 0;
   let cum = 0;
@@ -99,11 +92,6 @@ export function selectReviewBoundary(charCounts, targetChars) {
   return bestEnd;
 }
 
-// --pages の指定文字列を範囲リストに変換する。
-//   "42"            → [[42, 42]]
-//   "42-45"         → [[42, 45]]
-//   "42,50,60-62"   → [[42, 42], [50, 50], [60, 62]]
-// 不正な指定は null を返す（呼び出し側でエラー終了する）。
 export function parsePageSpec(spec) {
   if (spec == null) return null;
   const ranges = [];
@@ -120,7 +108,6 @@ export function parsePageSpec(spec) {
   return ranges.length > 0 ? ranges : null;
 }
 
-// ページ番号 n がいずれかの範囲に含まれるか
 export function pageInRanges(n, ranges) {
   return ranges.some(([s, e]) => n >= s && n <= e);
 }
@@ -128,7 +115,6 @@ export function pageInRanges(n, ranges) {
 const SYNOPSIS_FILENAME = 'synopsis.txt';
 const CHARACTERS_FILENAME = 'characters.txt';
 
-// 指定ファイルを入力ディレクトリ群から探す
 function findSidecarFile(inputFiles, inputPaths, filename) {
   for (const p of inputPaths) {
     try {
@@ -146,15 +132,6 @@ function findSidecarFile(inputFiles, inputPaths, filename) {
   return null;
 }
 
-function findSynopsisFile(inputFiles, inputPaths) {
-  return findSidecarFile(inputFiles, inputPaths, SYNOPSIS_FILENAME);
-}
-
-function findCharactersFile(inputFiles, inputPaths) {
-  return findSidecarFile(inputFiles, inputPaths, CHARACTERS_FILENAME);
-}
-
-// プレーンテキストの行をHTMLに変換（梗概・人物紹介で共通）
 function parsePlainTextFile(filePath, vertical = true) {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
@@ -171,21 +148,27 @@ function parsePlainTextFile(filePath, vertical = true) {
   return htmlParts.join('\n');
 }
 
-function parseSynopsisFile(filePath, vertical = true) {
-  return parsePlainTextFile(filePath, vertical);
-}
-
-function parseCharactersFile(filePath, vertical = true) {
-  return parsePlainTextFile(filePath, vertical);
-}
-
-// 引数をパース
-function parseArgs(args) {
-  const result = {
+function parseArgs(argv) {
+  const args = parseCliArgs(argv, [
+    { key: 'output', flags: ['-o', '--output'], takesValue: true },
+    { key: 'title', flags: ['--title'], takesValue: true },
+    { key: 'author', flags: ['--author'], takesValue: true },
+    { key: 'pageBreak', flags: ['--no-page-break'], value: false },
+    { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
+    { key: 'vertical', flags: ['--horizontal'], value: false },
+    { key: 'size', flags: ['--size'], takesValue: true },
+    { key: 'limit', flags: ['--limit'], takesValue: true, parse: v => parseInt(v, 10) },
+    { key: 'synopsisOnTitle', flags: ['--synopsis-on-title'] },
+    { key: 'coverless', flags: ['--coverless'] },
+    { key: 'open', flags: ['--open'] },
+    { key: 'countOnly', flags: ['--count-only'] },
+    { key: 'parts', flags: ['--part', '--parts'], takesValue: true, parse: parseList },
+    { key: 'review', flags: ['--review'] },
+    { key: 'pages', flags: ['--pages'], takesValue: true, parse: parsePageSpec },
+  ], {
     output: null,
     title: null,
     author: null,
-    files: [],
     pageBreak: true,
     chapterBreak: true,
     vertical: true,
@@ -199,56 +182,16 @@ function parseArgs(args) {
     parts: null,
     review: false,
     pages: null,
-  };
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '-o' || arg === '--output') {
-      result.output = args[++i];
-    } else if (arg === '--title') {
-      result.title = args[++i];
-    } else if (arg === '--author') {
-      result.author = args[++i];
-    } else if (arg === '--no-page-break') {
-      result.pageBreak = false;
-    } else if (arg === '--no-chapter-break') {
-      result.chapterBreak = false;
-    } else if (arg === '--horizontal') {
-      result.vertical = false;
-    } else if (arg === '--size') {
-      const size = args[++i];
-      const [chars, lines] = size.split('x').map(Number);
-      result.chars = chars;
-      result.lines = lines;
-    } else if (arg === '--limit') {
-      result.limit = parseInt(args[++i], 10);
-    } else if (arg === '--synopsis-on-title') {
-      result.synopsisOnTitle = true;
-    } else if (arg === '--coverless') {
-      result.coverless = true;
-    } else if (arg === '--open') {
-      result.open = true;
-    } else if (arg === '--count-only') {
-      result.countOnly = true;
-    } else if (arg === '--part' || arg === '--parts') {
-      const val = args[++i];
-      result.parts = val.split(',').map(s => s.trim()).filter(s => s.length > 0);
-    } else if (arg.startsWith('--part=') || arg.startsWith('--parts=')) {
-      const val = arg.slice(arg.indexOf('=') + 1);
-      result.parts = val.split(',').map(s => s.trim()).filter(s => s.length > 0);
-    } else if (arg === '--review') {
-      result.review = true;
-    } else if (arg === '--pages') {
-      result.pages = parsePageSpec(args[++i]);
-    } else if (!arg.startsWith('-')) {
-      result.files.push(arg);
-    }
+  });
+  if (args.size) {
+    const [chars, lines] = args.size.split('x').map(Number);
+    args.chars = chars;
+    args.lines = lines;
   }
-
-  return result;
+  return args;
 }
 
-// 縦書き時のレイアウト計算（A4横: 297mm x 210mm）
+// A4横（297mm x 210mm）前提の寸法
 function calcVerticalLayout(options) {
   const chars = options.chars || 30;
   const lines = options.lines || null;
@@ -269,7 +212,6 @@ function calcVerticalLayout(options) {
   return { fontSizePt: Math.floor(fontSizePt * 10) / 10, lineHeight, chars };
 }
 
-// HTML生成
 export function generateHtml(sections, options, synopsisHtml = null, synopsisCharCount = 0, charactersHtml = null) {
   const writingMode = options.vertical ? 'vertical-rl' : 'horizontal-tb';
   const layout = options.vertical ? calcVerticalLayout(options) : null;
@@ -313,8 +255,6 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
 
     const prevEndsViewpoint = i > 0 && sections[i - 1].hasViewpointEnd;
 
-    // --no-chapter-break: 章ごとの改ページをせず、章境界は空行1つ、
-    // 同一章内のファイル境界は◇◇◇で連結する
     if (options.chapterBreak === false) {
       if (i === 0) {
         return `<div class="section">\n${trimmedHtml}\n</div>`;
@@ -660,7 +600,6 @@ ${(() => {
 </html>`;
 }
 
-// PDFストリームを解凍してテキストを取得
 function decompressStream(stream) {
   if (!stream || typeof stream.getContents !== 'function') return '';
   const raw = stream.getContents();
@@ -671,7 +610,6 @@ function decompressStream(stream) {
   }
 }
 
-// 白紙ページを検出して除去
 function removeBlankPages(pdfDoc, titlePageIndex) {
   const pagesToRemove = [];
   const pageCount = pdfDoc.getPageCount();
@@ -707,7 +645,6 @@ function removeBlankPages(pdfDoc, titlePageIndex) {
   return pagesToRemove.length;
 }
 
-// メイン処理
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
@@ -717,52 +654,28 @@ async function main() {
       args.chars = 20;
       args.lines = 20;
     } else if (args.chars == null || args.lines == null) {
-      console.error('エラー: --count-only には --size WxH の両方を指定してください');
-      process.exit(1);
+      fail('--count-only には --size WxH の両方を指定してください');
     }
   }
 
-  if (!args.countOnly && !args.output) {
-    console.error('エラー: 出力ファイルを指定してください (-o output.pdf)');
-    process.exit(1);
+  if (!args.countOnly && !args.output) fail('出力ファイルを指定してください (-o output.pdf)');
+
+  if (args.pages === null && process.argv.some(a => a === '--pages' || a.startsWith('--pages='))) {
+    fail('--pages の指定が不正です（例: --pages 42 / 42-45 / 42,50,60-62）');
   }
 
-  if (args.pages === null && process.argv.includes('--pages')) {
-    console.error('エラー: --pages の指定が不正です（例: --pages 42 / 42-45 / 42,50,60-62）');
-    process.exit(1);
-  }
+  if (args.files.length === 0) fail('入力ファイルまたはディレクトリを指定してください');
 
-  if (args.files.length === 0) {
-    console.error('エラー: 入力ファイルまたはディレクトリを指定してください');
-    process.exit(1);
-  }
+  let inputFiles = collectInputFiles(args.files, [SYNOPSIS_FILENAME, CHARACTERS_FILENAME]);
 
-  // 入力ファイルのリストを作成
-  let inputFiles = [];
-  for (const path of args.files) {
-    const stat = statSync(path);
-    if (stat.isDirectory()) {
-      inputFiles.push(...getTextFilesFromDir(path, [SYNOPSIS_FILENAME, CHARACTERS_FILENAME]));
-    } else {
-      inputFiles.push(path);
-    }
-  }
-
-  // --limit で件数を制限
   if (args.limit != null && args.limit > 0) {
     inputFiles = inputFiles.slice(0, args.limit);
   }
 
-  if (inputFiles.length === 0) {
-    console.error('エラー: txtファイルが見つかりません');
-    process.exit(1);
-  }
+  if (inputFiles.length === 0) fail('txtファイルが見つかりません');
 
   console.log(`入力ファイル: ${inputFiles.length}件`);
 
-  // --review: 表紙・梗概・人物紹介・部構成をoverrideし、先頭から約2万字に最も近い
-  // ファイル境界までを切り出して1本のPDFを生成
-  // --title / --author が指定されていれば coverless 形式で本文先頭に出す
   if (args.review) {
     args.coverless = true;
     args.synopsisOnTitle = false;
@@ -778,32 +691,12 @@ async function main() {
     inputFiles = slice;
   }
 
-  // --part の値（ファイル名プレフィックス or 1始まりインデックス）を 1始まりインデックスに正規化
   if (args.parts && args.parts.length > 0) {
-    const resolved = [];
-    for (const tok of args.parts) {
-      const idxByPrefix = inputFiles.findIndex(f => {
-        const m = basename(f).match(/^\d+/);
-        return m && m[0] === tok;
-      });
-      if (idxByPrefix >= 0) {
-        resolved.push(idxByPrefix + 1);
-        continue;
-      }
-      const asInt = parseInt(tok, 10);
-      if (!isNaN(asInt) && asInt >= 1 && asInt <= inputFiles.length) {
-        resolved.push(asInt);
-        continue;
-      }
-      console.error(`エラー: --part の値 "${tok}" に対応するファイルが見つかりません`);
-      process.exit(1);
-    }
-    args.parts = [...new Set(resolved)].sort((a, b) => a - b);
+    args.parts = resolvePartIndices(args.parts, inputFiles).map(i => i + 1);
     const allParts = [1, ...args.parts.filter(p => p > 1)];
     console.log(`部の境界: ${allParts.map((p, i) => `第${i + 1}部=${basename(inputFiles[p - 1])}`).join(', ')}`);
   }
 
-  // --count-only: text-parser で原稿用紙換算して終了（vivliostyle 起動なし）
   if (args.countOnly) {
     const { totalLines, totalChars } = countManuscript(inputFiles, args.chars);
     const pages = totalLines / args.lines;
@@ -815,8 +708,7 @@ async function main() {
     return;
   }
 
-  // 梗概ファイルを探す（--review時はスキップ）
-  const synopsisPath = args.review ? null : findSynopsisFile(inputFiles, args.files);
+  const synopsisPath = args.review ? null : findSidecarFile(inputFiles, args.files, SYNOPSIS_FILENAME);
   let synopsisHtml = null;
   let synopsisCharCount = 0;
   if (synopsisPath) {
@@ -828,18 +720,16 @@ async function main() {
       return sum + [...text].length;
     }, 0);
     console.log(`梗概: ${basename(synopsisPath)}  （${synopsisCharCount.toLocaleString()}文字）`);
-    synopsisHtml = parseSynopsisFile(synopsisPath, args.vertical);
+    synopsisHtml = parsePlainTextFile(synopsisPath, args.vertical);
   }
 
-  // 人物紹介ファイルを探す（--review時はスキップ）
-  const charactersPath = args.review ? null : findCharactersFile(inputFiles, args.files);
+  const charactersPath = args.review ? null : findSidecarFile(inputFiles, args.files, CHARACTERS_FILENAME);
   let charactersHtml = null;
   if (charactersPath) {
     console.log(`人物紹介: ${basename(charactersPath)}`);
-    charactersHtml = parseCharactersFile(charactersPath, args.vertical);
+    charactersHtml = parsePlainTextFile(charactersPath, args.vertical);
   }
 
-  // 各ファイルをHTMLセクションに変換
   const partFirstIndices = args.parts && args.parts.length > 0
     ? args.parts.map(p => p - 1).filter(i => i > 0 && i < inputFiles.length)
     : null;
@@ -850,23 +740,19 @@ async function main() {
   });
   logSections(sections, inputFiles);
 
-  // HTML生成
   const html = generateHtml(sections, args, synopsisHtml, synopsisCharCount, charactersHtml);
 
-  // デバッグ用にHTMLを保存
+  // デバッグ用にHTMLも残す
   const htmlPath = args.output.replace(/\.pdf$/, '.html');
   writeFileSync(htmlPath, html);
   console.log(`HTML出力: ${htmlPath}`);
 
-  // Vivliostyle CLIでPDF生成
   console.log('PDF生成中...');
-  execSync(`./node_modules/.bin/vivliostyle build "${htmlPath}" -o "${args.output}"`, { stdio: 'inherit' });
+  vivliostyleBuild(htmlPath, args.output);
   const pdfBuffer = readFileSync(args.output);
 
-  // pdf-libでページ番号を追加
   const pdfDoc = await PDFDocument.load(pdfBuffer);
 
-  // 白紙ページを除去
   const titlePageIndex = (args.title && !args.coverless) ? 0 : -1;
   const removedCount = removeBlankPages(pdfDoc, titlePageIndex);
   if (removedCount > 0) {
@@ -884,7 +770,7 @@ async function main() {
     const fmHtmlPath = args.output.replace(/\.pdf$/, '.fm.html');
     const fmPdfPath = args.output.replace(/\.pdf$/, '.fm.pdf');
     writeFileSync(fmHtmlPath, fmHtml);
-    execSync(`./node_modules/.bin/vivliostyle build "${fmHtmlPath}" -o "${fmPdfPath}"`, { stdio: 'pipe' });
+    vivliostyleBuild(fmHtmlPath, fmPdfPath, { quiet: true });
     const fmDoc = await PDFDocument.load(readFileSync(fmPdfPath));
     removeBlankPages(fmDoc, hasCover ? 0 : -1);
     frontMatterPages = fmDoc.getPageCount();
@@ -892,7 +778,6 @@ async function main() {
     console.log(`前付ページ数: ${frontMatterPages}`);
   }
 
-  // 全ページにループし、通し番号から前付分を引く。≤ 0 なら非表示
   for (let i = 0; i < pageCount; i++) {
     const page = pdfDoc.getPage(i);
     const { width } = page.getSize();
@@ -919,10 +804,7 @@ async function main() {
       const bodyNum = (i + 1) - frontMatterPages;
       if (bodyNum >= 1 && pageInRanges(bodyNum, args.pages)) keep.push(i);
     }
-    if (keep.length === 0) {
-      console.error('エラー: --pages の指定に該当する本文ページがありません');
-      process.exit(1);
-    }
+    if (keep.length === 0) fail('--pages の指定に該当する本文ページがありません');
     const keepSet = new Set(keep);
     for (let i = pageCount - 1; i >= 0; i--) {
       if (!keepSet.has(i)) pdfDoc.removePage(i);
@@ -930,7 +812,6 @@ async function main() {
     extractedBodyNums = keep.map(i => (i + 1) - frontMatterPages);
   }
 
-  // 縦書き時はページ方向を右→左に設定
   if (args.vertical) {
     const viewerPrefs = pdfDoc.catalog.getOrCreateViewerPreferences();
     viewerPrefs.setReadingDirection('R2L');
@@ -956,7 +837,7 @@ async function main() {
   }
 
   if (args.open) {
-    execSync(`open "${resolve(args.output)}"`);
+    openFile(args.output);
   }
 }
 
