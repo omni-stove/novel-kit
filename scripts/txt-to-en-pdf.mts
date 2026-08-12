@@ -14,6 +14,10 @@
  *   --5x8                5×8in トレードペーパーバック
  *   --6x9                6×9in USトレード（デフォルト）
  *   --a5                 A5サイズ
+ *   --part 070,085,...   部の境界となるファイル名プレフィックス（txt-to-pdf.mts の --part と同形式）。
+ *                        該当ファイルから新しい部（Part One, Part Two, ...）が始まり、部扉ページを挿入する。
+ *                        章番号は部ごとにリセットされ、部に章が1つしかない場合は章番号を表示しない。
+ *                        未訳などで該当ファイルが存在しない境界はスキップする。
  *   --recto              章を必ず右ページ（recto）から開始する
  *   --no-smart-quotes    ストレート引用符をカーリー引用符に変換しない
  *   --open               生成後にプレビューを開く
@@ -25,19 +29,21 @@
  *   Epigraph: ...    章扉のエピグラフ
  *   Memo: ...        無視
  *   *text*           イタリック
+ *   《《text》》     傍点（文字上に点を打つ強調）
  *   ◇◇◇ / *** / ---  場面区切り（* * * として出力）
  *   空行             場面の小休止（行アキ）
  */
 
 import { readFileSync, writeFileSync, statSync, unlinkSync } from 'fs';
+import { basename } from 'path';
 import { PDFDocument, PDFArray, PDFRawStream, StandardFonts, rgb } from 'pdf-lib';
 import {
   isMemoLine, isPovLine, parsePovLine,
   isEpigraphLine, parseEpigraphLine,
   isViewpointLine, isSeparator,
 } from './lib/text-parser.mts';
-import { collectInputFiles } from './lib/text-parser.mts';
-import { parseCliArgs, fail, vivliostyleBuild, openFile } from './lib/cli.mts';
+import { collectInputFiles, resolvePartIndices } from './lib/text-parser.mts';
+import { parseCliArgs, parseList, fail, vivliostyleBuild, openFile } from './lib/cli.mts';
 
 // 判型定義
 const PAGE_SIZES = {
@@ -80,10 +86,11 @@ function parseArgs(argv) {
     { key: 'pageSize', flags: ['--5x8'], value: '5x8' },
     { key: 'pageSize', flags: ['--6x9'], value: '6x9' },
     { key: 'pageSize', flags: ['--a5'], value: 'a5' },
+    { key: 'parts', flags: ['--part', '--parts'], takesValue: true, parse: parseList },
     { key: 'recto', flags: ['--recto'] },
     { key: 'smartQuotes', flags: ['--no-smart-quotes'], value: false },
     { key: 'open', flags: ['--open'] },
-  ], { output: null, title: null, author: null, pageSize: '6x9', recto: false, smartQuotes: true, open: false });
+  ], { output: null, title: null, author: null, pageSize: '6x9', parts: null, recto: false, smartQuotes: true, open: false });
 }
 
 function isRuleLine(line) {
@@ -105,6 +112,7 @@ export function formatInline(text, { curly = true } = {}) {
     .replace(/>/g, '&gt;');
   if (curly) t = smartQuotes(t);
   t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  t = t.replace(/《《(.+?)》》/g, '<span class="emphasis">$1</span>');
   return t;
 }
 
@@ -161,16 +169,30 @@ export function parseEnglishFile(filePath) {
   return { blocks, chapterTitle, pov, epigraphs, hasViewpointStart, hasViewpointEnd };
 }
 
-// ファイル列を章にまとめる。視点行で始まるファイル（または前ファイルが【】で終わる場合）が新章
-export function buildChapters(parsedFiles) {
+// ファイル列を章にまとめる。視点行で始まるファイル（または前ファイルが【】で終わる場合）が新章。
+// partFirstIndices（0始まりのファイルインデックス。先頭0を含む）を渡すと部を構成し、
+// 章番号は部ごとにリセットされる
+export function buildChapters(parsedFiles, partFirstIndices = null) {
+  const partSet = partFirstIndices ? new Set(partFirstIndices) : null;
   const chapters = [];
+  let partNumber = 0;
+  let numberInPart = 0;
+
   parsedFiles.forEach((f, i) => {
+    const startsPart = partSet !== null && partSet.has(i);
     const prevEndsViewpoint = i > 0 && parsedFiles[i - 1].hasViewpointEnd;
-    const startsNewChapter = i === 0 || f.hasViewpointStart || prevEndsViewpoint;
+    const startsNewChapter = i === 0 || startsPart || f.hasViewpointStart || prevEndsViewpoint;
 
     if (startsNewChapter) {
+      if (startsPart) {
+        partNumber++;
+        numberInPart = 0;
+      }
+      numberInPart++;
       chapters.push({
-        number: chapters.length + 1,
+        number: partSet ? numberInPart : chapters.length + 1,
+        part: partSet ? partNumber : null,
+        startsPart,
         title: f.chapterTitle,
         pov: f.pov,
         epigraphs: [...f.epigraphs],
@@ -183,6 +205,14 @@ export function buildChapters(parsedFiles) {
       ch.epigraphs.push(...f.epigraphs);
     }
   });
+
+  // 章が1つしかない部では章番号を出さない（日本語版の【2】/【2-1】の使い分けに対応）
+  if (partSet) {
+    const counts = new Map();
+    for (const ch of chapters) counts.set(ch.part, (counts.get(ch.part) ?? 0) + 1);
+    for (const ch of chapters) ch.soleInPart = counts.get(ch.part) === 1;
+  }
+
   return chapters;
 }
 
@@ -191,7 +221,7 @@ function chapterHtml(ch, opts) {
   const parts = [];
 
   parts.push('<header class="chapter-head">');
-  parts.push(`<p class="chapter-number">${chapterNumberWord(ch.number)}</p>`);
+  if (!ch.soleInPart) parts.push(`<p class="chapter-number">${chapterNumberWord(ch.number)}</p>`);
   if (ch.title) parts.push(`<h2 class="chapter-title">${inline(ch.title)}</h2>`);
   else parts.push(`<h2 class="chapter-title chapter-title-hidden">Chapter ${chapterNumberWord(ch.number)}</h2>`);
   if (ch.pov) parts.push(`<p class="chapter-pov">${inline(ch.pov)}</p>`);
@@ -218,8 +248,11 @@ function chapterHtml(ch, opts) {
     }
   }
 
-  const cls = ch.number === 1 ? 'chapter chapter-first' : 'chapter';
-  return `<section class="${cls}">\n${parts.join('\n')}\n</section>`;
+  const cls = ch.number === 1 && (ch.part === null || ch.part === 1) ? 'chapter chapter-first' : 'chapter';
+  const partPage = ch.startsPart
+    ? `<section class="part-page">\n<p class="part-number">Part ${chapterNumberWord(ch.part)}</p>\n</section>\n`
+    : '';
+  return `${partPage}<section class="${cls}">\n${parts.join('\n')}\n</section>`;
 }
 
 function generateHtml(chapters, size, opts) {
@@ -333,6 +366,7 @@ function generateHtml(chapters, size, opts) {
     }
 
     .title-page .title-author {
+      text-indent: 0;
       font-size: 12pt;
       letter-spacing: 0.2em;
       text-transform: uppercase;
@@ -342,6 +376,29 @@ function generateHtml(chapters, size, opts) {
     .chapter {
       page: chapter;
       break-before: ${opts.recto ? 'recto' : 'page'};
+    }
+
+    /* 部扉。柱を出さないため front ページとして扱う */
+    .part-page {
+      page: front;
+      break-before: ${opts.recto ? 'recto' : 'page'};
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 38%;
+      height: 100%;
+      box-sizing: border-box;
+      text-align: center;
+    }
+
+    .part-page .part-number {
+      text-indent: 0;
+      font-size: 14pt;
+      font-weight: 500;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: #333;
+      margin: 0;
     }
 
 
@@ -413,14 +470,22 @@ function generateHtml(chapters, size, opts) {
 
     p.noindent { text-indent: 0; }
 
+    /* 《《text》》 の傍点。横組なので文字の上に点を打つ */
+    .emphasis {
+      text-emphasis: filled dot;
+      text-emphasis-position: over right;
+    }
+
     .scene-space {
       height: 1lh;
     }
 
+    /* 上下マージンは行送りの整数倍にする（区切り全体で3lh）。
+       半端な値にすると以降の行がベースライングリッドから外れ、見開きで行が揃わない */
     p.ornament {
       text-indent: 0;
       text-align: center;
-      margin: 0.85lh 0;
+      margin: 1lh 0;
       letter-spacing: 0.2em;
       break-inside: avoid;
     }
@@ -497,8 +562,19 @@ async function main() {
   const inputFiles = collectInputFiles(args.files);
   if (inputFiles.length === 0) fail('txtファイルが見つかりません');
 
+  // 部境界の解決。未訳などで存在しない境界はスキップする（翻訳は先頭から進む前提なので部番号はずれない）
+  let partFirstIndices = null;
+  if (args.parts && args.parts.length > 0) {
+    const present = args.parts.filter(tok => inputFiles.some(f => basename(f).match(/^\d+/)?.[0] === tok));
+    const missing = args.parts.filter(tok => !present.includes(tok));
+    if (missing.length > 0) console.log(`部境界（ファイルなしのためスキップ）: ${missing.join(', ')}`);
+    const resolved = resolvePartIndices(present, inputFiles).filter(i => i > 0);
+    partFirstIndices = [0, ...resolved];
+    console.log(`部の境界: ${partFirstIndices.map((idx, i) => `Part ${chapterNumberWord(i + 1)}=${basename(inputFiles[idx])}`).join(', ')}`);
+  }
+
   const parsedFiles = inputFiles.map(f => parseEnglishFile(f));
-  const chapters = buildChapters(parsedFiles);
+  const chapters = buildChapters(parsedFiles, partFirstIndices);
 
   let totalWords = 0;
   for (const ch of chapters) {
@@ -506,9 +582,10 @@ async function main() {
       .filter(b => b.type === 'para')
       .reduce((n, b) => n + b.text.split(/\s+/).filter(Boolean).length, 0);
     totalWords += words;
+    const num = ch.part !== null ? (ch.soleInPart ? `${ch.part}` : `${ch.part}-${ch.number}`) : `${ch.number}`;
     const label = ch.title ? ` "${ch.title}"` : '';
     const pov = ch.pov ? ` (POV: ${ch.pov})` : '';
-    console.log(`  Chapter ${ch.number}${label}${pov}: ${words.toLocaleString()} words`);
+    console.log(`  Chapter ${num}${label}${pov}: ${words.toLocaleString()} words`);
   }
 
   const html = generateHtml(chapters, size, args);
@@ -566,6 +643,9 @@ if (import.meta.vitest) {
     test('curly=falseでは引用符を変換しない', () => {
       expect(formatInline('"x"', { curly: false })).toBe('"x"');
     });
+    test('《《》》囲みを傍点spanに変換', () => {
+      expect(formatInline('《《really》》')).toBe('<span class="emphasis">really</span>');
+    });
   });
 
   describe('parseEnglishFile / buildChapters', () => {
@@ -599,6 +679,24 @@ if (import.meta.vitest) {
         expect(chapters[0].blocks.map(bl => bl.type)).toEqual(['para', 'ornament', 'para']);
       } finally {
         ul(a); ul(b);
+      }
+    });
+
+    test('部境界で章番号がリセットされ、部の先頭章にstartsPartが付く', () => {
+      const files = ['f', 'g', 'h'].map(s => join(tmpdir(), `en-pdf-${process.pid}-${s}.txt`));
+      wf(files[0], '【One】\nBody A.\n【】\n');
+      wf(files[1], '【Two】\nBody B.\n【】\n');
+      wf(files[2], '【Three】\nBody C.\n');
+      try {
+        const chapters = buildChapters(files.map(f => parseEnglishFile(f)), [0, 2]);
+        expect(chapters.map(ch => [ch.part, ch.number, ch.startsPart])).toEqual([
+          [1, 1, true],
+          [1, 2, false],
+          [2, 1, true],
+        ]);
+        expect(chapters.map(ch => ch.soleInPart)).toEqual([false, false, true]);
+      } finally {
+        files.forEach(f => ul(f));
       }
     });
 
