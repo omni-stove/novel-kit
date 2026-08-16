@@ -22,6 +22,8 @@
  *   --no-smart-quotes    ストレート引用符をカーリー引用符に変換しない
  *   --open               生成後にプレビューを開く
  *
+ * 章が1つしかなく章題も無い場合は、章ヘッダ（章番号・POV）を出力しない。
+ *
  * 原稿の記法:
  *   POV: name        章扉に視点人物名として表示
  *   【title】        章の開始（titleは章題、空なら番号のみ）
@@ -220,11 +222,16 @@ function chapterHtml(ch, opts) {
   const inline = t => formatInline(t, { curly: opts.smartQuotes });
   const parts = [];
 
-  parts.push('<header class="chapter-head">');
-  if (!ch.soleInPart) parts.push(`<p class="chapter-number">${chapterNumberWord(ch.number)}</p>`);
-  if (ch.title) parts.push(`<h2 class="chapter-title">${inline(ch.title)}</h2>`);
-  else parts.push(`<h2 class="chapter-title chapter-title-hidden">Chapter ${chapterNumberWord(ch.number)}</h2>`);
-  if (ch.pov) parts.push(`<p class="chapter-pov">${inline(ch.pov)}</p>`);
+  // 章が1つだけの作品で章題も無い場合は章ヘッダを出さない。
+  // ただし柱のstring-setを担うため、要素自体は空で残す
+  const bareHead = opts.bareChapterHead && !ch.title;
+  parts.push(`<header class="chapter-head${bareHead ? ' chapter-head-bare' : ''}">`);
+  if (!bareHead) {
+    if (!ch.soleInPart) parts.push(`<p class="chapter-number">${chapterNumberWord(ch.number)}</p>`);
+    if (ch.title) parts.push(`<h2 class="chapter-title">${inline(ch.title)}</h2>`);
+    else parts.push(`<h2 class="chapter-title chapter-title-hidden">Chapter ${chapterNumberWord(ch.number)}</h2>`);
+    if (ch.pov) parts.push(`<p class="chapter-pov">${inline(ch.pov)}</p>`);
+  }
   parts.push('</header>');
 
   for (const { quote, source } of ch.epigraphs) {
@@ -430,6 +437,11 @@ function generateHtml(chapters, size, opts) {
       display: none;
     }
 
+    /* 章ヘッダなし（単章作品）。本文開始位置の沈み込みだけ残す */
+    .chapter-head-bare {
+      margin-bottom: 0;
+    }
+
     .chapter-pov {
       text-align: center;
       text-indent: 0;
@@ -493,7 +505,7 @@ function generateHtml(chapters, size, opts) {
 </head>
 <body>
 ${titlePage}
-${chapters.map(ch => chapterHtml(ch, opts)).join('\n')}
+${chapters.map(ch => chapterHtml(ch, { ...opts, bareChapterHead: chapters.length === 1 })).join('\n')}
 </body>
 </html>`;
 }
@@ -645,6 +657,30 @@ if (import.meta.vitest) {
     });
     test('《《》》囲みを傍点spanに変換', () => {
       expect(formatInline('《《really》》')).toBe('<span class="emphasis">really</span>');
+    });
+  });
+
+  describe('chapterHtml', () => {
+    const ch = {
+      number: 1, title: '', pov: 'Nol', epigraphs: [],
+      blocks: [{ type: 'para', text: 'Body.' }],
+      part: null, startsPart: false, soleInPart: false,
+    };
+    test('通常は章番号とPOVを出す', () => {
+      const html = chapterHtml(ch, { smartQuotes: true });
+      expect(html).toContain('chapter-number');
+      expect(html).toContain('chapter-pov');
+    });
+    test('bareChapterHeadでは章ヘッダを空にする', () => {
+      const html = chapterHtml(ch, { smartQuotes: true, bareChapterHead: true });
+      expect(html).toContain('chapter-head-bare');
+      expect(html).not.toContain('chapter-number');
+      expect(html).not.toContain('chapter-pov');
+    });
+    test('bareChapterHeadでも章題があればヘッダを出す', () => {
+      const html = chapterHtml({ ...ch, title: 'One' }, { smartQuotes: true, bareChapterHead: true });
+      expect(html).not.toContain('chapter-head-bare');
+      expect(html).toContain('chapter-title');
     });
   });
 
