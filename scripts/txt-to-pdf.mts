@@ -365,8 +365,16 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
     .epigraph-page .epigraph-quote {
       text-indent: 0;
       text-align: end;
+      /* 引用元の文字数ぶん本文を押し上げ、本文末尾を引用元の先頭に揃える。
+         padding だと行長が縮んで本文が折り返してしまうため、
+         レイアウトに影響しない translate で描画位置だけをずらす。
+         押し上げ量は「本文の先頭が上から一字下げの位置」を上限にクランプする */
+      translate: ${options.vertical
+        ? `0 calc(-1em * max(0, min(var(--epigraph-source-len, 0), ${layout.chars} - var(--epigraph-quote-len, ${layout.chars}) - 1)))`
+        : 'calc(var(--epigraph-source-len, 0) * -1em) 0'};
     }
-    .epigraph-page .epigraph-source {
+    .epigraph-page .epigraph-source,
+    .epigraph-page .epigraph-line {
       text-indent: 0;
       text-align: end;
       height: ${options.vertical ? `${layout.chars}em` : '165mm'};

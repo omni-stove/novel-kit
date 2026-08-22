@@ -24,10 +24,13 @@ export function parsePovLine(line) {
 
 export function parseEpigraphLine(line) {
   const text = line.replace(/^Epigraph:\s*/, '');
-  const parts = text.split('——');
-  const quote = parts[0].trim();
-  const source = parts.length > 1 ? parts.slice(1).join('——').trim() : null;
-  return { quote, source: source || null };
+  // 引用本文の中にもダッシュ（——）が使われうるため、最後の——を引用元との区切りとする
+  const idx = text.lastIndexOf('——');
+  if (idx === -1) return { quote: text.trim(), source: null };
+  const source = text.slice(idx + 2).trim();
+  // ——の後が空なら引用元なし（末尾のダッシュは引用本文の一部として残す）
+  if (!source) return { quote: text.trim(), source: null };
+  return { quote: text.slice(0, idx).trim(), source };
 }
 
 export function isViewpointLine(line) {
@@ -238,9 +241,37 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   return result;
 }
 
-function epigraphsToHtml(epigraphs, escapeOpts) {
+// エピグラフ行の表示幅（em換算）。縦書きでは半角英字も.latin（縦中横）で
+// 全角1文字幅になるため、縦中横になる1〜2桁の数字列を1文字幅、
+// それ以外は1文字=1文字幅として数える
+function epigraphSourceLength(text) {
+  let len = 0;
+  const rest = stripInlineMarkup(text).replace(/\d{1,2}/g, () => {
+    len += 1;
+    return '';
+  });
+  len += [...rest].length;
+  return len;
+}
+
+// 本文＋引用元が一字下げを保ったまま1行（1列）に収まるか
+export function epigraphFitsOneLine(quote, source, chars) {
+  if (!source || !chars) return false;
+  return epigraphSourceLength(quote) + epigraphSourceLength(`——${source}`) <= chars - 1;
+}
+
+function epigraphsToHtml(epigraphs, escapeOpts, chars = null) {
   return epigraphs.map(({ quote, source }) => {
-    const parts = [`<p class="epigraph-quote">${escapeHtml(quote, escapeOpts)}</p>`];
+    // 本文＋引用元が1行に収まる場合はまとめて1行で出す
+    if (epigraphFitsOneLine(quote, source, chars)) {
+      return `<p class="epigraph-line">${escapeHtml(`${quote}——${source}`, escapeOpts)}</p>`;
+    }
+    // 引用元・本文の長さをCSS変数で渡し、本文の行末を引用元の先頭位置まで押し上げる
+    // （本文の先頭が一字下げ位置より上に突き抜けないよう、CSS側で本文長からクランプする）
+    const quoteStyle = source
+      ? ` style="--epigraph-quote-len: ${epigraphSourceLength(quote)}; --epigraph-source-len: ${epigraphSourceLength(`——${source}`)}"`
+      : '';
+    const parts = [`<p class="epigraph-quote"${quoteStyle}>${escapeHtml(quote, escapeOpts)}</p>`];
     if (source) parts.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
     return parts.join('\n');
   }).join('\n');
@@ -294,10 +325,11 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       const viewpointLine = sectionNumber !== null ? applyViewpointLabel(line, sectionNumber) : line;
       const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
       if (pendingEpigraphs) {
-        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>\n${epigraphsToHtml(pendingEpigraphs, escapeOpts)}\n</div>`);
+        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>\n${epigraphsToHtml(pendingEpigraphs, escapeOpts, chars)}\n</div>`);
         pendingEpigraphs = null;
-        // エピグラフページの直後には空行を入れず、本文をページ先頭から始める
-        lastWasViewpoint = false;
+        // エピグラフの直後には空行を1つ挟んでから本文を始める
+        // （視点行と同じ扱いにすることで、原稿側に空行があっても二重にならない）
+        lastWasViewpoint = true;
       } else {
         htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
         lastWasViewpoint = true;
@@ -310,9 +342,10 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       lastWasViewpoint = false;
     }
 
-    // 視点行がないファイルの場合、先頭の本文前にエピグラフを挿入
+    // 視点行がないファイルの場合、先頭の本文前にエピグラフを挿入し、空行を1つ挟む
     if (pendingEpigraphs) {
-      htmlParts.push(`<div class="epigraph">\n${epigraphsToHtml(pendingEpigraphs, escapeOpts)}\n</div>`);
+      htmlParts.push(`<div class="epigraph">\n${epigraphsToHtml(pendingEpigraphs, escapeOpts, chars)}\n</div>`);
+      htmlParts.push('<p class="empty">&nbsp;</p>');
       pendingEpigraphs = null;
     }
 
@@ -405,8 +438,8 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   };
 }
 
-export function getFilteredLines(filePath, { keepEpigraphs = false, keepPov = false } = {}) {
-  const lines = readFileSync(filePath, 'utf-8').split('\n');
+export function getBodyLinesFromContent(content, { keepEpigraphs = false, keepPov = false } = {}) {
+  const lines = content.split('\n');
   const { hasViewpointStart, hasViewpointEnd, endViewpointLineIndex, pov } = analyzeLines(lines);
   return {
     lines: selectBodyLines(lines, endViewpointLineIndex, { keepEpigraphs, keepPov }),
@@ -414,6 +447,10 @@ export function getFilteredLines(filePath, { keepEpigraphs = false, keepPov = fa
     hasViewpointEnd,
     pov,
   };
+}
+
+export function getFilteredLines(filePath, opts = {}) {
+  return getBodyLinesFromContent(readFileSync(filePath, 'utf-8'), opts);
 }
 
 // parseTextFile の hasViewpointStart と同じ条件で、パースせずに事前判定する
@@ -426,8 +463,11 @@ export function fileHasViewpointStart(filePath) {
   return false;
 }
 
-export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
-  const { partFirstIndices = null, ...restOptions } = options;
+/**
+ * 各ファイルに割り当てる章番号ラベルを算出する（PDF・EPUB・規定チェック共通の採番規則）。
+ * 部指定なし: 「1」「2」…。部指定あり: 部内が1章なら「N」、複数章なら「N-M」。
+ */
+export function computeSectionLabels(filePaths, partFirstIndices = null) {
   const resetSet = partFirstIndices ? new Set(partFirstIndices) : null;
 
   // 部ごとの章数を事前集計する（採番ラベルは章数が確定してからでないと決められない）
@@ -455,10 +495,17 @@ export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
     const sectionLabel = resetSet
       ? (partSectionCounts[partNumber - 1] === 1 ? String(partNumber) : `${partNumber}-${sectionNumber}`)
       : String(sectionNumber);
-    const result = parseFn(filePath, { ...restOptions, sectionNumber: sectionLabel });
-    if (result.hasViewpointStart) sectionNumber++;
-    return result;
+    if (fileHasViewpointStart(filePath)) sectionNumber++;
+    return sectionLabel;
   });
+}
+
+export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
+  const { partFirstIndices = null, ...restOptions } = options;
+  const labels = computeSectionLabels(filePaths, partFirstIndices);
+  return filePaths.map((filePath, idx) =>
+    parseFn(filePath, { ...restOptions, sectionNumber: labels[idx] })
+  );
 }
 
 export function getTextFilesFromDir(dirPath, excludeFiles = ['synopsis.txt']) {
@@ -534,7 +581,9 @@ export function countChars(html) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/[\s\u00A0]/g, '');
+    // \u6539\u884C\u30FB\u30BF\u30D6\u30FB&nbsp;\uFF08\u7A7A\u884C\u30D7\u30EC\u30FC\u30B9\u30DB\u30EB\u30C0\uFF09\u306E\u307F\u9664\u5916\u3002
+    // \u5B57\u4E0B\u3052\u306E\u5168\u89D2\u30B9\u30DA\u30FC\u30B9\u7B49\u306F\u539F\u7A3F\u306E\u30DE\u30B9\u3068\u3057\u3066\u6570\u3048\u308B\uFF08\u898F\u5B9A\u30C1\u30A7\u30C3\u30AF\u3068\u540C\u3058\u57FA\u6E96\uFF09
+    .replace(/[\r\n\t\u00A0]/g, '');
   return [...text].length;
 }
 
@@ -597,10 +646,16 @@ if (import.meta.vitest) {
         source: null,
       });
     });
-    test('\u2014\u2014\u304C\u8907\u6570\u3042\u308C\u3070\u6700\u521D\u306E\u2014\u2014\u3067\u5206\u5272\u3057\u6B8B\u308A\u3092\u7D50\u5408', () => {
-      expect(parseEpigraphLine('Epigraph: \u5F15\u7528\u2014\u2014\u51FA\u51781\u2014\u2014\u51FA\u51782')).toEqual({
-        quote: '\u5F15\u7528',
-        source: '\u51FA\u51781\u2014\u2014\u51FA\u51782',
+    test('\u2014\u2014\u304C\u8907\u6570\u3042\u308C\u3070\u6700\u5F8C\u306E\u2014\u2014\u3067\u5206\u5272\u3059\u308B\uFF08\u5F15\u7528\u672C\u6587\u4E2D\u306E\u30C0\u30C3\u30B7\u30E5\u3092\u4FDD\u3064\uFF09', () => {
+      expect(parseEpigraphLine('Epigraph: \u300C\u3060\u3068\u3057\u305F\u3089\u2014\u2014\u300D\u2014\u2014\u30C9\u30B9\u30C8\u30A8\u30D5\u30B9\u30AD\u30FC')).toEqual({
+        quote: '\u300C\u3060\u3068\u3057\u305F\u3089\u2014\u2014\u300D',
+        source: '\u30C9\u30B9\u30C8\u30A8\u30D5\u30B9\u30AD\u30FC',
+      });
+    });
+    test('\u672B\u5C3E\u306E\u2014\u2014\u306F\u5F15\u7528\u672C\u6587\u306E\u4E00\u90E8\u3068\u3057\u3066\u6B8B\u3057source\u306Fnull', () => {
+      expect(parseEpigraphLine('Epigraph: \u8A00\u3044\u304B\u3051\u3066\u2014\u2014')).toEqual({
+        quote: '\u8A00\u3044\u304B\u3051\u3066\u2014\u2014',
+        source: null,
       });
     });
   });
@@ -715,27 +770,61 @@ if (import.meta.vitest) {
   });
 
   describe('parseTextFile epigraph', () => {
-    test('視点行＋エピグラフの直後には空行を入れない', () => {
+    test('視点行＋エピグラフの直後には空行を1つ挟む', () => {
       const tmp = join(tmpdir(), `epi-vp-${Date.now()}.txt`);
       writeFileSync(tmp, 'Epigraph: 引用——出典\n【】\n本文1行目\n');
       try {
         const { html } = parseTextFile(tmp, { vertical: false });
         expect(html).toContain('epigraph-page');
-        // エピグラフページdivの直後に本文が来る（空行<p class="empty">を挟まない）
-        expect(html).toMatch(/<\/div>\n<p[^>]*>本文1行目<\/p>/);
-        expect(html).not.toMatch(/<\/div>\n<p class="empty">/);
+        // エピグラフページdivと本文の間に空行<p class="empty">を1つだけ挟む
+        expect(html).toMatch(/<\/div>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
       } finally {
         unlinkSync(tmp);
       }
     });
 
-    test('視点行なしでもエピグラフの直後には空行を入れない', () => {
+    test('視点行＋エピグラフの後に原稿側の空行があっても空行は二重にならない', () => {
+      const tmp = join(tmpdir(), `epi-vp-blank-${Date.now()}.txt`);
+      writeFileSync(tmp, 'Epigraph: 引用——出典\n【】\n\n本文1行目\n');
+      try {
+        const { html } = parseTextFile(tmp, { vertical: false });
+        expect(html).toMatch(/<\/div>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
+      } finally {
+        unlinkSync(tmp);
+      }
+    });
+
+    test('本文＋引用元が1行に収まるエピグラフは1行にまとめる', () => {
+      const tmp = join(tmpdir(), `epi-oneline-${Date.now()}.txt`);
+      writeFileSync(tmp, 'Epigraph: 引用文——出典\n【】\n本文1行目\n');
+      try {
+        const { html } = parseTextFile(tmp, { vertical: false, chars: 30 });
+        expect(html).toContain('<p class="epigraph-line">引用文——出典</p>');
+        expect(html).not.toContain('epigraph-quote');
+      } finally {
+        unlinkSync(tmp);
+      }
+    });
+
+    test('1行に収まらないエピグラフは従来どおり2行に分ける', () => {
+      const tmp = join(tmpdir(), `epi-twoline-${Date.now()}.txt`);
+      writeFileSync(tmp, 'Epigraph: 引用文——出典\n【】\n本文1行目\n');
+      try {
+        const { html } = parseTextFile(tmp, { vertical: false, chars: 7 });
+        expect(html).toContain('epigraph-quote');
+        expect(html).toContain('epigraph-source');
+        expect(html).not.toContain('epigraph-line');
+      } finally {
+        unlinkSync(tmp);
+      }
+    });
+
+    test('視点行なしでもエピグラフの直後には空行を1つ挟む', () => {
       const tmp = join(tmpdir(), `epi-novp-${Date.now()}.txt`);
       writeFileSync(tmp, 'Epigraph: 引用——出典\n本文1行目\n');
       try {
         const { html } = parseTextFile(tmp, { vertical: false });
-        expect(html).toMatch(/<div class="epigraph">[\s\S]*?<\/div>\n<p[^>]*>本文1行目<\/p>/);
-        expect(html).not.toMatch(/<\/div>\n<p class="empty">/);
+        expect(html).toMatch(/<div class="epigraph">[\s\S]*?<\/div>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
       } finally {
         unlinkSync(tmp);
       }
@@ -802,6 +891,15 @@ if (import.meta.vitest) {
         paths.forEach(p => unlinkSync(p));
       }
     });
+
+    test('computeSectionLabels: 継続ファイルには現在の章ラベルを割り当て、番号は進めない', () => {
+      const paths = makeTmpFiles(['【】\n本文\n', '続きの本文\n', '【】\n本文\n']);
+      try {
+        expect(computeSectionLabels(paths)).toEqual(['1', '2', '2']);
+      } finally {
+        paths.forEach(p => unlinkSync(p));
+      }
+    });
   });
 
   describe('countChars', () => {
@@ -819,8 +917,9 @@ if (import.meta.vitest) {
       expect(countChars('<p>&nbsp;</p>')).toBe(0);
       expect(countChars('<p>a&amp;b</p>')).toBe(3);
     });
-    test('\u7A7A\u767D\u30FB\u5168\u89D2\u7A7A\u767D\u306F\u9664\u5916', () => {
-      expect(countChars('<p>\u3042 \u3044\u3000\u3046</p>')).toBe(3);
+    test('\u7A7A\u767D\u30FB\u5168\u89D2\u7A7A\u767D\u306F\u30DE\u30B9\u3068\u3057\u3066\u6570\u3048\u308B\uFF08\u6539\u884C\u30FB\u30BF\u30D6\u306F\u9664\u5916\uFF09', () => {
+      expect(countChars('<p>\u3042 \u3044\u3000\u3046</p>')).toBe(5);
+      expect(countChars('<p>\u3042</p>\n<p>\u3044</p>')).toBe(2);
     });
   });
 }
