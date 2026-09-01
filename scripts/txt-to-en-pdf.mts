@@ -32,7 +32,8 @@
  *   Memo: ...        無視
  *   *text*           イタリック
  *   《《text》》     傍点（文字上に点を打つ強調）
- *   ◇◇◇ / *** / ---  場面区切り（* * * として出力）
+ *   ◇◇◇ / ■■■ 等    場面区切り（* * * として出力）
+ *   >>>              場面区切り（記号をそのまま出力。再生・信号パートの区切り用）
  *   空行             場面の小休止（行アキ）
  */
 
@@ -99,6 +100,11 @@ function isRuleLine(line) {
   return /^-{3,}$/.test(line.trim()) || /^\*(\s*\*)+$/.test(line.trim());
 }
 
+// 記号をそのまま紙面に出す場面区切り（>>> = 再生・信号パートの区切り）
+function isVerbatimSeparator(line) {
+  return /^>{2,}$/.test(line.trim());
+}
+
 export function smartQuotes(text) {
   return text
     .replace(/(^|[\s([—–“])"/g, '$1“')
@@ -148,8 +154,8 @@ export function parseEnglishFile(filePath) {
       continue;
     }
 
-    if (isSeparator(line)) {
-      blocks.push({ type: 'ornament' });
+    if (isSeparator(line) || isVerbatimSeparator(line)) {
+      blocks.push({ type: 'ornament', mark: isVerbatimSeparator(line) ? line.trim() : null });
       continue;
     }
 
@@ -247,7 +253,12 @@ function chapterHtml(ch, opts) {
       parts.push('<div class="scene-space"></div>');
       afterBreak = true;
     } else if (block.type === 'ornament') {
-      parts.push('<p class="ornament">*&#x2002;*&#x2002;*</p>');
+      // mark付きは記号をそのまま出力（>>> 等）。* * * と同じく各記号の間にenスペースを挟む
+      parts.push(block.mark
+        ? `<p class="ornament">${[...block.mark]
+            .map(c => c.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+            .join('&#x2002;')}</p>`
+        : '<p class="ornament">*&#x2002;*&#x2002;*</p>');
       afterBreak = true;
     } else {
       parts.push(`<p${afterBreak ? ' class="noindent"' : ''}>${inline(block.text)}</p>`);
@@ -733,6 +744,24 @@ if (import.meta.vitest) {
         expect(chapters.map(ch => ch.soleInPart)).toEqual([false, false, true]);
       } finally {
         files.forEach(f => ul(f));
+      }
+    });
+
+    test('>>> は記号をそのまま出す区切り、■■■ は * * * になる', () => {
+      const tmp = join(tmpdir(), `en-pdf-${process.pid}-v.txt`);
+      wf(tmp, 'Body A.\n\n■■■\n\nBody B.\n\n>>>\n\nBody C.\n');
+      try {
+        const parsed = parseEnglishFile(tmp);
+        const ornaments = parsed.blocks.filter(b => b.type === 'ornament');
+        expect(ornaments.map(b => b.mark)).toEqual([null, '>>>']);
+        const html = chapterHtml({
+          number: 1, title: null, pov: null, epigraphs: [], blocks: parsed.blocks,
+          part: null, startsPart: false, soleInPart: false,
+        }, { smartQuotes: true });
+        expect(html).toContain('<p class="ornament">*&#x2002;*&#x2002;*</p>');
+        expect(html).toContain('<p class="ornament">&gt;&#x2002;&gt;&#x2002;&gt;</p>');
+      } finally {
+        ul(tmp);
       }
     });
 
