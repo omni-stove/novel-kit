@@ -1,6 +1,11 @@
-import { readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from 'fs';
-import { basename, join } from 'path';
-import { tmpdir } from 'os';
+/**
+ * 原稿テキスト（1ファイル分）の解釈。
+ * 行の種別判定、インライン記法（ルビ・傍点・横倒し・イタリック）、
+ * 縦書きHTMLへの変換、エピグラフの整形など、テキストそのものに関する処理を置く。
+ * 複数ファイルの集合や採番・ディレクトリ走査は manuscript.mts。
+ */
+
+import { readFileSync } from 'fs';
 
 export function isSeparator(line) {
   return /^[◇◆□■○●◎※＊*]+$/.test(line);
@@ -100,12 +105,63 @@ export function trimBlankEdges(lines) {
   return lines;
 }
 
-export function stripInlineMarkup(text, { rubyParens = false } = {}) {
-  return text
-    .replace(/<<(.+?)>>/g, '$1')
-    .replace(/《《(.+?)》》/g, '$1')
-    .replace(/\|(.+?)《(.+?)》/g, rubyParens ? '$1（$2）' : '$1');
+// 改行で分割する。CRLF の CR は落とす
+export function splitLines(content) {
+  return content.split('\n').map(l => l.replace(/\r$/, ''));
 }
+
+export function readLines(filePath) {
+  return splitLines(readFileSync(filePath, 'utf-8'));
+}
+
+// 空白（改行・全角スペース含む）を除いた字数。記法の除去は呼び出し側で行う
+export function countTextChars(text) {
+  return [...text.replace(/\s/g, '')].length;
+}
+
+const INLINE_MARKUP_RE = /《《(.+?)》》|\|(.+?)《(.+?)》|<<(.+?)>>|\*([^*]+)\*/g;
+
+/**
+ * インライン記法をトークン列に分解する。
+ *   { type: 'text', text }        通常テキスト
+ *   { type: 'emphasis', text }    《《傍点》》
+ *   { type: 'ruby', base, ruby }  |親文字《ルビ》
+ *   { type: 'sideways', text }    <<横倒し>>（縦書き用。中身にルビ記法を含みうる）
+ *   { type: 'italic', text }      *イタリック*（英語原稿用）
+ */
+export function tokenizeInlineMarkup(text) {
+  const tokens = [];
+  let last = 0;
+  for (const m of text.matchAll(INLINE_MARKUP_RE)) {
+    if (m.index > last) tokens.push({ type: 'text', text: text.slice(last, m.index) });
+    if (m[1] !== undefined) tokens.push({ type: 'emphasis', text: m[1] });
+    else if (m[2] !== undefined) tokens.push({ type: 'ruby', base: m[2], ruby: m[3] });
+    else if (m[4] !== undefined) tokens.push({ type: 'sideways', text: m[4] });
+    else tokens.push({ type: 'italic', text: m[5] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) tokens.push({ type: 'text', text: text.slice(last) });
+  return tokens;
+}
+
+// 記法を外して表示されるテキストだけにする（字数カウントや書式なし出力用）
+export function stripInlineMarkup(text, { rubyParens = false } = {}) {
+  return tokenizeInlineMarkup(text).map(t => {
+    if (t.type === 'ruby') return rubyParens ? `${t.base}（${t.ruby}）` : t.base;
+    if (t.type === 'sideways') return stripInlineMarkup(t.text, { rubyParens });
+    return t.text;
+  }).join('');
+}
+
+// XML/HTML のテキストノード用エスケープ
+export function escapeXml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export function escapeHtml(text, { vertical = true, separateSymbolClasses = false } = {}) {
   const rubyPlaceholders = [];
   const emphasisPlaceholders = [];
@@ -264,6 +320,13 @@ export function epigraphFitsOneLine(quote, source, chars) {
   return epigraphSourceLength(quote) + epigraphSourceLength(`——${source}`) <= chars - 1;
 }
 
+// エピグラフを表示行に分ける。1行に収まるなら「引用——出典」の1行、
+// 収まらなければ引用行と「——出典」行（出典がなければ引用行のみ）
+export function epigraphDisplayLines(quote, source, chars = null) {
+  if (epigraphFitsOneLine(quote, source, chars)) return [`${quote}——${source}`];
+  return source ? [quote, `——${source}`] : [quote];
+}
+
 function epigraphsToHtml(epigraphs, escapeOpts, chars = null) {
   return epigraphs.map(({ quote, source }) => {
     // 本文＋引用元が1行に収まる場合はまとめて1行で出す
@@ -282,7 +345,7 @@ function epigraphsToHtml(epigraphs, escapeOpts, chars = null) {
 }
 
 export function parseTextFile(filePath, { vertical = true, separateSymbolClasses = false, sectionNumber = null, chars = null } = {}) {
-  const lines = readFileSync(filePath, 'utf-8').split('\n');
+  const lines = readLines(filePath);
   const htmlParts = [];
 
   const { hasViewpointStart, hasViewpointEnd, hasEmptyViewpointStart, endViewpointLineIndex, epigraphs, pov } = analyzeLines(lines);
@@ -369,7 +432,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
 }
 
 export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
-  const lines = readFileSync(filePath, 'utf-8').split('\n');
+  const lines = readLines(filePath);
   const xhtmlParts = [];
   const escapeOpts = { vertical: true, separateSymbolClasses: true };
 
@@ -443,7 +506,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
 }
 
 export function getBodyLinesFromContent(content, { keepEpigraphs = false, keepPov = false } = {}) {
-  const lines = content.split('\n');
+  const lines = splitLines(content);
   const { hasViewpointStart, hasViewpointEnd, endViewpointLineIndex, pov } = analyzeLines(lines);
   return {
     lines: selectBodyLines(lines, endViewpointLineIndex, { keepEpigraphs, keepPov }),
@@ -459,118 +522,11 @@ export function getFilteredLines(filePath, opts = {}) {
 
 // parseTextFile の hasViewpointStart と同じ条件で、パースせずに事前判定する
 export function fileHasViewpointStart(filePath) {
-  const lines = readFileSync(filePath, 'utf-8').split('\n');
-  for (const line of lines) {
+  for (const line of readLines(filePath)) {
     if (line.trim() === '' || isMetaLine(line)) continue;
     return isViewpointLine(line);
   }
   return false;
-}
-
-/**
- * 各ファイルに割り当てる章番号ラベルを算出する（PDF・EPUB・規定チェック共通の採番規則）。
- * 部指定なし: 「1」「2」…。部指定あり: 部内が1章なら「N」、複数章なら「N-M」。
- */
-export function computeSectionLabels(filePaths, partFirstIndices = null) {
-  const resetSet = partFirstIndices ? new Set(partFirstIndices) : null;
-
-  // 部ごとの章数を事前集計する（採番ラベルは章数が確定してからでないと決められない）
-  let partSectionCounts = null;
-  if (resetSet) {
-    partSectionCounts = [];
-    let count = 0;
-    filePaths.forEach((filePath, idx) => {
-      if (idx > 0 && resetSet.has(idx)) {
-        partSectionCounts.push(count);
-        count = 0;
-      }
-      if (fileHasViewpointStart(filePath)) count++;
-    });
-    partSectionCounts.push(count);
-  }
-
-  let partNumber = 1;
-  let sectionNumber = 1;
-  return filePaths.map((filePath, idx) => {
-    if (resetSet && idx > 0 && resetSet.has(idx)) {
-      partNumber++;
-      sectionNumber = 1;
-    }
-    const sectionLabel = resetSet
-      ? (partSectionCounts[partNumber - 1] === 1 ? String(partNumber) : `${partNumber}-${sectionNumber}`)
-      : String(sectionNumber);
-    if (fileHasViewpointStart(filePath)) sectionNumber++;
-    return sectionLabel;
-  });
-}
-
-export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
-  const { partFirstIndices = null, ...restOptions } = options;
-  const labels = computeSectionLabels(filePaths, partFirstIndices);
-  return filePaths.map((filePath, idx) =>
-    parseFn(filePath, { ...restOptions, sectionNumber: labels[idx] })
-  );
-}
-
-export function getTextFilesFromDir(dirPath, excludeFiles = ['synopsis.txt']) {
-  return readdirSync(dirPath)
-    .filter(f => f.endsWith('.txt') && !excludeFiles.includes(f))
-    .sort((a, b) => {
-      const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10);
-      const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10);
-      return numA - numB;
-    })
-    .map(f => join(dirPath, f));
-}
-
-export function collectInputFiles(paths, excludeFiles = undefined) {
-  const files = [];
-  for (const path of paths) {
-    if (statSync(path).isDirectory()) {
-      files.push(...(excludeFiles ? getTextFilesFromDir(path, excludeFiles) : getTextFilesFromDir(path)));
-    } else {
-      files.push(path);
-    }
-  }
-  return files;
-}
-
-// 部境界の指定トークン（ファイル名の数値プレフィックス、またはフォールバックとして
-// 1始まりのファイル順インデックス）を0始まりインデックスに解決する
-export function resolvePartIndices(tokens, filePaths) {
-  const resolved = [];
-  for (const tok of tokens) {
-    const idxByPrefix = filePaths.findIndex(f => basename(f).match(/^\d+/)?.[0] === tok);
-    if (idxByPrefix >= 0) {
-      resolved.push(idxByPrefix);
-      continue;
-    }
-    const asInt = parseInt(tok, 10);
-    if (!isNaN(asInt) && asInt >= 1 && asInt <= filePaths.length) {
-      resolved.push(asInt - 1);
-      continue;
-    }
-    console.error(`エラー: 部境界の値 "${tok}" に対応するファイルが見つかりません`);
-    process.exit(1);
-  }
-  return [...new Set(resolved)].sort((a, b) => a - b);
-}
-
-export function logSections(sections, inputFiles) {
-  let totalChars = 0;
-  let sectionChars = 0;
-  for (let i = 0; i < inputFiles.length; i++) {
-    const content = sections[i].html || sections[i].xhtml;
-    const chars = countChars(content);
-    totalChars += chars;
-    sectionChars += chars;
-    const startMarker = sections[i].hasViewpointStart ? '\u{1F4D6}' : '  ';
-    const endMarker = sections[i].hasViewpointEnd ? '\u{1F4D5}' : '  ';
-    const sectionTotal = sections[i].hasViewpointEnd ? `  計${sectionChars.toLocaleString()}字` : '';
-    console.log(`${startMarker}${endMarker} 処理中: ${basename(inputFiles[i])} (${chars.toLocaleString()}字)${sectionTotal}`);
-    if (sections[i].hasViewpointEnd) sectionChars = 0;
-  }
-  return totalChars;
 }
 
 export function countChars(html) {
@@ -593,6 +549,56 @@ export function countChars(html) {
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
+  const { writeFileSync, unlinkSync } = await import('fs');
+  const { join } = await import('path');
+  const { tmpdir } = await import('os');
+
+  describe('splitLines / countTextChars', () => {
+    test('CRLF の CR を落とす', () => {
+      expect(splitLines('a\r\nb\n')).toEqual(['a', 'b', '']);
+    });
+    test('空白・改行・全角スペースを除いてコードポイントで数える', () => {
+      expect(countTextChars('あ い\n　う\t')).toBe(3);
+      expect(countTextChars('𠮟る')).toBe(2);
+    });
+  });
+
+  describe('tokenizeInlineMarkup', () => {
+    test('記法のないテキストは1トークン', () => {
+      expect(tokenizeInlineMarkup('本文')).toEqual([{ type: 'text', text: '本文' }]);
+      expect(tokenizeInlineMarkup('')).toEqual([]);
+    });
+    test('ルビ・傍点・横倒し・イタリックを出現順に切り出す', () => {
+      expect(tokenizeInlineMarkup('a|漢字《かんじ》b《《強》》c<<AB>>d*it*e')).toEqual([
+        { type: 'text', text: 'a' },
+        { type: 'ruby', base: '漢字', ruby: 'かんじ' },
+        { type: 'text', text: 'b' },
+        { type: 'emphasis', text: '強' },
+        { type: 'text', text: 'c' },
+        { type: 'sideways', text: 'AB' },
+        { type: 'text', text: 'd' },
+        { type: 'italic', text: 'it' },
+        { type: 'text', text: 'e' },
+      ]);
+    });
+  });
+
+  describe('escapeXml', () => {
+    test('& < > " をエスケープする', () => {
+      expect(escapeXml('a<b>&"c"')).toBe('a&lt;b&gt;&amp;&quot;c&quot;');
+    });
+  });
+
+  describe('epigraphDisplayLines', () => {
+    test('幅指定なしは引用行と出典行に分ける', () => {
+      expect(epigraphDisplayLines('引用文', '出典')).toEqual(['引用文', '——出典']);
+      expect(epigraphDisplayLines('引用文', null)).toEqual(['引用文']);
+    });
+    test('一字下げを保って幅に収まるなら1行にまとめる', () => {
+      expect(epigraphDisplayLines('引用文', '出典', 8)).toEqual(['引用文——出典']);
+      expect(epigraphDisplayLines('引用文', '出典', 7)).toEqual(['引用文', '——出典']);
+    });
+  });
 
   describe('isSeparator', () => {
     test('\u25C7\u306E\u307F\u3067\u69CB\u6210\u3055\u308C\u308B\u884C\u306Ftrue', () => {
@@ -831,77 +837,6 @@ if (import.meta.vitest) {
         expect(html).toMatch(/<div class="epigraph">[\s\S]*?<\/div>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
       } finally {
         unlinkSync(tmp);
-      }
-    });
-  });
-
-  describe('parseWithSectionNumbering', () => {
-    const makeTmpFiles = (contents) => {
-      const paths = contents.map((c, i) => join(tmpdir(), `psn-${Date.now()}-${i}.txt`));
-      paths.forEach((p, i) => writeFileSync(p, contents[i]));
-      return paths;
-    };
-
-    test('部に複数章がある場合は「部-章」形式で採番される', () => {
-      const paths = makeTmpFiles(['【】\n本文\n', '【】\n本文\n', '【】\n本文\n']);
-      try {
-        const sections = parseWithSectionNumbering(paths, parseTextFile, {
-          vertical: false,
-          partFirstIndices: [2],
-        });
-        expect(sections[0].html).toContain('【1-1】');
-        expect(sections[1].html).toContain('【1-2】');
-      } finally {
-        paths.forEach(p => unlinkSync(p));
-      }
-    });
-
-    test('部に章が1つしかない場合は「部」のみで採番される', () => {
-      const paths = makeTmpFiles(['【】\n本文\n', '【】\n本文\n', '【】\n本文\n']);
-      try {
-        const sections = parseWithSectionNumbering(paths, parseTextFile, {
-          vertical: false,
-          partFirstIndices: [2],
-        });
-        expect(sections[2].html).toContain('【2】');
-        expect(sections[2].html).not.toContain('【2-1】');
-      } finally {
-        paths.forEach(p => unlinkSync(p));
-      }
-    });
-
-    test('視点行を持たない継続ファイルは章数に数えない', () => {
-      // 2部目は「視点行あり＋継続ファイル」の2ファイル構成だが章は1つ → 【2】
-      const paths = makeTmpFiles(['【】\n本文\n', '【】\n本文\n', '続きの本文\n']);
-      try {
-        const sections = parseWithSectionNumbering(paths, parseTextFile, {
-          vertical: false,
-          partFirstIndices: [1],
-        });
-        expect(sections[0].html).toContain('【1】');
-        expect(sections[1].html).toContain('【2】');
-      } finally {
-        paths.forEach(p => unlinkSync(p));
-      }
-    });
-
-    test('--part未指定時は従来どおり通し番号', () => {
-      const paths = makeTmpFiles(['【】\n本文\n', '【】\n本文\n']);
-      try {
-        const sections = parseWithSectionNumbering(paths, parseTextFile, { vertical: false });
-        expect(sections[0].html).toContain('【1】');
-        expect(sections[1].html).toContain('【2】');
-      } finally {
-        paths.forEach(p => unlinkSync(p));
-      }
-    });
-
-    test('computeSectionLabels: 継続ファイルには現在の章ラベルを割り当て、番号は進めない', () => {
-      const paths = makeTmpFiles(['【】\n本文\n', '続きの本文\n', '【】\n本文\n']);
-      try {
-        expect(computeSectionLabels(paths)).toEqual(['1', '2', '2']);
-      } finally {
-        paths.forEach(p => unlinkSync(p));
       }
     });
   });

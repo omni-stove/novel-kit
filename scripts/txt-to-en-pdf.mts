@@ -42,12 +42,15 @@ import { readFileSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { basename } from 'path';
 import { PDFDocument, PDFArray, PDFRawStream, StandardFonts, rgb } from 'pdf-lib';
 import {
+  readLines, escapeXml,
   isMemoLine, isTitleLine, isPovLine, parsePovLine,
   isEpigraphLine, parseEpigraphLine,
   isViewpointLine, isSeparator,
 } from './lib/text-parser.mts';
-import { collectInputFiles, resolvePartIndices } from './lib/text-parser.mts';
-import { parseCliArgs, parseList, fail, vivliostyleBuild, openFile } from './lib/cli.mts';
+import { requireInputFiles, resolvePartIndices } from './lib/manuscript.mts';
+import { chapterNumberWord } from './lib/english.mts';
+import { googleFontsLinks } from './lib/html.mts';
+import { parseCliArgs, ARG, fail, vivliostyleBuild, openFile, runMain } from './lib/cli.mts';
 
 // 判型定義
 const PAGE_SIZES = {
@@ -68,33 +71,19 @@ const PAGE_SIZES = {
   },
 };
 
-const NUMBER_WORDS = [
-  'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
-  'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen',
-  'Eighteen', 'Nineteen', 'Twenty', 'Twenty-One', 'Twenty-Two', 'Twenty-Three',
-  'Twenty-Four', 'Twenty-Five', 'Twenty-Six', 'Twenty-Seven', 'Twenty-Eight',
-  'Twenty-Nine', 'Thirty', 'Thirty-One', 'Thirty-Two', 'Thirty-Three',
-  'Thirty-Four', 'Thirty-Five', 'Thirty-Six', 'Thirty-Seven', 'Thirty-Eight',
-  'Thirty-Nine', 'Forty',
-];
-
-function chapterNumberWord(n) {
-  return NUMBER_WORDS[n - 1] ?? String(n);
-}
-
 function parseArgs(argv) {
   return parseCliArgs(argv, [
-    { key: 'output', flags: ['-o', '--output'], takesValue: true },
-    { key: 'title', flags: ['--title'], takesValue: true },
-    { key: 'author', flags: ['--author'], takesValue: true },
+    ARG.output,
+    ARG.title,
+    ARG.author,
     { key: 'pageSize', flags: ['--5x8'], value: '5x8' },
     { key: 'pageSize', flags: ['--6x9'], value: '6x9' },
     { key: 'pageSize', flags: ['--a5'], value: 'a5' },
-    { key: 'parts', flags: ['--part', '--parts'], takesValue: true, parse: parseList },
+    ARG.parts,
     { key: 'recto', flags: ['--recto'] },
     { key: 'smartQuotes', flags: ['--no-smart-quotes'], value: false },
-    { key: 'open', flags: ['--open'] },
-  ], { output: null, title: null, author: null, pageSize: '6x9', parts: null, recto: false, smartQuotes: true, open: false });
+    ARG.open,
+  ], { pageSize: '6x9', smartQuotes: true });
 }
 
 function isRuleLine(line) {
@@ -127,7 +116,7 @@ export function formatInline(text, { curly = true } = {}) {
 
 // 1ファイルを解析して { blocks, chapterTitle, pov, epigraphs, hasViewpointStart, hasViewpointEnd } を返す
 export function parseEnglishFile(filePath) {
-  const lines = readFileSync(filePath, 'utf-8').split('\n');
+  const lines = readLines(filePath);
   const isMeta = l => isMemoLine(l) || isTitleLine(l) || isPovLine(l) || isEpigraphLine(l);
 
   const povLine = lines.find(l => isPovLine(l));
@@ -256,9 +245,7 @@ function chapterHtml(ch, opts) {
     } else if (block.type === 'ornament') {
       // mark付きは記号をそのまま出力（>>> 等）。* * * と同じく各記号の間にenスペースを挟む
       parts.push(block.mark
-        ? `<p class="ornament">${[...block.mark]
-            .map(c => c.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
-            .join('&#x2002;')}</p>`
+        ? `<p class="ornament">${[...block.mark].map(escapeXml).join('&#x2002;')}</p>`
         : '<p class="ornament">*&#x2002;*&#x2002;*</p>');
       afterBreak = true;
     } else {
@@ -290,9 +277,7 @@ function generateHtml(chapters, size, opts) {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+${googleFontsLinks('EB+Garamond:ital,wght@0,400;0,500;0,600;1,400')}
   <style>
     /* ノンブルはVivliostyleのpageカウンタがリセットできないため、
        ビルド後にpdf-libでスタンプする（stampPageNumbers参照） */
@@ -578,13 +563,11 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (!args.output) fail('出力ファイルを指定してください (-o output.pdf)');
-  if (args.files.length === 0) fail('入力ファイルまたはディレクトリを指定してください');
 
   const size = PAGE_SIZES[args.pageSize];
   console.log(`判型: ${size.name}`);
 
-  const inputFiles = collectInputFiles(args.files);
-  if (inputFiles.length === 0) fail('txtファイルが見つかりません');
+  const inputFiles = requireInputFiles(args.files);
 
   // 部境界の解決。未訳などで存在しない境界はスキップする（翻訳は先頭から進む前提なので部番号はずれない）
   let partFirstIndices = null;
@@ -632,12 +615,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(err => {
-    console.error('エラー:', err.message);
-    process.exit(1);
-  });
-}
+runMain(import.meta.url, main);
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;

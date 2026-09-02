@@ -36,11 +36,16 @@
  */
 
 import { PDFDocument, PDFName, rgb } from 'pdf-lib';
-import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync } from 'fs';
-import { basename, dirname, join } from 'path';
+import { readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { basename } from 'path';
 import { inflateSync } from 'zlib';
-import { escapeHtml, parseTextFile, parseWithSectionNumbering, getFilteredLines, isSeparator, isViewpointLine, countChars, logSections, stripInlineMarkup, collectInputFiles, resolvePartIndices } from './lib/text-parser.mts';
-import { parseCliArgs, parseList, fail, vivliostyleBuild, openFile } from './lib/cli.mts';
+import { escapeHtml, parseTextFile, readLines, getFilteredLines, isSeparator, isViewpointLine, countChars, stripInlineMarkup } from './lib/text-parser.mts';
+import {
+  parseWithSectionNumbering, logSections, requireInputFiles, resolvePartIndices, findSidecarFile,
+  SYNOPSIS_FILENAME, CHARACTERS_FILENAME,
+} from './lib/manuscript.mts';
+import { googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mts';
+import { parseCliArgs, ARG, fail, vivliostyleBuild, openFile, runMain } from './lib/cli.mts';
 
 function countManuscript(inputFiles, charsPerLine) {
   // 半角英数は0.5文字幅で詰まるため、1行の容量を半角単位で持って行数を見積もる
@@ -112,32 +117,10 @@ export function pageInRanges(n, ranges) {
   return ranges.some(([s, e]) => n >= s && n <= e);
 }
 
-const SYNOPSIS_FILENAME = 'synopsis.txt';
-const CHARACTERS_FILENAME = 'characters.txt';
-
-function findSidecarFile(inputFiles, inputPaths, filename) {
-  for (const p of inputPaths) {
-    try {
-      if (statSync(p).isDirectory()) {
-        const sidecarPath = join(p, filename);
-        if (existsSync(sidecarPath)) return sidecarPath;
-      }
-    } catch { /* ignore */ }
-  }
-  if (inputFiles.length > 0) {
-    const dir = dirname(inputFiles[0]);
-    const sidecarPath = join(dir, filename);
-    if (existsSync(sidecarPath)) return sidecarPath;
-  }
-  return null;
-}
-
 function parsePlainTextFile(filePath, vertical = true) {
-  const content = readFileSync(filePath, 'utf-8');
-  const lines = content.split('\n');
   const htmlParts = [];
 
-  for (const line of lines) {
+  for (const line of readLines(filePath)) {
     if (line.trim() === '') {
       htmlParts.push('<p class="empty">&nbsp;</p>');
     } else {
@@ -150,9 +133,9 @@ function parsePlainTextFile(filePath, vertical = true) {
 
 function parseArgs(argv) {
   const args = parseCliArgs(argv, [
-    { key: 'output', flags: ['-o', '--output'], takesValue: true },
-    { key: 'title', flags: ['--title'], takesValue: true },
-    { key: 'author', flags: ['--author'], takesValue: true },
+    ARG.output,
+    ARG.title,
+    ARG.author,
     { key: 'pageBreak', flags: ['--no-page-break'], value: false },
     { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
     { key: 'vertical', flags: ['--horizontal'], value: false },
@@ -160,29 +143,12 @@ function parseArgs(argv) {
     { key: 'limit', flags: ['--limit'], takesValue: true, parse: v => parseInt(v, 10) },
     { key: 'synopsisOnTitle', flags: ['--synopsis-on-title'] },
     { key: 'coverless', flags: ['--coverless'] },
-    { key: 'open', flags: ['--open'] },
+    ARG.open,
     { key: 'countOnly', flags: ['--count-only'] },
-    { key: 'parts', flags: ['--part', '--parts'], takesValue: true, parse: parseList },
+    ARG.parts,
     { key: 'review', flags: ['--review'] },
     { key: 'pages', flags: ['--pages'], takesValue: true, parse: parsePageSpec },
-  ], {
-    output: null,
-    title: null,
-    author: null,
-    pageBreak: true,
-    chapterBreak: true,
-    vertical: true,
-    open: false,
-    synopsisOnTitle: false,
-    coverless: false,
-    limit: null,
-    chars: null,
-    lines: null,
-    countOnly: false,
-    parts: null,
-    review: false,
-    pages: null,
-  });
+  ], { pageBreak: true, chapterBreak: true, vertical: true, chars: null, lines: null });
   if (args.size) {
     const [chars, lines] = args.size.split('x').map(Number);
     args.chars = chars;
@@ -287,9 +253,7 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400&display=swap" rel="stylesheet">
+${googleFontsLinks('Noto+Serif+JP:wght@400')}
   <style>
     @page {
       size: A4 landscape;
@@ -384,79 +348,7 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
       text-orientation: sideways;
       vertical-align: central;
     }
-
-    .latin {
-      text-combine-upright: all;
-      -webkit-text-combine: horizontal;
-    }
-
-    .sideways-latin {
-      text-orientation: sideways;
-    }
-
-    .sideways-latin rt {
-      text-orientation: mixed;
-    }
-
-    .upright {
-      text-combine-upright: all;
-      -webkit-text-combine: horizontal;
-    }
-
-    /* 縦中横（1〜2桁の数字・!?等）。
-       text-combine-upright: all は Chromium/Vivliostyle で合成結果が
-       1em より狭いと中央に揃わず左へ寄る（例: 【+42Y】の「42」だけが左寄り）。
-       txt-to-novel-pdf.mts と同様に、横書きの inline-block を 1em 幅で
-       中央寄せして確実にセンタリングする。 */
-    .tcy {
-      display: inline-block;
-      writing-mode: horizontal-tb;
-      text-orientation: initial;
-      width: 1em;
-      text-align: center;
-      line-height: 1em;
-    }
-
-    /* 単独の全角ハイフン（章番号「1-1」の区切り等）。
-       .dash の sideways や glyph の rotate ではフォントのインク位置の都合で列の中央より
-       左へずれるため、tcy と同じ 1em の正方セル（配置が確実）にグリフを透明で残して
-       文字数カウントを保ちつつ、::before でセル中央に縦向きの短い棒を実描画する。 */
-    .hyphen {
-      display: inline-block;
-      writing-mode: horizontal-tb;
-      text-orientation: initial;
-      width: 1em;
-      text-align: center;
-      line-height: 1em;
-      position: relative;
-      color: transparent;
-    }
-
-    .hyphen::before {
-      content: "";
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      width: 0.07em;
-      height: 0.8em;
-      transform: translate(-50%, -50%);
-      background: #000;
-    }
-
-    /* 略語の区切りピリオド（O.M. / U.S.A. 等）。素の「.」は mixed のまま
-       セルの左下へ寄ってずれる。縦書きの句点と同じく、1em セルの右上へ
-       フォント本来のピリオド字形のまま寄せる（前の文字の直後にまとまって読める）。 */
-    .dot {
-      display: inline-flex;
-      writing-mode: horizontal-tb;
-      text-orientation: initial;
-      width: 1em;
-      height: 1em;
-      align-items: flex-start;
-      justify-content: flex-end;
-      line-height: 0;
-    }
-
+${VERTICAL_GLYPH_CSS}
     .title-page {
       display: flex;
       align-items: center;
@@ -510,11 +402,6 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
       ${options.vertical ? `height: ${layout.chars}em;` : ''}
     }
 
-    .emphasis {
-      text-emphasis: filled sesame;
-      text-emphasis-position: over right;
-    }
-
     .synopsis-page {
       page-break-before: always;
       page-break-after: always;
@@ -552,21 +439,6 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
       font-weight: bold;
       text-align: center;
       margin-bottom: 1em;
-    }
-
-    ruby {
-      ruby-align: center;
-      position: relative;
-    }
-
-    rt {
-      font-size: 0.5em;
-      position: absolute;
-      left: 100%;
-      margin-left: -0.4em;
-      top: 50%;
-      transform: translateY(-50%);
-      white-space: nowrap;
     }
   </style>
 </head>
@@ -672,15 +544,11 @@ async function main() {
     fail('--pages の指定が不正です（例: --pages 42 / 42-45 / 42,50,60-62）');
   }
 
-  if (args.files.length === 0) fail('入力ファイルまたはディレクトリを指定してください');
-
-  let inputFiles = collectInputFiles(args.files, [SYNOPSIS_FILENAME, CHARACTERS_FILENAME]);
+  let inputFiles = requireInputFiles(args.files, [SYNOPSIS_FILENAME, CHARACTERS_FILENAME]);
 
   if (args.limit != null && args.limit > 0) {
     inputFiles = inputFiles.slice(0, args.limit);
   }
-
-  if (inputFiles.length === 0) fail('txtファイルが見つかりません');
 
   console.log(`入力ファイル: ${inputFiles.length}件`);
 
@@ -720,8 +588,7 @@ async function main() {
   let synopsisHtml = null;
   let synopsisCharCount = 0;
   if (synopsisPath) {
-    const synopsisContent = readFileSync(synopsisPath, 'utf-8');
-    const synopsisLines = synopsisContent.split('\n').filter(l => l.trim() !== '');
+    const synopsisLines = readLines(synopsisPath).filter(l => l.trim() !== '');
     synopsisCharCount = synopsisLines.reduce((sum, line) => {
       const html = escapeHtml(line, { vertical: args.vertical });
       const text = html.replace(/<rt>.*?<\/rt>/g, '').replace(/<[^>]+>/g, '').replace(/[\s\u00A0]/g, '');
@@ -849,12 +716,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(err => {
-    console.error('エラー:', err.message);
-    process.exit(1);
-  });
-}
+runMain(import.meta.url, main);
 
 if (import.meta.vitest) {
   const { test, expect } = import.meta.vitest;
