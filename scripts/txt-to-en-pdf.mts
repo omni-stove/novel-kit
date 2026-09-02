@@ -29,6 +29,7 @@
  *   【title】        章の開始（titleは章題、空なら番号のみ）
  *   末尾の【】       次章のアンカー（本文には出力しない）
  *   Epigraph: ...    章扉のエピグラフ
+ *   Title: ...       無視
  *   Memo: ...        無視
  *   *text*           イタリック
  *   《《text》》     傍点（文字上に点を打つ強調）
@@ -41,7 +42,7 @@ import { readFileSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { basename } from 'path';
 import { PDFDocument, PDFArray, PDFRawStream, StandardFonts, rgb } from 'pdf-lib';
 import {
-  isMemoLine, isPovLine, parsePovLine,
+  isMemoLine, isTitleLine, isPovLine, parsePovLine,
   isEpigraphLine, parseEpigraphLine,
   isViewpointLine, isSeparator,
 } from './lib/text-parser.mts';
@@ -127,7 +128,7 @@ export function formatInline(text, { curly = true } = {}) {
 // 1ファイルを解析して { blocks, chapterTitle, pov, epigraphs, hasViewpointStart, hasViewpointEnd } を返す
 export function parseEnglishFile(filePath) {
   const lines = readFileSync(filePath, 'utf-8').split('\n');
-  const isMeta = l => isMemoLine(l) || isPovLine(l) || isEpigraphLine(l);
+  const isMeta = l => isMemoLine(l) || isTitleLine(l) || isPovLine(l) || isEpigraphLine(l);
 
   const povLine = lines.find(l => isPovLine(l));
   const pov = povLine ? parsePovLine(povLine) : null;
@@ -710,6 +711,17 @@ if (import.meta.vitest) {
           { type: 'space' },
           { type: 'para', text: 'Second paragraph.' },
         ]);
+      } finally {
+        ul(tmp);
+      }
+    });
+
+    test('Title:行は本文に含めない', () => {
+      const tmp = join(tmpdir(), `en-pdf-${process.pid}-title.txt`);
+      wf(tmp, 'Title: The Sirens Sing Nevermore\nPOV: Outi\nFirst paragraph.\n');
+      try {
+        const parsed = parseEnglishFile(tmp);
+        expect(parsed.blocks).toEqual([{ type: 'para', text: 'First paragraph.' }]);
       } finally {
         ul(tmp);
       }

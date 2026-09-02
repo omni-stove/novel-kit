@@ -10,6 +10,10 @@ export function isMemoLine(line) {
   return line.startsWith('Memo:');
 }
 
+export function isTitleLine(line) {
+  return line.startsWith('Title:');
+}
+
 export function isEpigraphLine(line) {
   return line.startsWith('Epigraph:');
 }
