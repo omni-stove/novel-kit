@@ -19,6 +19,10 @@ export function isTitleLine(line) {
   return line.startsWith('Title:');
 }
 
+export function isGenreLine(line) {
+  return line.startsWith('Genre:');
+}
+
 export function isEpigraphLine(line) {
   return line.startsWith('Epigraph:');
 }

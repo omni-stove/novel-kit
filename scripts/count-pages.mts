@@ -10,7 +10,10 @@ import { statSync } from 'fs';
 import { basename } from 'path';
 import {
   readLines,
+  trimBlankEdges,
   isMemoLine,
+  isTitleLine,
+  isGenreLine,
   isEpigraphLine,
   isPovLine,
   isViewpointLine,
@@ -28,8 +31,11 @@ function countPagesForFile(filePath) {
   let totalRows = 0;
   let charCount = 0;
 
-  for (const rawLine of readLines(filePath)) {
+  // 末尾の改行が生む空要素や前後の余白行は枚数に含めない
+  for (const rawLine of trimBlankEdges(readLines(filePath))) {
     if (isMemoLine(rawLine)) continue;
+    if (isTitleLine(rawLine)) continue;
+    if (isGenreLine(rawLine)) continue;
     if (isEpigraphLine(rawLine)) continue;
     if (isPovLine(rawLine)) continue;
     if (isSeparator(rawLine)) continue;
