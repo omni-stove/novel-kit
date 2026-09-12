@@ -43,7 +43,7 @@ import { basename } from 'path';
 import { PDFDocument, PDFArray, PDFRawStream, StandardFonts, rgb } from 'pdf-lib';
 import {
   readLines, escapeXml,
-  isMemoLine, isTitleLine, isPovLine, parsePovLine,
+  isMemoLine, isTitleLine, isGenreLine, isPovLine, parsePovLine,
   isEpigraphLine, parseEpigraphLine,
   isViewpointLine, isSeparator,
 } from './lib/text-parser.mts';
@@ -97,9 +97,9 @@ function isVerbatimSeparator(line) {
 
 export function smartQuotes(text) {
   return text
-    .replace(/(^|[\s([—–“])"/g, '$1“')
+    .replace(/(^|[\s([—–“]|<em>)"/g, '$1“')
     .replace(/"/g, '”')
-    .replace(/(^|[\s([—–“])'/g, '$1‘')
+    .replace(/(^|[\s([—–“]|<em>)'/g, '$1‘')
     .replace(/'/g, '’');
 }
 
@@ -108,8 +108,9 @@ export function formatInline(text, { curly = true } = {}) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
-  if (curly) t = smartQuotes(t);
+  // 引用符の開閉判定が<em>タグを文脈にできるよう、イタリック変換を先に行う
   t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  if (curly) t = smartQuotes(t);
   t = t.replace(/《《(.+?)》》/g, '<span class="emphasis">$1</span>');
   return t;
 }
@@ -117,7 +118,7 @@ export function formatInline(text, { curly = true } = {}) {
 // 1ファイルを解析して { blocks, chapterTitle, pov, epigraphs, hasViewpointStart, hasViewpointEnd } を返す
 export function parseEnglishFile(filePath) {
   const lines = readLines(filePath);
-  const isMeta = l => isMemoLine(l) || isTitleLine(l) || isPovLine(l) || isEpigraphLine(l);
+  const isMeta = l => isMemoLine(l) || isTitleLine(l) || isGenreLine(l) || isPovLine(l) || isEpigraphLine(l);
 
   const povLine = lines.find(l => isPovLine(l));
   const pov = povLine ? parsePovLine(povLine) : null;
@@ -632,6 +633,10 @@ if (import.meta.vitest) {
     });
     test('引用内のシングルクォート', () => {
       expect(smartQuotes(`"Bach. 'Jesu.'"`)).toBe('“Bach. ‘Jesu.’”');
+    });
+    test('イタリックと引用符の入れ子はどちらの順でも開閉が正しい', () => {
+      expect(formatInline('*"Execute."*')).toBe('<em>“Execute.”</em>');
+      expect(formatInline('"*Execute.*"')).toBe('“<em>Execute.</em>”');
     });
   });
 
