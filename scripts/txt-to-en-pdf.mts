@@ -31,6 +31,7 @@
  *   Epigraph: ...    章扉のエピグラフ
  *   Title: ...       無視
  *   Memo: ...        無視
+ *   Source: ...      無視
  *   *text*           イタリック
  *   《《text》》     傍点（文字上に点を打つ強調）
  *   ◇◇◇ / ■■■ 等    場面区切り（* * * として出力）
@@ -43,7 +44,7 @@ import { basename } from 'path';
 import { PDFDocument, PDFArray, PDFRawStream, StandardFonts, rgb } from 'pdf-lib';
 import {
   readLines, escapeXml,
-  isMemoLine, isTitleLine, isGenreLine, isPovLine, parsePovLine,
+  isMetaLine, isPovLine, parsePovLine,
   isEpigraphLine, parseEpigraphLine,
   isViewpointLine, isSeparator,
 } from './lib/text-parser.mts';
@@ -118,7 +119,6 @@ export function formatInline(text, { curly = true } = {}) {
 // 1ファイルを解析して { blocks, chapterTitle, pov, epigraphs, hasViewpointStart, hasViewpointEnd } を返す
 export function parseEnglishFile(filePath) {
   const lines = readLines(filePath);
-  const isMeta = l => isMemoLine(l) || isTitleLine(l) || isGenreLine(l) || isPovLine(l) || isEpigraphLine(l);
 
   const povLine = lines.find(l => isPovLine(l));
   const pov = povLine ? parsePovLine(povLine) : null;
@@ -127,7 +127,7 @@ export function parseEnglishFile(filePath) {
   // 本文行（メタ行・罫線を除く）の先頭/末尾が視点行かどうか
   const contentIdx = [];
   lines.forEach((l, i) => {
-    if (l.trim() !== '' && !isMeta(l) && !isRuleLine(l)) contentIdx.push(i);
+    if (l.trim() !== '' && !isMetaLine(l) && !isRuleLine(l)) contentIdx.push(i);
   });
   const hasViewpointStart = contentIdx.length > 0 && isViewpointLine(lines[contentIdx[0]]);
   const hasViewpointEnd = contentIdx.length > 0 && isViewpointLine(lines[contentIdx[contentIdx.length - 1]]);
@@ -138,7 +138,7 @@ export function parseEnglishFile(filePath) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (isMeta(line) || isRuleLine(line) || i === endViewpointLineIndex) continue;
+    if (isMetaLine(line) || isRuleLine(line) || i === endViewpointLineIndex) continue;
 
     if (line.trim() === '') {
       blocks.push({ type: 'space' });

@@ -12,7 +12,7 @@ import {
   getFilteredLines,
   fileHasViewpointStart,
   isEpigraphLine,
-  isMemoLine,
+  isMetaLine,
   isViewpointLine,
   trimBlankEdges,
   countChars,
@@ -96,9 +96,9 @@ export function findSidecarFile(inputFiles, inputPaths, filename) {
   return null;
 }
 
-// あらすじファイルを本文行だけにする（Memo: と【】行を除き、前後の空行を詰める）
+// あらすじファイルを本文行だけにする（メタ行と【】行を除き、前後の空行を詰める）
 export function loadSynopsisLines(filePath) {
-  return trimBlankEdges(readLines(filePath).filter(l => !isMemoLine(l) && !isViewpointLine(l)));
+  return trimBlankEdges(readLines(filePath).filter(l => !isMetaLine(l) && !isViewpointLine(l)));
 }
 
 /**

@@ -15,6 +15,11 @@ export function isMemoLine(line) {
   return line.startsWith('Memo:');
 }
 
+// /write が出力先の先頭に書く元ファイル（プロット等）への参照行
+export function isSourceLine(line) {
+  return line.startsWith('Source:');
+}
+
 export function isTitleLine(line) {
   return line.startsWith('Title:');
 }
@@ -58,8 +63,10 @@ export function applyViewpointLabel(line, label) {
     : line.replace(/^【】/, `【${label}】`);
 }
 
-function isMetaLine(line) {
-  return isMemoLine(line) || isTitleLine(line) || isGenreLine(line) || isEpigraphLine(line) || isPovLine(line);
+// 本文として印刷・集計しない行（Memo: / Source: / Title: / Genre: / Epigraph: / POV:）。
+// メタ行の種類を増やすときはここに足す（manuscript-count.sh の is_meta_line も揃える）
+export function isMetaLine(line) {
+  return isMemoLine(line) || isSourceLine(line) || isTitleLine(line) || isGenreLine(line) || isEpigraphLine(line) || isPovLine(line);
 }
 
 function analyzeLines(lines) {
@@ -94,9 +101,8 @@ function analyzeLines(lines) {
 function selectBodyLines(lines, endViewpointLineIndex, { keepEpigraphs = false, keepPov = false } = {}) {
   const result = [];
   for (let i = 0; i < lines.length; i++) {
-    if (isMemoLine(lines[i]) || isTitleLine(lines[i]) || isGenreLine(lines[i])) continue;
-    if (!keepEpigraphs && isEpigraphLine(lines[i])) continue;
-    if (!keepPov && isPovLine(lines[i])) continue;
+    const kept = (keepEpigraphs && isEpigraphLine(lines[i])) || (keepPov && isPovLine(lines[i]));
+    if (isMetaLine(lines[i]) && !kept) continue;
     if (i === endViewpointLineIndex) continue;
     result.push(lines[i]);
   }
@@ -629,6 +635,7 @@ if (import.meta.vitest) {
   describe('isMemoLine / isEpigraphLine / isPovLine', () => {
     test('\u30D7\u30EC\u30D5\u30A3\u30C3\u30AF\u30B9\u4E00\u81F4\u3067true', () => {
       expect(isMemoLine('Memo: \u306A\u306B\u304B')).toBe(true);
+      expect(isSourceLine('Source: src/x/plot/000.md')).toBe(true);
       expect(isTitleLine('Title: \u984C\u540D')).toBe(true);
       expect(isGenreLine('Genre: SF')).toBe(true);
       expect(isEpigraphLine('Epigraph: \u5F15\u7528')).toBe(true);
@@ -636,14 +643,15 @@ if (import.meta.vitest) {
     });
     test('\u30D7\u30EC\u30D5\u30A3\u30C3\u30AF\u30B9\u304C\u306A\u3051\u308C\u3070false', () => {
       expect(isMemoLine('memo: \u5C0F\u6587\u5B57')).toBe(false);
+      expect(isSourceLine('source: \u5C0F\u6587\u5B57')).toBe(false);
       expect(isEpigraphLine(' Epigraph: \u5148\u982D\u7A7A\u767D')).toBe(false);
       expect(isPovLine('\u672C\u6587')).toBe(false);
     });
   });
 
   describe('getBodyLinesFromContent', () => {
-    test('Memo/Title/Genre\u884C\u306F\u672C\u6587\u304B\u3089\u9664\u304F', () => {
-      const { lines } = getBodyLinesFromContent('Memo: plot.md\nTitle: T\nGenre: SF\n\n\u672C\u6587\u3002\n');
+    test('Memo/Source/Title/Genre\u884C\u306F\u672C\u6587\u304B\u3089\u9664\u304F', () => {
+      const { lines } = getBodyLinesFromContent('Memo: plot.md\nSource: plot/000.md\nTitle: T\nGenre: SF\n\n\u672C\u6587\u3002\n');
       expect(lines).toEqual(['', '\u672C\u6587\u3002', '']);
     });
   });
