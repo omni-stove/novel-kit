@@ -124,7 +124,7 @@ function parsePlainTextFile(filePath, vertical = true) {
     if (line.trim() === '') {
       htmlParts.push('<p class="empty">&nbsp;</p>');
     } else {
-      htmlParts.push(`<p>${escapeHtml(line, { vertical })}</p>`);
+      htmlParts.push(`<p>${escapeHtml(line, { vertical, rubyLayout: true })}</p>`);
     }
   }
 

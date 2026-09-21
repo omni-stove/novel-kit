@@ -104,4 +104,27 @@ export const VERTICAL_GLYPH_CSS = `
       transform: translateY(-50%);
       white-space: nowrap;
     }
+
+    /* escapeHtml の rubyLayout が字数から決めた配置（--rt-* は rt の em、--rb-* は親文字の em）。
+       ルビが短ければ字間を空けて親文字いっぱいに広げ、長ければ親文字側の字間・前後のアキを広げる */
+    ruby.fit {
+      white-space: nowrap;
+      padding-inline: calc(var(--rb-pad, 0) * 1em);
+    }
+
+    .ruby-gap {
+      display: inline-block;
+      inline-size: calc(var(--rb-gap, 0) * 1em);
+    }
+
+    ruby.fit > rt {
+      top: auto;
+      left: auto;
+      margin-left: 0;
+      inset-inline-start: calc(var(--rt-off, 0) * 1em);
+      inset-block-end: 100%;
+      margin-block-end: -0.4em;
+      transform: none;
+      letter-spacing: calc(var(--rt-ls, 0) * 1em);
+    }
 `;

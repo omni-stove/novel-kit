@@ -172,7 +172,57 @@ export function escapeXml(text) {
     .replace(/"/g, '&quot;');
 }
 
-export function escapeHtml(text, { vertical = true, separateSymbolClasses = false } = {}) {
+
+// ルビ1字は親文字の半分の大きさ。以下の長さの単位は親文字の em
+const RUBY_SCALE = 0.5;
+// ルビが隣の文字へはみ出してよい量の上限（ルビ1字分）
+const RUBY_MAX_OVERHANG = 0.5;
+const KANA_OR_SPACE_RE = /[ぁ-ゖァ-ヺー　 ]/;
+// 1字ずつ <ruby> に分割しても processInnerText の結果が変わらない文字だけからなるか
+const RUBY_SPLIT_SAFE_VERTICAL_RE = /^[぀-ヿ㐀-鿿豈-﫿々〆A-Za-z 　]+$/;
+const RUBY_SPLIT_SAFE_HORIZONTAL_RE = /^[぀-ヿ㐀-鿿豈-﫿々〆　]+$/;
+const RUBY_ASCII_ROMAN_RE = /\b(XII|XI|VIII|VII|VI|IX|IV|III|II)\b/;
+
+// ルビがはみ出してよい隣接文字か。かな・空白に加え、ルビ側の半分が空いている約物
+// （前なら句読点・閉じ括弧、後ろなら開き括弧）を許す
+function rubyOverhangCap(ch, side) {
+  if (!ch) return 0;
+  if (KANA_OR_SPACE_RE.test(ch)) return RUBY_MAX_OVERHANG;
+  const punct = side === 'before' ? '、。，．」』）〕】〉' : '「『（〔【〈';
+  return punct.includes(ch) ? RUBY_MAX_OVERHANG : 0;
+}
+
+// 組み上がりの字数（1字＝1em のセル数）。縦書きでは2桁数字と !? の対が縦中横で1セルになり、
+// 横書きでは半角が半分の幅になる
+function rubyCellCount(text, vertical) {
+  if (!vertical) return [...text].reduce((sum, c) => sum + (/[\x20-\x7E]/.test(c) ? 0.5 : 1), 0);
+  return [...text.replace(/(?<![\d.,])\d{2}(?![\d.,])/g, '0').replace(/[!?！？]{2}/g, '！')].length;
+}
+
+/**
+ * 親文字 n 字・ルビ m 字の配置を決める。
+ *   ルビが短い → 親文字の長さに合わせて 1:2:1 で均等配置（gap＝ルビの字間、rtStart＝先頭のアキ）。
+ *                字数が同じなら1字ずつ親文字の真横に来る
+ *   ルビが長い → まず前後の文字へはみ出させ（rtStart が負）、余りは親文字の字間を広げて吸収（widen）
+ */
+export function layoutRuby(n, m, capBefore = 0, capAfter = 0) {
+  const baseLen = n;
+  const rubyLen = m * RUBY_SCALE;
+  if (rubyLen <= baseLen) {
+    // 字間はルビ1字分（＝字数が同じときの空き）まで。それ以上は間延びするので全体を中央に寄せる
+    const gap = Math.min((baseLen - rubyLen) / m, RUBY_SCALE);
+    return { gap, rtStart: (baseLen - rubyLen - gap * (m - 1)) / 2, widen: 0 };
+  }
+  const excess = rubyLen - baseLen;
+  let before = Math.min(capBefore, excess / 2);
+  const after = Math.min(capAfter, excess - before);
+  before = Math.min(capBefore, excess - after);
+  return { gap: 0, rtStart: -before, widen: excess - before - after };
+}
+
+const cssNum = (v) => String(Math.round(v * 1000) / 1000);
+
+export function escapeHtml(text, { vertical = true, separateSymbolClasses = false, rubyLayout = false } = {}) {
   const rubyPlaceholders = [];
   const emphasisPlaceholders = [];
 
@@ -266,6 +316,45 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return r;
   }
 
+  // 字数に合わせて配置したルビ。CSS（lib/html.mts の ruby.fit）がカスタムプロパティを読む。
+  // rt 側の値は rt 自身の em（親文字の半分）で持つ
+  function fittedRubyHtml({ base, ruby, prev, prevShared, next, nextShared }) {
+    const n = rubyCellCount(base, vertical);
+    const m = rubyCellCount(ruby, vertical);
+    const capBefore = rubyOverhangCap(prev, 'before') / (prevShared ? 2 : 1);
+    const capAfter = rubyOverhangCap(next, 'after') / (nextShared ? 2 : 1);
+    const { gap, rtStart, widen } = layoutRuby(n, m, capBefore, capAfter);
+    const rtVars = (start) => `--rt-off:${cssNum(start / RUBY_SCALE)};--rt-ls:${cssNum(gap / RUBY_SCALE)}`;
+
+    // ルビが親文字に収まるなら親文字1字ごとの <ruby> に分け、途中で行が折り返せるようにする。
+    // 各ルビ文字は均等配置したときの中心が乗る親文字に付くので、見た目は分けない場合と変わらない
+    const splitSafe = vertical
+      ? (t) => RUBY_SPLIT_SAFE_VERTICAL_RE.test(t) && !RUBY_ASCII_ROMAN_RE.test(t)
+      : (t) => RUBY_SPLIT_SAFE_HORIZONTAL_RE.test(t);
+    if (widen === 0 && rtStart >= 0 && n >= 2 && splitSafe(base) && splitSafe(ruby)) {
+      const charStart = (k) => rtStart + k * (RUBY_SCALE + gap);
+      const cells = [...base].map(() => []);
+      [...ruby].forEach((c, k) => cells[Math.min(n - 1, Math.floor(charStart(k) + RUBY_SCALE / 2))].push({ c, k }));
+      return [...base].map((b, i) => {
+        if (cells[i].length === 0) return processInnerText(b);
+        const start = charStart(cells[i][0].k) - i;
+        const rt = processInnerText(cells[i].map(({ c }) => c).join(''));
+        return `<ruby class="fit" style="${rtVars(start)}">${processInnerText(b)}<rt>${rt}</rt></ruby>`;
+      }).join('');
+    }
+
+    // ルビが長い場合は親文字の前後を空け、1字ずつに分けられる親文字なら字間（span.ruby-gap）も均等に広げる
+    const vars = [rtVars(rtStart)];
+    let baseHtml = processInnerText(base);
+    if (widen > 0 && n >= 2 && splitSafe(base)) {
+      vars.push(`--rb-pad:${cssNum(widen / n / 2)}`, `--rb-gap:${cssNum(widen / n)}`);
+      baseHtml = [...base].map(processInnerText).join('<span class="ruby-gap"></span>');
+    } else if (widen > 0) {
+      vars.push(`--rb-pad:${cssNum(widen / 2)}`);
+    }
+    return `<ruby class="fit" style="${vars.join(';')}">${baseHtml}<rt>${processInnerText(ruby)}</rt></ruby>`;
+  }
+
   let result = text.replace(/<<(.+?)>>/g, (_, content) => {
     const idx = sidewaysPlaceholders.length;
     sidewaysPlaceholders.push(content);
@@ -278,17 +367,27 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return phEmphasis(idx);
   });
 
-  result = result.replace(/\|(.+?)《(.+?)》/g, (_, base, ruby) => {
+  result = result.replace(/\|(.+?)《(.+?)》/g, (match, base, ruby, offset, whole) => {
     const idx = rubyPlaceholders.length;
-    rubyPlaceholders.push({ base, ruby });
+    // 前後の1字（はみ出し可否の判定用）。傍点などのプレースホルダーは不可扱いになる
+    const before = [...whole.slice(0, offset)];
+    const after = [...whole.slice(offset + match.length)];
+    // 隣の1字を挟んで別のルビがある場合は、その1字を半分ずつ分け合う
+    rubyPlaceholders.push({
+      base, ruby,
+      prev: before.at(-1), prevShared: before.at(-2) === '》',
+      next: after[0], nextShared: after[1] === '|',
+    });
     return phRuby(idx);
   });
 
   result = processInnerText(result);
 
   result = result.replace(/\uE000([\uE010-\uEFFF])\uE000/g, (_, ch) => {
-    const { base, ruby } = rubyPlaceholders[ch.charCodeAt(0) - 0xE010];
-    return `<ruby>${processInnerText(base)}<rt>${processInnerText(ruby)}</rt></ruby>`;
+    const placeholder = rubyPlaceholders[ch.charCodeAt(0) - 0xE010];
+    const { base, ruby } = placeholder;
+    if (!rubyLayout) return `<ruby>${processInnerText(base)}<rt>${processInnerText(ruby)}</rt></ruby>`;
+    return fittedRubyHtml(placeholder);
   });
 
   result = result.replace(/\uE001([\uE010-\uEFFF])\uE001/g, (_, ch) => {
@@ -363,7 +462,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
 
   let lastWasViewpoint = false;
 
-  const escapeOpts = { vertical, separateSymbolClasses };
+  const escapeOpts = { vertical, separateSymbolClasses, rubyLayout: true };
 
   // エピグラフをプレーンな段落として挿入（PDF公募用：装飾なし）
   let pendingEpigraphs = epigraphs.length > 0 ? [...epigraphs] : null;
@@ -771,6 +870,36 @@ if (import.meta.vitest) {
     });
     test('\u30EB\u30D3 |\u89AA\u300A\u3075\u308A\u300B \u3092 <ruby> \u306B\u5909\u63DB', () => {
       expect(escapeHtml('|\u6F22\u5B57\u300A\u304B\u3093\u3058\u300B', { vertical: false })).toBe('<ruby>\u6F22\u5B57<rt>\u304B\u3093\u3058</rt></ruby>');
+    });
+    test('rubyLayout: 字数が同じなら親文字1字ごとに分け、ルビ1字ずつを真横に置く', () => {
+      expect(escapeHtml('|籠手《こて》', { rubyLayout: true })).toBe(
+        '<ruby class="fit" style="--rt-off:0.5;--rt-ls:1">籠<rt>こ</rt></ruby>'
+        + '<ruby class="fit" style="--rt-off:0.5;--rt-ls:1">手<rt>て</rt></ruby>');
+    });
+    test('rubyLayout: 短いルビは親文字の長さに均等配置し、中心が乗る親文字に付ける', () => {
+      expect(escapeHtml('|琥珀《こはく》', { rubyLayout: true })).toBe(
+        '<ruby class="fit" style="--rt-off:0.167;--rt-ls:0.333">琥<rt>こ</rt></ruby>'
+        + '<ruby class="fit" style="--rt-off:-0.5;--rt-ls:0.333">珀<rt>はく</rt></ruby>');
+    });
+    test('rubyLayout: 長いルビは前後のかなへはみ出させ、余りは親文字の前後を空ける', () => {
+      expect(escapeHtml('彼は|蹲《うずくま》る', { rubyLayout: true })).toBe(
+        '彼は<ruby class="fit" style="--rt-off:-1;--rt-ls:0">蹲<rt>うずくま</rt></ruby>る');
+      expect(escapeHtml('漢|志《こころざし》漢', { rubyLayout: true })).toBe(
+        '漢<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.75">志<rt>こころざし</rt></ruby>漢');
+    });
+    test('rubyLayout: 漢字に挟まれた長いルビは親文字の字間を均等に広げる', () => {
+      expect(escapeHtml('「|東恋《あずまれん》」', { rubyLayout: true })).toBe(
+        '「<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.125;--rb-gap:0.25">東<span class="ruby-gap"></span>恋<rt>あずまれん</rt></ruby>」');
+    });
+    test('layoutRuby: 字間はルビ1字分までで、それ以上は中央に寄せる', () => {
+      expect(layoutRuby(2, 2)).toEqual({ gap: 0.5, rtStart: 0.25, widen: 0 });
+      expect(layoutRuby(4, 1)).toEqual({ gap: 0.5, rtStart: 1.75, widen: 0 });
+      expect(layoutRuby(6, 3)).toEqual({ gap: 0.5, rtStart: 1.75, widen: 0 });
+    });
+    test('layoutRuby: はみ出しは許される側へ最大限使い、残りだけ親文字を広げる', () => {
+      expect(layoutRuby(1, 4, 0.5, 0.5)).toEqual({ gap: 0, rtStart: -0.5, widen: 0 });
+      expect(layoutRuby(1, 3, 0, 0.5)).toEqual({ gap: 0, rtStart: -0, widen: 0 });
+      expect(layoutRuby(1, 5, 0.5, 0)).toEqual({ gap: 0, rtStart: -0.5, widen: 1 });
     });
     test('\u508D\u70B9 \u300A\u300Atext\u300B\u300B \u3092 span.emphasis \u306B\u5909\u63DB', () => {
       expect(escapeHtml('\u300A\u300A\u5F37\u8ABF\u300B\u300B', { vertical: false })).toBe('<span class="emphasis">\u5F37\u8ABF</span>');
