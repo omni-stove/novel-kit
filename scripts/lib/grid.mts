@@ -20,7 +20,6 @@ export function countWrappedRows(line, cols, { hanging = true } = {}) {
   while (pos < chars.length) {
     rows++;
     if (chars.length - pos <= cols) break;
-    // cols+1 字目がぶら下げ対象ならその行に収める
     pos += hanging && HANGING_CHARS.includes(chars[pos + cols]) ? cols + 1 : cols;
   }
   return rows;

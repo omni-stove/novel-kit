@@ -43,17 +43,14 @@ import { readFileSync, writeFileSync, statSync, unlinkSync } from 'fs';
 import { basename } from 'path';
 import { PDFDocument, PDFArray, PDFRawStream, StandardFonts, rgb } from 'pdf-lib';
 import {
-  readLines, escapeXml,
-  isMetaLine, isPovLine, parsePovLine,
-  isEpigraphLine, parseEpigraphLine,
-  isViewpointLine, isSeparator,
+  readLines, getBodyLines, escapeXml,
+  isEpigraphLine, parseEpigraphLine, parseViewpointLine, isSeparator,
 } from './lib/text-parser.mts';
-import { requireInputFiles, resolvePartIndices } from './lib/manuscript.mts';
+import { requireInputFiles, resolvePartIndices, startsNewChapter } from './lib/manuscript.mts';
 import { chapterNumberWord } from './lib/english.mts';
 import { googleFontsLinks } from './lib/html.mts';
-import { parseCliArgs, ARG, fail, vivliostyleBuild, openFile, runMain } from './lib/cli.mts';
+import { parseCliArgs, ARG, buildPdfFromHtml, openFile, requireOutput, runMain } from './lib/cli.mts';
 
-// 判型定義
 const PAGE_SIZES = {
   '5x8': {
     name: '5×8in Trade Paperback', width: '5in', height: '8in',
@@ -116,61 +113,40 @@ export function formatInline(text, { curly = true } = {}) {
   return t;
 }
 
-// 1ファイルを解析して { blocks, chapterTitle, pov, epigraphs, hasViewpointStart, hasViewpointEnd } を返す
 export function parseEnglishFile(filePath) {
-  const lines = readLines(filePath);
-
-  const povLine = lines.find(l => isPovLine(l));
-  const pov = povLine ? parsePovLine(povLine) : null;
+  // 罫線（--- / * * *）は翻訳作業用の目印で、紙面にも章頭・章末の判定にも関わらせない
+  const { lines, hasViewpointStart, hasViewpointEnd, pov } = getBodyLines(
+    readLines(filePath).filter(l => !isRuleLine(l)),
+    { keepEpigraphs: true },
+  );
   const epigraphs = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
-
-  // 本文行（メタ行・罫線を除く）の先頭/末尾が視点行かどうか
-  const contentIdx = [];
-  lines.forEach((l, i) => {
-    if (l.trim() !== '' && !isMetaLine(l) && !isRuleLine(l)) contentIdx.push(i);
-  });
-  const hasViewpointStart = contentIdx.length > 0 && isViewpointLine(lines[contentIdx[0]]);
-  const hasViewpointEnd = contentIdx.length > 0 && isViewpointLine(lines[contentIdx[contentIdx.length - 1]]);
-  const endViewpointLineIndex = hasViewpointEnd ? contentIdx[contentIdx.length - 1] : -1;
+  const bodyLines = lines.filter(l => !isEpigraphLine(l));
+  const headingIndex = hasViewpointStart ? bodyLines.findIndex(l => l.trim() !== '') : -1;
 
   let chapterTitle = null;
   const blocks = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (isMetaLine(line) || isRuleLine(line) || i === endViewpointLineIndex) continue;
-
+  bodyLines.forEach((line, i) => {
     if (line.trim() === '') {
       blocks.push({ type: 'space' });
-      continue;
-    }
-
-    if (isSeparator(line) || isVerbatimSeparator(line)) {
+    } else if (isSeparator(line) || isVerbatimSeparator(line)) {
       blocks.push({ type: 'ornament', mark: isVerbatimSeparator(line) ? line.trim() : null });
-      continue;
-    }
-
-    if (isViewpointLine(line) && i === contentIdx[0]) {
-      const m = line.match(/^【(.*)】(.*)$/);
-      chapterTitle = m[1].trim() || null;
-      const rest = m[2].trim();
+    } else if (i === headingIndex) {
+      const { title, rest } = parseViewpointLine(line);
+      chapterTitle = title || null;
       if (rest) blocks.push({ type: 'para', text: rest });
-      continue;
+    } else {
+      blocks.push({ type: 'para', text: line.trim() });
     }
+  });
 
-    blocks.push({ type: 'para', text: line.trim() });
-  }
-
-  // 先頭・末尾の space/ornament をトリム
   while (blocks.length > 0 && blocks[0].type !== 'para') blocks.shift();
   while (blocks.length > 0 && blocks[blocks.length - 1].type !== 'para') blocks.pop();
 
   return { blocks, chapterTitle, pov, epigraphs, hasViewpointStart, hasViewpointEnd };
 }
 
-// ファイル列を章にまとめる。視点行で始まるファイル（または前ファイルが【】で終わる場合）が新章。
-// partFirstIndices（0始まりのファイルインデックス。先頭0を含む）を渡すと部を構成し、
-// 章番号は部ごとにリセットされる
+// partFirstIndices は先頭の 0 を含む（第1部にも部扉を付けるため）
 export function buildChapters(parsedFiles, partFirstIndices = null) {
   const partSet = partFirstIndices ? new Set(partFirstIndices) : null;
   const chapters = [];
@@ -179,10 +155,8 @@ export function buildChapters(parsedFiles, partFirstIndices = null) {
 
   parsedFiles.forEach((f, i) => {
     const startsPart = partSet !== null && partSet.has(i);
-    const prevEndsViewpoint = i > 0 && parsedFiles[i - 1].hasViewpointEnd;
-    const startsNewChapter = i === 0 || startsPart || f.hasViewpointStart || prevEndsViewpoint;
 
-    if (startsNewChapter) {
+    if (startsPart || startsNewChapter(parsedFiles, i)) {
       if (startsPart) {
         partNumber++;
         numberInPart = 0;
@@ -563,7 +537,7 @@ async function stampPageNumbers(pdfPath, size, { hasTitlePage }) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
-  if (!args.output) fail('出力ファイルを指定してください (-o output.pdf)');
+  requireOutput(args, 'output.pdf');
 
   const size = PAGE_SIZES[args.pageSize];
   console.log(`判型: ${size.name}`);
@@ -597,12 +571,8 @@ async function main() {
   }
 
   const html = generateHtml(chapters, size, args);
-  const htmlPath = args.output.replace(/\.pdf$/, '.html');
-  writeFileSync(htmlPath, html);
-
   console.log('\nPDF生成中...');
-  vivliostyleBuild(htmlPath, args.output);
-  unlinkSync(htmlPath);
+  unlinkSync(buildPdfFromHtml(html, args.output));
 
   const pageCount = await stampPageNumbers(args.output, size, { hasTitlePage: Boolean(args.title) });
   const fileSize = statSync(args.output).size;

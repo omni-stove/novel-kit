@@ -1,18 +1,8 @@
 import { execSync } from 'child_process';
+import { writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 
-/**
- * コマンドライン引数を解釈する。
- *   defs: [{ key, flags, takesValue?, parse?, value? }]
- *     takesValue: 次の引数（または --flag=value）を値として受け取る
- *     parse:      受け取った値を変換する
- *     value:      真偽フラグにセットする値（省略時 true）
- *   defaults: 各キーの初期値。省略したキーは takesValue なら null、
- *             value 指定のない真偽フラグなら false で初期化する
- *             （value 指定つきのフラグは defaults で初期値を与えること）。
- *   フラグでない引数は files に積む。
- */
 export function parseCliArgs(argv, defs, defaults = {}) {
   const result = { files: [] };
   for (const def of defs) {
@@ -50,12 +40,18 @@ export function parseList(value) {
   return value.split(',').map(s => s.trim()).filter(s => s.length > 0);
 }
 
-// 複数スクリプトで共通のフラグ定義
+export function parseGridSize(value) {
+  const [cols, rows] = value.split('x').map(Number);
+  if (!cols || !rows) fail('--size は 40x40 の形式（字数x行数）で指定してください');
+  return { cols, rows };
+}
+
 export const ARG = {
   output: { key: 'output', flags: ['-o', '--output'], takesValue: true },
   title: { key: 'title', flags: ['--title'], takesValue: true },
   author: { key: 'author', flags: ['--author'], takesValue: true },
   open: { key: 'open', flags: ['--open'] },
+  size: { key: 'size', flags: ['--size'], takesValue: true, parse: parseGridSize },
   // 部の境界となるファイル名プレフィックス（co-split の --splits と同形式）
   parts: { key: 'parts', flags: ['--part', '--parts'], takesValue: true, parse: parseList },
 };
@@ -63,6 +59,10 @@ export const ARG = {
 export function fail(message) {
   console.error(`エラー: ${message}`);
   process.exit(1);
+}
+
+export function requireOutput(args, example) {
+  if (!args.output) fail(`出力ファイルを指定してください (-o ${example})`);
 }
 
 /**
@@ -79,6 +79,14 @@ export function runMain(importMetaUrl, main) {
 
 export function vivliostyleBuild(htmlPath, outputPath, { quiet = false } = {}) {
   execSync(`./node_modules/.bin/vivliostyle build "${htmlPath}" -o "${outputPath}"`, { stdio: quiet ? 'pipe' : 'inherit' });
+}
+
+// 組版の崩れを調べられるよう、PDFの隣にHTMLも書き出す（不要なら呼び出し側で消す）
+export function buildPdfFromHtml(html, outputPath, opts) {
+  const htmlPath = outputPath.replace(/\.pdf$/, '.html');
+  writeFileSync(htmlPath, html);
+  vivliostyleBuild(htmlPath, outputPath, opts);
+  return htmlPath;
 }
 
 export function openFile(path) {
@@ -135,6 +143,13 @@ if (import.meta.vitest) {
       expect(args.parts).toBeNull();
       expect(args.open).toBe(false);
       expect(args.vertical).toBeUndefined();
+    });
+  });
+
+  describe('parseGridSize', () => {
+    test('字数x行数を { cols, rows } にする', () => {
+      expect(parseGridSize('42x34')).toEqual({ cols: 42, rows: 34 });
+      expect(parseCliArgs(['--size', '20x20'], [ARG.size]).size).toEqual({ cols: 20, rows: 20 });
     });
   });
 

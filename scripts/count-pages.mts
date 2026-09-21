@@ -1,87 +1,46 @@
 #!/usr/bin/env node
 /**
- * 400字詰め原稿用紙換算スクリプト
+ * 原稿用紙換算スクリプト
  *
  * 使い方:
- *   node scripts/count-pages.mts <file-or-dir>
+ *   node scripts/count-pages.mts [--size WxH] <file-or-dir>...
+ *
+ * オプション:
+ *   --size WxH   1枚の字詰め（省略時: 20x20 = 400字詰め原稿用紙）
  */
 
-import { statSync } from 'fs';
 import { basename } from 'path';
-import {
-  readLines,
-  trimBlankEdges,
-  isMetaLine,
-  isViewpointLine,
-  isSeparator,
-  stripInlineMarkup,
-} from './lib/text-parser.mts';
-import { getTextFilesFromDir } from './lib/manuscript.mts';
-import { countWrappedRows } from './lib/grid.mts';
-import { runMain } from './lib/cli.mts';
-
-const COLS = 20;
-const ROWS = 20;
-
-function countPagesForFile(filePath) {
-  let totalRows = 0;
-  let charCount = 0;
-
-  // 末尾の改行が生む空要素や前後の余白行は枚数に含めない
-  for (const rawLine of trimBlankEdges(readLines(filePath))) {
-    if (isMetaLine(rawLine)) continue;
-    if (isSeparator(rawLine)) continue;
-
-    const line = stripInlineMarkup(rawLine);
-
-    if (line.trim() === '') {
-      totalRows++;
-      continue;
-    }
-
-    // 視点行【】は章タイトルとして1行扱い
-    if (isViewpointLine(rawLine)) {
-      totalRows++;
-      charCount += [...stripInlineMarkup(rawLine.replace(/^【.*?】/, ''))].length;
-      continue;
-    }
-
-    totalRows += countWrappedRows(line, COLS);
-    charCount += [...line].length;
-  }
-
-  return { totalRows, pages: totalRows / ROWS, charCount };
-}
+import { readLines } from './lib/text-parser.mts';
+import { countGenkoRows, requireInputFiles } from './lib/manuscript.mts';
+import { parseCliArgs, ARG, runMain } from './lib/cli.mts';
 
 function main() {
-  const target = process.argv[2] || 'story.txt';
+  const args = parseCliArgs(process.argv.slice(2), [ARG.size], { size: { cols: 20, rows: 20 } });
+  const { cols, rows: rowsPerPage } = args.size;
+  const files = requireInputFiles(args.files);
+  const counts = files.map(f => countGenkoRows(readLines(f), cols));
+  const pagesOf = rows => (rows / rowsPerPage).toFixed(1);
 
-  if (statSync(target).isDirectory()) {
-    const files = getTextFilesFromDir(target);
-    let grandTotalRows = 0;
-    let grandTotalChars = 0;
-
-    console.log(`📁 ${target}`);
-    console.log('─'.repeat(50));
-
-    for (const file of files) {
-      const { totalRows, pages, charCount } = countPagesForFile(file);
-      grandTotalRows += totalRows;
-      grandTotalChars += charCount;
-      console.log(`  ${basename(file).padEnd(20)} ${totalRows.toString().padStart(5)}行  ${pages.toFixed(1).padStart(6)}枚  ${charCount.toLocaleString().padStart(8)}字`);
-    }
-
-    console.log('─'.repeat(50));
-    const grandPages = grandTotalRows / ROWS;
-    console.log(`  ${'合計'.padEnd(18)} ${grandTotalRows.toString().padStart(5)}行  ${grandPages.toFixed(1).padStart(6)}枚  ${grandTotalChars.toLocaleString().padStart(8)}字`);
+  if (files.length === 1) {
+    const [{ rows, chars }] = counts;
+    console.log(`📄 ${basename(files[0])}`);
+    console.log(`総行数: ${rows} 行`);
+    console.log(`${cols}字×${rowsPerPage}行: ${pagesOf(rows)} 枚`);
+    console.log(`文字数: ${chars.toLocaleString()} 字`);
     return;
   }
 
-  const { totalRows, pages, charCount } = countPagesForFile(target);
-  console.log(`📄 ${basename(target)}`);
-  console.log(`総行数: ${totalRows} 行`);
-  console.log(`400字詰め: ${pages.toFixed(1)} 枚`);
-  console.log(`文字数: ${charCount.toLocaleString()} 字`);
+  const row = (name, { rows, chars }) =>
+    `  ${name} ${rows.toString().padStart(5)}行  ${pagesOf(rows).padStart(6)}枚  ${chars.toLocaleString().padStart(8)}字`;
+
+  console.log(`📁 ${args.files.join(' ')}（${cols}字×${rowsPerPage}行）`);
+  console.log('─'.repeat(50));
+  files.forEach((f, i) => console.log(row(basename(f).padEnd(20), counts[i])));
+  console.log('─'.repeat(50));
+  console.log(row('合計'.padEnd(18), {
+    rows: counts.reduce((n, c) => n + c.rows, 0),
+    chars: counts.reduce((n, c) => n + c.chars, 0),
+  }));
 }
 
 runMain(import.meta.url, main);

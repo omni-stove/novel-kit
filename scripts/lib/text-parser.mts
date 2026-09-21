@@ -55,16 +55,19 @@ export function isViewpointLine(line) {
   return /^【.*】/.test(line);
 }
 
+// 【章題】の後ろに本文が続く書き方（英語原稿など）があるため、見出しと残りに分ける
+export function parseViewpointLine(line) {
+  const match = line.match(/^【(.*)】(.*)$/);
+  return match ? { title: match[1].trim(), rest: match[2].trim() } : { title: '', rest: '' };
+}
+
 export function applyViewpointLabel(line, label) {
-  const match = line.match(/^【(.*)】/);
-  const title = match ? match[1].trim() : '';
+  const { title } = parseViewpointLine(line);
   return title
     ? line.replace(/^【.*】/, `【${label}　${title}】`)
     : line.replace(/^【】/, `【${label}】`);
 }
 
-// 本文として印刷・集計しない行（Memo: / Source: / Title: / Genre: / Epigraph: / POV:）。
-// メタ行の種類を増やすときはここに足す（manuscript-count.sh の is_meta_line も揃える）
 export function isMetaLine(line) {
   return isMemoLine(line) || isSourceLine(line) || isTitleLine(line) || isGenreLine(line) || isEpigraphLine(line) || isPovLine(line);
 }
@@ -115,7 +118,6 @@ export function trimBlankEdges(lines) {
   return lines;
 }
 
-// 改行で分割する。CRLF の CR は落とす
 export function splitLines(content) {
   return content.split('\n').map(l => l.replace(/\r$/, ''));
 }
@@ -124,21 +126,14 @@ export function readLines(filePath) {
   return splitLines(readFileSync(filePath, 'utf-8'));
 }
 
-// 空白（改行・全角スペース含む）を除いた字数。記法の除去は呼び出し側で行う
+// 記法の除去は呼び出し側で行う（ルビを括弧で残すかどうかが出力先ごとに違うため）
 export function countTextChars(text) {
   return [...text.replace(/\s/g, '')].length;
 }
 
 const INLINE_MARKUP_RE = /《《(.+?)》》|\|(.+?)《(.+?)》|<<(.+?)>>|\*([^*]+)\*/g;
 
-/**
- * インライン記法をトークン列に分解する。
- *   { type: 'text', text }        通常テキスト
- *   { type: 'emphasis', text }    《《傍点》》
- *   { type: 'ruby', base, ruby }  |親文字《ルビ》
- *   { type: 'sideways', text }    <<横倒し>>（縦書き用。中身にルビ記法を含みうる）
- *   { type: 'italic', text }      *イタリック*（英語原稿用）
- */
+// sideways の中身にはルビ記法が入りうるので、text は未解釈のまま返す
 export function tokenizeInlineMarkup(text) {
   const tokens = [];
   let last = 0;
@@ -154,7 +149,6 @@ export function tokenizeInlineMarkup(text) {
   return tokens;
 }
 
-// 記法を外して表示されるテキストだけにする（字数カウントや書式なし出力用）
 export function stripInlineMarkup(text, { rubyParens = false } = {}) {
   return tokenizeInlineMarkup(text).map(t => {
     if (t.type === 'ruby') return rubyParens ? `${t.base}（${t.ruby}）` : t.base;
@@ -163,7 +157,6 @@ export function stripInlineMarkup(text, { rubyParens = false } = {}) {
   }).join('');
 }
 
-// XML/HTML のテキストノード用エスケープ
 export function escapeXml(text) {
   return text
     .replace(/&/g, '&amp;')
@@ -243,23 +236,19 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   };
 
   function processInnerText(t) {
-    let r = t
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    let r = escapeXml(t);
     // 半角スペースを全角スペース(U+3000)に変換し、半角・全角どちらも一文字分の幅で保持する。
     // U+3000 はHTMLの連続空白コラプス対象外なので、複数スペースや行頭・行末でも潰れない
     // （CSSの text-spacing-trim: space-all により全角スペースは行頭でもトリムされない）。
     r = r.replace(/ /g, '　');
     if (vertical) {
-      // ASCII\u30ED\u30FC\u30DE\u6570\u5B57\uFF08II\u301CXII\uFF09\u306FUnicode\u306E\u5358\u4E00\u30B3\u30FC\u30C9\u30DD\u30A4\u30F3\u30C8\u306B\u6B63\u898F\u5316\u3057\u3066upright\u3067\u7ACB\u3066\u308B\u3002
-      // text-combine-upright: all \u306FChromium/Vivliostyle\u3067\u5B57\u5E45\u5DEE\u306E\u3042\u308B\u7D44\uFF08IV\u7B49\uFF09\u304C\u53F3\u306B\u5BC4\u308B\u305F\u3081\u4F7F\u308F\u306A\u3044\u3002
+      // ASCIIローマ数字（II〜XII）はUnicodeの単一コードポイントに正規化してuprightで立てる。
+      // text-combine-upright: all はChromium/Vivliostyleで字幅差のある組（IV等）が右に寄るため使わない。
       const asciiRomanMap = {
         'II': '\u2161', 'III': '\u2162', 'IV': '\u2163', 'VI': '\u2165',
         'VII': '\u2166', 'VIII': '\u2167', 'IX': '\u2168', 'XI': '\u216A', 'XII': '\u216B',
       };
-      r = r.replace(/\b(XII|XI|VIII|VII|VI|IX|IV|III|II)\b/g, (match) => phSpan(`<span class="upright">${asciiRomanMap[match]}</span>`));
+      r = r.replace(new RegExp(RUBY_ASCII_ROMAN_RE, 'g'), (match) => phSpan(`<span class="upright">${asciiRomanMap[match]}</span>`));
       r = r.replace(/[\u2160-\u216B\u2170-\u217B]+/g, (match) => {
         return [...match].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
       });
@@ -284,8 +273,8 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       // U+00D7（×）と U+00F7（÷）は数学記号なので除外。
       const latinChar = 'a-zA-Z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u024F\\u1E00-\\u1EFF';
       const latinRe = new RegExp(`[${latinChar}]+(?:\\s[${latinChar}]+)*`, 'g');
-      // 1\u6587\u5B57\u305A\u3064\u72EC\u7ACB\u3057\u305F\u6B63\u65B9\u30BB\u30EB\u306B\u53CE\u3081\u308B\u3053\u3068\u3067\u3001y/g/p/j \u306E\u30C7\u30A3\u30BB\u30F3\u30C0\u304C\u30D9\u30FC\u30B9\u30E9\u30A4\u30F3\u3067
-      // \u4E0B\u306B\u305A\u308C\u306A\u3044\u3088\u3046\u306B\u3059\u308B\uFF08CSS .latin \u5074\u3067 text-combine-upright: all \u3092\u9069\u7528\uFF09\u3002
+      // 1文字ずつ独立した正方セルに収めることで、y/g/p/j のディセンダがベースラインで
+      // 下にずれないようにする（CSS .latin 側で text-combine-upright: all を適用）。
       r = r.replace(latinRe, (match) => {
         return [...match].map(c => /\s/.test(c) ? c : phSpan(`<span class="latin">${c}</span>`)).join('');
       });
@@ -398,7 +387,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   result = result.replace(/\uE003([\uE010-\uEFFF])\uE003/g, (_, ch) => {
     let content = sidewaysPlaceholders[ch.charCodeAt(0) - 0xE010];
     // 先にHTMLエスケープ（《》| はHTMLエンティティではないので残る）
-    content = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    content = escapeXml(content);
     content = content.replace(/\|(.+?)《(.+?)》/g, (_, base, ruby) => `<ruby>${base}<rt>${ruby}</rt></ruby>`);
     return `<span class="sideways-latin">${content}</span>`;
   });
@@ -429,8 +418,6 @@ export function epigraphFitsOneLine(quote, source, chars) {
   return epigraphSourceLength(quote) + epigraphSourceLength(`——${source}`) <= chars - 1;
 }
 
-// エピグラフを表示行に分ける。1行に収まるなら「引用——出典」の1行、
-// 収まらなければ引用行と「——出典」行（出典がなければ引用行のみ）
 export function epigraphDisplayLines(quote, source, chars = null) {
   if (epigraphFitsOneLine(quote, source, chars)) return [`${quote}——${source}`];
   return source ? [quote, `——${source}`] : [quote];
@@ -438,7 +425,6 @@ export function epigraphDisplayLines(quote, source, chars = null) {
 
 function epigraphsToHtml(epigraphs, escapeOpts, chars = null) {
   return epigraphs.map(({ quote, source }) => {
-    // 本文＋引用元が1行に収まる場合はまとめて1行で出す
     if (epigraphFitsOneLine(quote, source, chars)) {
       return `<p class="epigraph-line">${escapeHtml(`${quote}——${source}`, escapeOpts)}</p>`;
     }
@@ -518,7 +504,6 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       lastWasViewpoint = false;
     }
 
-    // 視点行がないファイルの場合、先頭の本文前にエピグラフを挿入し、空行を1つ挟む
     if (pendingEpigraphs) {
       htmlParts.push(`<div class="epigraph">\n${epigraphsToHtml(pendingEpigraphs, escapeOpts, chars)}\n</div>`);
       htmlParts.push('<p class="empty">&nbsp;</p>');
@@ -550,10 +535,7 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   let chapterTitle = null;
   if (hasViewpointStart) {
     const firstLine = sectionNumber !== null ? applyViewpointLabel(firstContentLine, sectionNumber) : firstContentLine;
-    const match = firstLine.match(/^【(.+?)】/);
-    if (match && match[1]) {
-      chapterTitle = match[1];
-    }
+    chapterTitle = parseViewpointLine(firstLine).title || null;
   }
 
   // 先頭・末尾の空行をトリム（セクション結合時の余分なスペースを防ぐ）
@@ -595,7 +577,6 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
       continue;
     }
 
-    // 視点行がないファイルの場合、先頭の本文前にエピグラフを挿入
     if (pendingEpigraph) {
       xhtmlParts.push(pendingEpigraph);
       pendingEpigraph = null;
@@ -614,8 +595,11 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
   };
 }
 
-export function getBodyLinesFromContent(content, { keepEpigraphs = false, keepPov = false } = {}) {
-  const lines = splitLines(content);
+export function getBodyLinesFromContent(content, opts = {}) {
+  return getBodyLines(splitLines(content), opts);
+}
+
+export function getBodyLines(lines, { keepEpigraphs = false, keepPov = false } = {}) {
   const { hasViewpointStart, hasViewpointEnd, endViewpointLineIndex, pov } = analyzeLines(lines);
   return {
     lines: selectBodyLines(lines, endViewpointLineIndex, { keepEpigraphs, keepPov }),
@@ -626,7 +610,7 @@ export function getBodyLinesFromContent(content, { keepEpigraphs = false, keepPo
 }
 
 export function getFilteredLines(filePath, opts = {}) {
-  return getBodyLinesFromContent(readFileSync(filePath, 'utf-8'), opts);
+  return getBodyLines(readLines(filePath), opts);
 }
 
 // parseTextFile の hasViewpointStart と同じ条件で、パースせずに事前判定する
@@ -650,8 +634,8 @@ export function countChars(html) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    // \u6539\u884C\u30FB\u30BF\u30D6\u30FB&nbsp;\uFF08\u7A7A\u884C\u30D7\u30EC\u30FC\u30B9\u30DB\u30EB\u30C0\uFF09\u306E\u307F\u9664\u5916\u3002
-    // \u5B57\u4E0B\u3052\u306E\u5168\u89D2\u30B9\u30DA\u30FC\u30B9\u7B49\u306F\u539F\u7A3F\u306E\u30DE\u30B9\u3068\u3057\u3066\u6570\u3048\u308B\uFF08\u898F\u5B9A\u30C1\u30A7\u30C3\u30AF\u3068\u540C\u3058\u57FA\u6E96\uFF09
+    // 改行・タブ・&nbsp;（空行プレースホルダ）のみ除外。
+    // 字下げの全角スペース等は原稿のマスとして数える（規定チェックと同じ基準）
     .replace(/[\r\n\t\u00A0]/g, '');
   return [...text].length;
 }
@@ -803,6 +787,13 @@ if (import.meta.vitest) {
     });
   });
 
+  describe('parseViewpointLine', () => {
+    test('章題と、同じ行に続く本文とに分ける', () => {
+      expect(parseViewpointLine('【　夜　】It was late.')).toEqual({ title: '夜', rest: 'It was late.' });
+      expect(parseViewpointLine('【】')).toEqual({ title: '', rest: '' });
+    });
+  });
+
   describe('applyViewpointLabel', () => {
     test('\u7A7A\u306E\u3010\u3011\u306F\u30E9\u30D9\u30EB\u3060\u3051\u304C\u5165\u308B', () => {
       expect(applyViewpointLabel('\u3010\u3011', '1-2')).toBe('\u30101-2\u3011');
@@ -856,7 +847,7 @@ if (import.meta.vitest) {
       expect(escapeHtml('1-1', { vertical: true, separateSymbolClasses: true })).toBe('<span class="tcy">1</span><span class="dash">\uFF0D</span><span class="tcy">1</span>');
     });
     test('\u7E26\u66F8\u304D\u3067\u30A2\u30AF\u30BB\u30F3\u30C8\u4ED8\u304D\u30E9\u30C6\u30F3\u6587\u5B57\u3082 latin \u30AF\u30E9\u30B9\u3067\u7ACB\u3066\u308B', () => {
-      // 1\u6587\u5B57\u305A\u3064\u72EC\u7ACB\u3057\u305F span \u306B\u5206\u3051\u3066\u3001\u5404\u6587\u5B57\u3092 text-combine-upright \u3067\u6B63\u65B9\u30BB\u30EB\u306B\u53CE\u3081\u308B
+      // 1文字ずつ独立した span に分けて、各文字を text-combine-upright で正方セルに収める
       expect(escapeHtml('ab', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>');
       expect(escapeHtml('C\u00F4te', { vertical: true })).toBe('<span class="latin">C</span><span class="latin">\u00F4</span><span class="latin">t</span><span class="latin">e</span>');
       expect(escapeHtml('\u00DCber', { vertical: true })).toBe('<span class="latin">\u00DC</span><span class="latin">b</span><span class="latin">e</span><span class="latin">r</span>');
@@ -919,9 +910,9 @@ if (import.meta.vitest) {
     test('\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u306F\u5168\u89D2\u30B9\u30DA\u30FC\u30B9(U+3000)\u306B\u5909\u63DB\u3055\u308C\u3001\u4E00\u6587\u5B57\u5206\u306E\u5E45\u3092\u4FDD\u3064', () => {
       expect(escapeHtml('\u3042 \u3044', { vertical: true })).toBe('\u3042\u3000\u3044');
       expect(escapeHtml('\u3042 \u3044', { vertical: false })).toBe('\u3042\u3000\u3044');
-      // \u9023\u7D9A\u3059\u308B\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u3082\u305D\u308C\u305E\u308C\u4E00\u6587\u5B57\u5206\u306B\uFF08\u30B3\u30E9\u30D7\u30B9\u3057\u306A\u3044\uFF09
+      // 連続する半角スペースもそれぞれ一文字分に（コラプスしない）
       expect(escapeHtml('\u3042  \u3044', { vertical: true })).toBe('\u3042\u3000\u3000\u3044');
-      // \u65E2\u5B58\u306E\u5168\u89D2\u30B9\u30DA\u30FC\u30B9\u306F\u305D\u306E\u307E\u307E
+      // 既存の全角スペースはそのまま
       expect(escapeHtml('\u3042\u3000\u3044', { vertical: true })).toBe('\u3042\u3000\u3044');
     });
     test('\u30E9\u30C6\u30F3\u8A9E\u9593\u306E\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u3082\u5168\u89D2\u5316\u3055\u308C\u5358\u8A9E\u9023\u7D50\u306F\u7DAD\u6301\u3055\u308C\u308B', () => {

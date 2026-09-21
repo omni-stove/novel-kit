@@ -39,44 +39,16 @@ import { PDFDocument, PDFName, rgb } from 'pdf-lib';
 import { readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { basename } from 'path';
 import { inflateSync } from 'zlib';
-import { escapeHtml, parseTextFile, readLines, getFilteredLines, isSeparator, isViewpointLine, countChars, stripInlineMarkup } from './lib/text-parser.mts';
+import { escapeHtml, parseTextFile, readLines, countChars } from './lib/text-parser.mts';
 import {
-  parseWithSectionNumbering, logSections, requireInputFiles, resolvePartIndices, findSidecarFile,
-  SYNOPSIS_FILENAME, CHARACTERS_FILENAME,
+  parseWithSectionNumbering, logSections, requireInputFiles, countGenkoRows, resolvePartIndices, findSidecarFile, startsNewChapter,
+  SYNOPSIS_FILENAME, CHARACTERS_FILENAME, FILE_SEPARATOR_MARK,
 } from './lib/manuscript.mts';
 import { googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mts';
-import { parseCliArgs, ARG, fail, vivliostyleBuild, openFile, runMain } from './lib/cli.mts';
+import { parseCliArgs, ARG, fail, requireOutput, buildPdfFromHtml, openFile, runMain } from './lib/cli.mts';
 
-function countManuscript(inputFiles, charsPerLine) {
-  // 半角英数は0.5文字幅で詰まるため、1行の容量を半角単位で持って行数を見積もる
-  const unitsPerLine = charsPerLine * 2;
-  const rowsFor = (line) => {
-    let units = 0;
-    for (const ch of line) units += /[0-9A-Za-z]/.test(ch) ? 1 : 2;
-    return Math.ceil(units / unitsPerLine);
-  };
-
-  let totalLines = 0;
-  let totalChars = 0;
-  for (const filePath of inputFiles) {
-    const { lines } = getFilteredLines(filePath);
-    let lastWasViewpoint = false;
-    for (const line of lines) {
-      if (line.trim() === '' || isSeparator(line)) {
-        totalLines += 1;
-        lastWasViewpoint = false;
-        continue;
-      }
-      // 視点行の直後の本文行は、視点行との間の空行1つ分を加算する
-      if (lastWasViewpoint && !isViewpointLine(line)) totalLines += 1;
-      const processed = stripInlineMarkup(line);
-      totalChars += [...processed].length;
-      totalLines += rowsFor(processed);
-      lastWasViewpoint = isViewpointLine(line);
-    }
-  }
-  return { totalLines, totalChars };
-}
+const EMPTY_LINE_HTML = '<p class="empty">&nbsp;</p>';
+const SEPARATOR_BLOCK_HTML = `${EMPTY_LINE_HTML}\n<p class="separator">${FILE_SEPARATOR_MARK}</p>\n${EMPTY_LINE_HTML}\n`;
 
 // 累積が targetChars 以上に達した時点で打ち切る。差分比較を <= にしているのは、
 // 同じ差分なら、より多く含む側を優先するため
@@ -139,7 +111,7 @@ function parseArgs(argv) {
     { key: 'pageBreak', flags: ['--no-page-break'], value: false },
     { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
     { key: 'vertical', flags: ['--horizontal'], value: false },
-    { key: 'size', flags: ['--size'], takesValue: true },
+    ARG.size,
     { key: 'limit', flags: ['--limit'], takesValue: true, parse: v => parseInt(v, 10) },
     { key: 'synopsisOnTitle', flags: ['--synopsis-on-title'] },
     { key: 'coverless', flags: ['--coverless'] },
@@ -150,9 +122,8 @@ function parseArgs(argv) {
     { key: 'pages', flags: ['--pages'], takesValue: true, parse: parsePageSpec },
   ], { pageBreak: true, chapterBreak: true, vertical: true, chars: null, lines: null });
   if (args.size) {
-    const [chars, lines] = args.size.split('x').map(Number);
-    args.chars = chars;
-    args.lines = lines;
+    args.chars = args.size.cols;
+    args.lines = args.size.rows;
   }
   return args;
 }
@@ -185,69 +156,27 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
   const explicitPartIndices = options.parts && options.parts.length > 0
     ? options.parts.map(p => p - 1).sort((a, b) => a - b).filter(i => i > 0 && i < sections.length)
     : null;
-  const partFirstIndices = explicitPartIndices
-    ? [0, ...explicitPartIndices]
-    : null;
-  const partOrderMap = partFirstIndices
-    ? new Map(partFirstIndices.map((idx, i) => [idx, i + 1]))
-    : null;
+  const partFirstIndexSet = explicitPartIndices ? new Set([0, ...explicitPartIndices]) : null;
+  // 部の内側と --no-chapter-break では章が変わっても改ページせず、空行1つで連結する
+  const chapterPageBreak = !partFirstIndexSet && options.chapterBreak !== false;
 
-  const stripLeadingEmpties = (html) => html.replace(/^(<p class="empty">&nbsp;<\/p>\n)+/, '');
-  const stripTrailingEmpties = (html) => html.replace(/(<p class="empty">&nbsp;<\/p>\n?)+$/, '');
-
-  const separatorBlock = '<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n';
+  const sectionDiv = (className, html) => `<div class="${className}">\n${html}\n</div>`;
 
   const sectionHtmls = sections.map((s, i) => {
-    const trimmedHtml = stripTrailingEmpties(s.html);
+    const html = s.html
+      .replace(/(<p class="empty">&nbsp;<\/p>\n?)+$/, '')
+      .replace(/^(<p class="empty">&nbsp;<\/p>\n)+/, '');
 
-    if (partFirstIndices) {
-      const partNum = partOrderMap.get(i);
-      if (partNum != null) {
-        const html = stripLeadingEmpties(trimmedHtml);
-        return `<div class="section page-break part-section">\n${html}\n</div>`;
-      }
-      const prevEndsViewpoint = i > 0 && sections[i - 1].hasViewpointEnd;
-      const isChapterBoundary = s.hasViewpointStart || prevEndsViewpoint;
-      if (i > 0 && !isChapterBoundary) {
-        const html = stripLeadingEmpties(trimmedHtml);
-        return `<div class="section">\n${separatorBlock}${html}\n</div>`;
-      }
-      if (i > 0 && isChapterBoundary) {
-        const html = stripLeadingEmpties(trimmedHtml);
-        return `<div class="section">\n<p class="empty">&nbsp;</p>\n${html}\n</div>`;
-      }
-      return `<div class="section">\n${trimmedHtml}\n</div>`;
-    }
-
-    const prevEndsViewpoint = i > 0 && sections[i - 1].hasViewpointEnd;
-
-    if (options.chapterBreak === false) {
-      if (i === 0) {
-        return `<div class="section">\n${trimmedHtml}\n</div>`;
-      }
-      const isChapterBoundary = s.hasViewpointStart || prevEndsViewpoint;
-      const html = stripLeadingEmpties(trimmedHtml);
-      if (isChapterBoundary) {
-        return `<div class="section">\n<p class="empty">&nbsp;</p>\n${html}\n</div>`;
-      }
-      return `<div class="section">\n${separatorBlock}${html}\n</div>`;
-    }
-
-    const needsPageBreak = i === 0 || s.hasViewpointStart || prevEndsViewpoint;
-    const className = (needsPageBreak && i > 0) ? 'section page-break' : 'section';
-
-    if (i > 0 && !needsPageBreak) {
-      const html = stripLeadingEmpties(trimmedHtml);
-      return `<div class="${className}">\n${separatorBlock}${html}\n</div>`;
-    }
-
-    let html = trimmedHtml;
-    if (needsPageBreak) {
-      html = stripLeadingEmpties(html);
-    }
-
-    return `<div class="${className}">\n${html}\n</div>`;
+    if (partFirstIndexSet?.has(i)) return sectionDiv('section page-break part-section', html);
+    if (i === 0) return sectionDiv('section', html);
+    if (!startsNewChapter(sections, i)) return sectionDiv('section', `${SEPARATOR_BLOCK_HTML}${html}`);
+    if (chapterPageBreak) return sectionDiv('section page-break', html);
+    return sectionDiv('section', `${EMPTY_LINE_HTML}\n${html}`);
   });
+
+  const coverlessHeading = options.coverless && options.title
+    ? `<p class="coverless-title">${options.title}</p>\n${options.author ? `<p class="coverless-author">${options.author}</p>\n` : ''}`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -320,8 +249,6 @@ ${googleFontsLinks('Noto+Serif+JP:wght@400')}
     }
 
 
-    .epigraph-page {
-    }
     .epigraph-page .viewpoint {
       text-align: start;
       text-indent: 0;
@@ -444,15 +371,10 @@ ${VERTICAL_GLYPH_CSS}
 </head>
 <body>
 ${(() => {
-  const coverlessHeading = options.coverless && options.title
-    ? `<p class="coverless-title">${options.title}</p>\n${options.author ? `<p class="coverless-author">${options.author}</p>\n` : ''}<p class="empty">&nbsp;</p>\n`
-    : '';
-
   if (options.coverless) {
-    const synopsisBlock = synopsisHtml
-      ? `<div class="synopsis-page">${coverlessHeading}${synopsisHtml}</div>`
+    return synopsisHtml
+      ? `<div class="synopsis-page">${coverlessHeading && `${coverlessHeading}${EMPTY_LINE_HTML}\n`}${synopsisHtml}</div>`
       : '';
-    return synopsisBlock;
   }
 
   if (options.title && options.synopsisOnTitle && synopsisHtml) {
@@ -469,10 +391,9 @@ ${(() => {
 })()}
 ${charactersHtml ? `<div class="characters-page"><h2 class="characters-heading">登場人物</h2>\n${charactersHtml}\n</div>` : ''}
 ${(() => {
-  if (!options.coverless || !options.title || sectionHtmls.length === 0) {
+  if (!coverlessHeading || sectionHtmls.length === 0) {
     return sectionHtmls.join('\n');
   }
-  const coverlessHeading = `<p class="coverless-title">${options.title}</p>\n${options.author ? `<p class="coverless-author">${options.author}</p>\n` : ''}`;
   const first = sectionHtmls[0].replace(/^(<div class="[^"]+">\n)/, `$1${coverlessHeading}`);
   return [first, ...sectionHtmls.slice(1)].join('\n');
 })()}
@@ -538,7 +459,7 @@ async function main() {
     }
   }
 
-  if (!args.countOnly && !args.output) fail('出力ファイルを指定してください (-o output.pdf)');
+  if (!args.countOnly) requireOutput(args, 'output.pdf');
 
   if (args.pages === null && process.argv.some(a => a === '--pages' || a.startsWith('--pages='))) {
     fail('--pages の指定が不正です（例: --pages 42 / 42-45 / 42,50,60-62）');
@@ -558,11 +479,10 @@ async function main() {
     args.parts = null;
 
     const targetChars = 20000;
-    const charsPerLine = args.chars || 30;
-    const charCounts = inputFiles.map(f => countManuscript([f], charsPerLine).totalChars);
+    const charCounts = inputFiles.map(f => countGenkoRows(readLines(f), args.chars || 30).chars);
     const bestEnd = selectReviewBoundary(charCounts, targetChars);
     const slice = inputFiles.slice(0, bestEnd);
-    const { totalChars: sliceChars } = countManuscript(slice, charsPerLine);
+    const sliceChars = charCounts.slice(0, bestEnd).reduce((n, c) => n + c, 0);
     console.log(`下読みモード: ${basename(inputFiles[0])} 〜 ${basename(inputFiles[bestEnd - 1])} (${slice.length}ファイル, ${sliceChars.toLocaleString()}字)`);
     inputFiles = slice;
   }
@@ -574,7 +494,9 @@ async function main() {
   }
 
   if (args.countOnly) {
-    const { totalLines, totalChars } = countManuscript(inputFiles, args.chars);
+    const counts = inputFiles.map(f => countGenkoRows(readLines(f), args.chars));
+    const totalLines = counts.reduce((n, c) => n + c.rows, 0);
+    const totalChars = counts.reduce((n, c) => n + c.chars, 0);
     const pages = totalLines / args.lines;
     const pagesCeil = Math.ceil(pages);
     console.log(`\n原稿用紙換算 (${args.chars}字×${args.lines}行)`);
@@ -617,13 +539,8 @@ async function main() {
 
   const html = generateHtml(sections, args, synopsisHtml, synopsisCharCount, charactersHtml);
 
-  // デバッグ用にHTMLも残す
-  const htmlPath = args.output.replace(/\.pdf$/, '.html');
-  writeFileSync(htmlPath, html);
-  console.log(`HTML出力: ${htmlPath}`);
-
   console.log('PDF生成中...');
-  vivliostyleBuild(htmlPath, args.output);
+  console.log(`HTML出力: ${buildPdfFromHtml(html, args.output)}`);
   const pdfBuffer = readFileSync(args.output);
 
   const pdfDoc = await PDFDocument.load(pdfBuffer);
@@ -642,10 +559,8 @@ async function main() {
   const hasFrontMatter = hasCover || (synopsisHtml && !args.synopsisOnTitle) || charactersHtml;
   if (hasFrontMatter) {
     const fmHtml = generateHtml([], args, synopsisHtml, synopsisCharCount, charactersHtml);
-    const fmHtmlPath = args.output.replace(/\.pdf$/, '.fm.html');
     const fmPdfPath = args.output.replace(/\.pdf$/, '.fm.pdf');
-    writeFileSync(fmHtmlPath, fmHtml);
-    vivliostyleBuild(fmHtmlPath, fmPdfPath, { quiet: true });
+    const fmHtmlPath = buildPdfFromHtml(fmHtml, fmPdfPath, { quiet: true });
     const fmDoc = await PDFDocument.load(readFileSync(fmPdfPath));
     removeBlankPages(fmDoc, hasCover ? 0 : -1);
     frontMatterPages = fmDoc.getPageCount();
@@ -719,7 +634,7 @@ async function main() {
 runMain(import.meta.url, main);
 
 if (import.meta.vitest) {
-  const { test, expect } = import.meta.vitest;
+  const { describe, test, expect } = import.meta.vitest;
 
   const makeSection = (overrides = {}) => ({
     html: '<p>本文</p>',
@@ -741,237 +656,248 @@ if (import.meta.vitest) {
     parts: null,
   };
 
-  const SEPARATOR_BLOCK = '<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n';
 
-  test('--part指定時: 部の境界は page-break part-section', () => {
-    const sections = [
-      makeSection({ html: '<p>1部1ファイル目</p>' }),
-      makeSection({ html: '<p>2部1ファイル目</p>' }),
-    ];
-    const html = generateHtml(sections, { ...baseOptions, parts: [2] });
+  describe('generateHtml', () => {
+    test('--part指定時: 部の境界は page-break part-section', () => {
+      const sections = [
+        makeSection({ html: '<p>1部1ファイル目</p>' }),
+        makeSection({ html: '<p>2部1ファイル目</p>' }),
+      ];
+      const html = generateHtml(sections, { ...baseOptions, parts: [2] });
 
-    const partSectionCount = (html.match(/page-break part-section/g) || []).length;
-    expect(partSectionCount).toBe(2);
-    expect(html).toMatch(/<div class="section page-break part-section">\s*<p>1部1ファイル目<\/p>/);
-    expect(html).toMatch(/<div class="section page-break part-section">\s*<p>2部1ファイル目<\/p>/);
-  });
-
-  test('--part指定時: 同一part内かつアンカーなしのファイル境界には◇◇◇が前後空行付きで挿入される', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>' }),
-      makeSection({ html: '<p>2ファイル目</p>' }),
-      makeSection({ html: '<p>3ファイル目</p>' }),
-    ];
-    const html = generateHtml(sections, { ...baseOptions, parts: [1] });
-
-    const separatorCount = (html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length;
-    expect(separatorCount).toBe(2);
-    expect(html).toMatch(new RegExp(`<div class="section">\\n${SEPARATOR_BLOCK.replace(/[/]/g, '\\/')}<p>2ファイル目<\\/p>`));
-    expect(html).toMatch(new RegExp(`<div class="section">\\n${SEPARATOR_BLOCK.replace(/[/]/g, '\\/')}<p>3ファイル目<\\/p>`));
-  });
-
-  test('--part指定時: 章アンカーがファイルを跨ぐ境界には◇◇◇は入らず、空行1つで連結', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
-      makeSection({
-        html: '<p class="viewpoint">【視点者】</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
-        hasViewpointStart: true,
-      }),
-    ];
-    const html = generateHtml(sections, { ...baseOptions, parts: [1] });
-
-    expect(html.includes('◇◇◇')).toBe(false);
-    expect((html.match(/page-break part-section/g) || []).length).toBe(1);
-    expect(html.includes('<div class="section page-break">')).toBe(false);
-    expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p class="viewpoint">【視点者】<\/p>/);
-  });
-
-  test('--part指定時: ファイル末尾の空行は剥がされる', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>\n<p class="empty">&nbsp;</p>\n<p class="empty">&nbsp;</p>' }),
-      makeSection({ html: '<p>2ファイル目</p>' }),
-    ];
-    const html = generateHtml(sections, { ...baseOptions, parts: [1] });
-
-    const firstDivMatch = html.match(/<div class="section page-break part-section">\n([\s\S]*?)<\/div>/);
-    expect(firstDivMatch).not.toBeNull();
-    expect(firstDivMatch[1].includes('<p class="empty">')).toBe(false);
-    expect(firstDivMatch[1]).toMatch(/<p>1ファイル目<\/p>/);
-  });
-
-  test('--part指定時: ファイル先頭の空行は◇◇◇境界で剥がされる', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>' }),
-      makeSection({ html: '<p class="empty">&nbsp;</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>' }),
-    ];
-    const html = generateHtml(sections, { ...baseOptions, parts: [1] });
-
-    expect(html).toMatch(/<p class="empty">&nbsp;<\/p>\n<p>2ファイル目<\/p>/);
-    expect(html).not.toMatch(/<p class="separator">◇◇◇<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>/);
-  });
-
-  test('--part未指定時: 視点切替で改ページ、それ以外は◇◇◇', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>' }),
-      makeSection({ html: '<p>2ファイル目</p>' }),
-      makeSection({
-        html: '<p class="viewpoint">【視点】</p>\n<p>3ファイル目</p>',
-        hasViewpointStart: true,
-      }),
-    ];
-    const html = generateHtml(sections, baseOptions);
-
-    const separatorCount = (html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length;
-    expect(separatorCount).toBe(1);
-    expect(html).toMatch(/<div class="section page-break">\n<p class="viewpoint">【視点】<\/p>/);
-  });
-
-  test('--part未指定時: 前ファイルが【】で終わると次ファイル先頭で改ページ', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
-      makeSection({ html: '<p>2ファイル目</p>' }),
-    ];
-    const html = generateHtml(sections, baseOptions);
-
-    expect(html.includes('◇◇◇')).toBe(false);
-    expect(html).toMatch(/<div class="section page-break">\n<p>2ファイル目<\/p>/);
-  });
-
-  test('--part未指定時: ◇◇◇は前後空行付きで挿入される', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>' }),
-      makeSection({ html: '<p>2ファイル目</p>' }),
-    ];
-    const html = generateHtml(sections, baseOptions);
-
-    expect(html).toMatch(new RegExp(`<div class="section">\\n${SEPARATOR_BLOCK.replace(/[/]/g, '\\/')}<p>2ファイル目<\\/p>`));
-  });
-
-  test('coverless: 最初のセクションの先頭（章頭/partの頭）の前に空行が入らない', () => {
-    const sections = [
-      makeSection({
-        html: '<p class="viewpoint">【視点】</p>\n<p>本文</p>',
-        hasViewpointStart: true,
-      }),
-    ];
-    const html = generateHtml(sections, {
-      ...baseOptions,
-      coverless: true,
-      title: 'タイトル',
-      author: '著者',
+      const partSectionCount = (html.match(/page-break part-section/g) || []).length;
+      expect(partSectionCount).toBe(2);
+      expect(html).toMatch(/<div class="section page-break part-section">\s*<p>1部1ファイル目<\/p>/);
+      expect(html).toMatch(/<div class="section page-break part-section">\s*<p>2部1ファイル目<\/p>/);
     });
 
-    expect(html).toMatch(/<p class="coverless-title">タイトル<\/p>\n<p class="coverless-author">著者<\/p>\n<p class="viewpoint">【視点】<\/p>/);
-    expect(html).not.toMatch(/<p class="coverless-author">著者<\/p>\n<p class="empty">/);
-  });
+    test('--part指定時: 同一part内かつアンカーなしのファイル境界には◇◇◇が前後空行付きで挿入される', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>' }),
+        makeSection({ html: '<p>2ファイル目</p>' }),
+        makeSection({ html: '<p>3ファイル目</p>' }),
+      ];
+      const html = generateHtml(sections, { ...baseOptions, parts: [1] });
 
-  test('coverless かつ --part指定時も最初のpart先頭の前に空行が入らない', () => {
-    const sections = [
-      makeSection({ html: '<p>1部本文</p>' }),
-      makeSection({ html: '<p>2部本文</p>' }),
-    ];
-    const html = generateHtml(sections, {
-      ...baseOptions,
-      coverless: true,
-      title: 'タイトル',
-      parts: [2],
+      const separatorCount = (html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length;
+      expect(separatorCount).toBe(2);
+      expect(html).toContain('<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>');
+      expect(html).toContain('<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>3ファイル目</p>');
     });
 
-    expect(html).toMatch(/<p class="coverless-title">タイトル<\/p>\n<p>1部本文<\/p>/);
-    expect(html).not.toMatch(/<p class="coverless-title">タイトル<\/p>\n<p class="empty">/);
+    test('--part指定時: 章アンカーがファイルを跨ぐ境界には◇◇◇は入らず、空行1つで連結', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
+        makeSection({
+          html: '<p class="viewpoint">【視点者】</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
+          hasViewpointStart: true,
+        }),
+      ];
+      const html = generateHtml(sections, { ...baseOptions, parts: [1] });
+
+      expect(html.includes('◇◇◇')).toBe(false);
+      expect((html.match(/page-break part-section/g) || []).length).toBe(1);
+      expect(html.includes('<div class="section page-break">')).toBe(false);
+      expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p class="viewpoint">【視点者】<\/p>/);
+    });
+
+    test('--part指定時: ファイル末尾の空行は剥がされる', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>\n<p class="empty">&nbsp;</p>\n<p class="empty">&nbsp;</p>' }),
+        makeSection({ html: '<p>2ファイル目</p>' }),
+      ];
+      const html = generateHtml(sections, { ...baseOptions, parts: [1] });
+
+      const firstDivMatch = html.match(/<div class="section page-break part-section">\n([\s\S]*?)<\/div>/);
+      expect(firstDivMatch).not.toBeNull();
+      expect(firstDivMatch[1].includes('<p class="empty">')).toBe(false);
+      expect(firstDivMatch[1]).toMatch(/<p>1ファイル目<\/p>/);
+    });
+
+    test('--part指定時: ファイル先頭の空行は◇◇◇境界で剥がされる', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>' }),
+        makeSection({ html: '<p class="empty">&nbsp;</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>' }),
+      ];
+      const html = generateHtml(sections, { ...baseOptions, parts: [1] });
+
+      expect(html).toMatch(/<p class="empty">&nbsp;<\/p>\n<p>2ファイル目<\/p>/);
+      expect(html).not.toMatch(/<p class="separator">◇◇◇<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>/);
+    });
+
+    test('--part未指定時: 視点切替で改ページ、それ以外は◇◇◇', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>' }),
+        makeSection({ html: '<p>2ファイル目</p>' }),
+        makeSection({
+          html: '<p class="viewpoint">【視点】</p>\n<p>3ファイル目</p>',
+          hasViewpointStart: true,
+        }),
+      ];
+      const html = generateHtml(sections, baseOptions);
+
+      const separatorCount = (html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length;
+      expect(separatorCount).toBe(1);
+      expect(html).toMatch(/<div class="section page-break">\n<p class="viewpoint">【視点】<\/p>/);
+    });
+
+    test('--part未指定時: 前ファイルが【】で終わると次ファイル先頭で改ページ', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
+        makeSection({ html: '<p>2ファイル目</p>' }),
+      ];
+      const html = generateHtml(sections, baseOptions);
+
+      expect(html.includes('◇◇◇')).toBe(false);
+      expect(html).toMatch(/<div class="section page-break">\n<p>2ファイル目<\/p>/);
+    });
+
+    test('--part未指定時: ◇◇◇は前後空行付きで挿入される', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>' }),
+        makeSection({ html: '<p>2ファイル目</p>' }),
+      ];
+      const html = generateHtml(sections, baseOptions);
+
+      expect(html).toContain('<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>');
+    });
+
+    test('coverless: 最初のセクションの先頭（章頭/partの頭）の前に空行が入らない', () => {
+      const sections = [
+        makeSection({
+          html: '<p class="viewpoint">【視点】</p>\n<p>本文</p>',
+          hasViewpointStart: true,
+        }),
+      ];
+      const html = generateHtml(sections, {
+        ...baseOptions,
+        coverless: true,
+        title: 'タイトル',
+        author: '著者',
+      });
+
+      expect(html).toMatch(/<p class="coverless-title">タイトル<\/p>\n<p class="coverless-author">著者<\/p>\n<p class="viewpoint">【視点】<\/p>/);
+      expect(html).not.toMatch(/<p class="coverless-author">著者<\/p>\n<p class="empty">/);
+    });
+
+    test('coverless かつ --part指定時も最初のpart先頭の前に空行が入らない', () => {
+      const sections = [
+        makeSection({ html: '<p>1部本文</p>' }),
+        makeSection({ html: '<p>2部本文</p>' }),
+      ];
+      const html = generateHtml(sections, {
+        ...baseOptions,
+        coverless: true,
+        title: 'タイトル',
+        parts: [2],
+      });
+
+      expect(html).toMatch(/<p class="coverless-title">タイトル<\/p>\n<p>1部本文<\/p>/);
+      expect(html).not.toMatch(/<p class="coverless-title">タイトル<\/p>\n<p class="empty">/);
+    });
+
+    test('--no-chapter-break: 章境界でも改ページせず空行1つで連結', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>' }),
+        makeSection({ html: '<p>2ファイル目</p>' }),
+        makeSection({
+          html: '<p class="viewpoint">【視点】</p>\n<p>3ファイル目</p>',
+          hasViewpointStart: true,
+        }),
+      ];
+      const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
+
+      // 改ページ用のクラスは一切付かない
+      expect(html.includes('<div class="section page-break')).toBe(false);
+      // 同一章内のファイル境界には◇◇◇
+      expect((html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length).toBe(1);
+      // 章境界（視点切替）は空行1つで連結
+      expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p class="viewpoint">【視点】<\/p>/);
+    });
+
+    test('--no-chapter-break: 先頭ファイルの頭の空行は剥がされる', () => {
+      const sections = [makeSection({ html: '<p class="empty">&nbsp;</p>\n<p>1ファイル目</p>' })];
+      const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
+      expect(html).toMatch(/<div class="section">\n<p>1ファイル目<\/p>/);
+    });
+
+    test('--no-chapter-break: 前ファイルが【】で終わる章境界も空行1つで連結', () => {
+      const sections = [
+        makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
+        makeSection({ html: '<p>2ファイル目</p>' }),
+      ];
+      const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
+
+      expect(html.includes('<div class="section page-break')).toBe(false);
+      expect(html.includes('◇◇◇')).toBe(false);
+      expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p>2ファイル目<\/p>/);
+    });
   });
 
-  test('--no-chapter-break: 章境界でも改ページせず空行1つで連結', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>' }),
-      makeSection({ html: '<p>2ファイル目</p>' }),
-      makeSection({
-        html: '<p class="viewpoint">【視点】</p>\n<p>3ファイル目</p>',
-        hasViewpointStart: true,
-      }),
-    ];
-    const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
+  describe('selectReviewBoundary', () => {
+    test('空配列は0', () => {
+      expect(selectReviewBoundary([], 20000)).toBe(0);
+    });
 
-    // 改ページ用のクラスは一切付かない
-    expect(html.includes('<div class="section page-break')).toBe(false);
-    // 同一章内のファイル境界には◇◇◇
-    expect((html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length).toBe(1);
-    // 章境界（視点切替）は空行1つで連結
-    expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p class="viewpoint">【視点】<\/p>/);
+    test('全部足してもtargetに届かない場合は全件', () => {
+      expect(selectReviewBoundary([3000, 4000, 5000], 20000)).toBe(3);
+    });
+
+    test('targetを最初に超えた境界が最も近ければそこで止まる', () => {
+      // 累積: 5000, 12000, 21000 → target=20000 との差は |5000-20000|=15000, 8000, 1000
+      expect(selectReviewBoundary([5000, 7000, 9000], 20000)).toBe(3);
+    });
+
+    test('targetを超える前の方がtargetに近ければ手前で止まる', () => {
+      // 累積: 19500, 30000 → 差は 500, 10000 → bestEndは1（19500の方が近い）
+      expect(selectReviewBoundary([19500, 10500], 20000)).toBe(1);
+    });
+
+    test('累積がちょうど一致する境界を選ぶ', () => {
+      // 累積: 10000, 20000, 30000 → 差は 10000, 0, 10000 → bestEnd=2
+      expect(selectReviewBoundary([10000, 10000, 10000], 20000)).toBe(2);
+    });
+
+    test('差が同じなら多く含む方（後ろ）を採用', () => {
+      // 累積: 15000, 25000 → 差は 5000, 5000 → <= で更新するので bestEnd=2
+      expect(selectReviewBoundary([15000, 10000], 20000)).toBe(2);
+    });
+
+    test('最初の1ファイルでtargetを大幅超過してもそれを返す', () => {
+      expect(selectReviewBoundary([50000, 1000], 20000)).toBe(1);
+    });
   });
 
-  test('--no-chapter-break: 前ファイルが【】で終わる章境界も空行1つで連結', () => {
-    const sections = [
-      makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
-      makeSection({ html: '<p>2ファイル目</p>' }),
-    ];
-    const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
+  describe('parsePageSpec / pageInRanges', () => {
+    test('parsePageSpec: 単一ページ', () => {
+      expect(parsePageSpec('42')).toEqual([[42, 42]]);
+    });
 
-    expect(html.includes('<div class="section page-break')).toBe(false);
-    expect(html.includes('◇◇◇')).toBe(false);
-    expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p>2ファイル目<\/p>/);
-  });
+    test('parsePageSpec: 範囲指定', () => {
+      expect(parsePageSpec('42-45')).toEqual([[42, 45]]);
+    });
 
-  test('selectReviewBoundary: 空配列は0', () => {
-    expect(selectReviewBoundary([], 20000)).toBe(0);
-  });
+    test('parsePageSpec: カンマ区切り＋範囲の混在（空白も許容）', () => {
+      expect(parsePageSpec('42, 50, 60-62')).toEqual([[42, 42], [50, 50], [60, 62]]);
+    });
 
-  test('selectReviewBoundary: 全部足してもtargetに届かない場合は全件', () => {
-    expect(selectReviewBoundary([3000, 4000, 5000], 20000)).toBe(3);
-  });
+    test('parsePageSpec: 逆順の範囲は昇順に正規化', () => {
+      expect(parsePageSpec('45-42')).toEqual([[42, 45]]);
+    });
 
-  test('selectReviewBoundary: targetを最初に超えた境界が最も近ければそこで止まる', () => {
-    // 累積: 5000, 12000, 21000 → target=20000 との差は |5000-20000|=15000, 8000, 1000
-    expect(selectReviewBoundary([5000, 7000, 9000], 20000)).toBe(3);
-  });
+    test('parsePageSpec: 不正な指定は null', () => {
+      expect(parsePageSpec('abc')).toBeNull();
+      expect(parsePageSpec('0')).toBeNull();
+      expect(parsePageSpec('1-')).toBeNull();
+      expect(parsePageSpec('')).toBeNull();
+    });
 
-  test('selectReviewBoundary: targetを超える前の方がtargetに近ければ手前で止まる', () => {
-    // 累積: 19500, 30000 → 差は 500, 10000 → bestEndは1（19500の方が近い）
-    expect(selectReviewBoundary([19500, 10500], 20000)).toBe(1);
-  });
-
-  test('selectReviewBoundary: 累積がちょうど一致する境界を選ぶ', () => {
-    // 累積: 10000, 20000, 30000 → 差は 10000, 0, 10000 → bestEnd=2
-    expect(selectReviewBoundary([10000, 10000, 10000], 20000)).toBe(2);
-  });
-
-  test('selectReviewBoundary: 差が同じなら多く含む方（後ろ）を採用', () => {
-    // 累積: 15000, 25000 → 差は 5000, 5000 → <= で更新するので bestEnd=2
-    expect(selectReviewBoundary([15000, 10000], 20000)).toBe(2);
-  });
-
-  test('selectReviewBoundary: 最初の1ファイルでtargetを大幅超過してもそれを返す', () => {
-    expect(selectReviewBoundary([50000, 1000], 20000)).toBe(1);
-  });
-
-  test('parsePageSpec: 単一ページ', () => {
-    expect(parsePageSpec('42')).toEqual([[42, 42]]);
-  });
-
-  test('parsePageSpec: 範囲指定', () => {
-    expect(parsePageSpec('42-45')).toEqual([[42, 45]]);
-  });
-
-  test('parsePageSpec: カンマ区切り＋範囲の混在（空白も許容）', () => {
-    expect(parsePageSpec('42, 50, 60-62')).toEqual([[42, 42], [50, 50], [60, 62]]);
-  });
-
-  test('parsePageSpec: 逆順の範囲は昇順に正規化', () => {
-    expect(parsePageSpec('45-42')).toEqual([[42, 45]]);
-  });
-
-  test('parsePageSpec: 不正な指定は null', () => {
-    expect(parsePageSpec('abc')).toBeNull();
-    expect(parsePageSpec('0')).toBeNull();
-    expect(parsePageSpec('1-')).toBeNull();
-    expect(parsePageSpec('')).toBeNull();
-  });
-
-  test('pageInRanges: 範囲内外を判定', () => {
-    const ranges = [[42, 42], [50, 50], [60, 62]];
-    expect(pageInRanges(42, ranges)).toBe(true);
-    expect(pageInRanges(61, ranges)).toBe(true);
-    expect(pageInRanges(43, ranges)).toBe(false);
-    expect(pageInRanges(63, ranges)).toBe(false);
+    test('pageInRanges: 範囲内外を判定', () => {
+      const ranges = [[42, 42], [50, 50], [60, 62]];
+      expect(pageInRanges(42, ranges)).toBe(true);
+      expect(pageInRanges(61, ranges)).toBe(true);
+      expect(pageInRanges(43, ranges)).toBe(false);
+      expect(pageInRanges(63, ranges)).toBe(false);
+    });
   });
 }

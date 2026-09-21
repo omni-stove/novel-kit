@@ -22,16 +22,11 @@ export function toVerticalBase(text) {
     .replace(/[→←↑↓]/g, m => ({ '→': '↓', '←': '↑', '↑': '←', '↓': '→' })[m]);
 }
 
-// 縦書きテンプレート用の素のテキスト（記号正規化＋全角化）
 export function toVerticalText(text) {
   return toFullWidth(toVerticalBase(text));
 }
 
-/**
- * テンプレートの zip エントリを書き換えて別ファイルに保存する。
- *   transforms: { 'word/document.xml': xml => xml, 'docProps/core.xml': xml => xml, ... }
- * word/document.xml は必須。それ以外のエントリはテンプレートに存在するときだけ書き換える。
- */
+// docProps/core.xml などはテンプレートによって無いことがあるので、無ければ読み飛ばす
 export async function rewriteDocx(templatePath, outputPath, transforms) {
   const zip = await JSZip.loadAsync(readFileSync(templatePath));
   if (!zip.file('word/document.xml')) {

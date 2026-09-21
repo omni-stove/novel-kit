@@ -19,6 +19,17 @@ import {
 } from './text-parser.mts';
 import { countWrappedRows, normalizeTcy } from './grid.mts';
 import { toFullWidth, toVerticalBase, toVerticalText } from './docx.mts';
+import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { fail } from './cli.mts';
+
+const DEFAULT_TEMPLATE_PATH = fileURLToPath(new URL('../templates/tategaki-a4-42x34.docx', import.meta.url));
+
+export function resolveTemplatePath(override = null) {
+  const templatePath = override || DEFAULT_TEMPLATE_PATH;
+  if (!existsSync(templatePath)) fail(`テンプレートが見つかりません: ${templatePath}`);
+  return templatePath;
+}
 
 const RPR = '<w:rPr><w:rFonts w:hint="eastAsia"/></w:rPr>';
 
@@ -36,8 +47,7 @@ function tcyRunXml(digits) {
   return runXml(digits, `<w:rPr><w:rFonts w:hint="eastAsia"/><w:eastAsianLayout w:id="${tcyId++}" w:vert="1" w:vertCompress="1"/></w:rPr>`);
 }
 
-// PDF出力と同じ規則: 2桁の数字は縦中横で1マスに収め、
-// 1桁・3桁以上は全角化して1字ずつ立てる
+// 数字の立て方は PDF 出力（text-parser の escapeHtml）と揃える
 export function textRunXml(text) {
   if (!text) return '';
   const base = toVerticalBase(text);
@@ -52,7 +62,6 @@ export function textRunXml(text) {
   return out;
 }
 
-// |漢字《かんじ》 → Wordの本物のルビ
 function rubyRunXml(base, ruby) {
   const rt = runXml(toVerticalText(ruby), '<w:rPr><w:rFonts w:hint="eastAsia"/><w:sz w:val="10"/></w:rPr>');
   const rb = runXml(toVerticalText(base));
@@ -62,17 +71,15 @@ function rubyRunXml(base, ruby) {
     `<w:rt>${rt}</w:rt><w:rubyBase>${rb}</w:rubyBase></w:ruby></w:r>`;
 }
 
-// 《《強調》》 → 傍点
 function emphasisRunXml(text) {
   return runXml(toVerticalText(text), '<w:rPr><w:rFonts w:hint="eastAsia"/><w:em w:val="dot"/></w:rPr>');
 }
 
-// *text* → イタリック
 function italicRunXml(text) {
   return runXml(toVerticalText(text), '<w:rPr><w:rFonts w:hint="eastAsia"/><w:i/></w:rPr>');
 }
 
-// <<横倒し>> → 半角のまま出す（Wordの縦書きでは半角英数がそのまま横倒しになる）
+// Wordの縦書きでは半角英数がそのまま横倒しになるので、全角化せずに出す
 function sidewaysRunXml(text) {
   return runXml(toVerticalBase(stripInlineMarkup(text)));
 }
@@ -96,13 +103,7 @@ export function paragraphXml(runsXml, { center = false, right = false, pageBreak
   return `<w:p>${pPr}${br}${runsXml}</w:p>`;
 }
 
-/**
- * 本文行を流し込む共通の走査。エピグラフ行・通常行ごとに emit を呼ぶ。
- *   emit(line, { pageBreakBefore, epigraph })
- *     epigraph: エピグラフ行なら表示行の配列（1行に収まれば1要素）、通常行なら null
- * 視点行（章の頭）ごとに改ページする（冒頭の視点行は改ページ不要）。
- * エピグラフの直後には空行を1行保証する。
- */
+// 出力（buildBodyXml）とページ見積もり（estimateBodyPages）で改ページ位置がずれないよう、走査を共有する
 export function walkBodyLines(lines, { cols, pageBreakBeforeBody = false }, emit) {
   let isFirstViewpoint = true;
   let needBodyPageBreak = pageBreakBeforeBody;
@@ -126,12 +127,10 @@ export function walkBodyLines(lines, { cols, pageBreakBeforeBody = false }, emit
   }
 }
 
-// グリッドの字数で何行になるか（ルビ・傍点記法を除去、2桁半角数字は縦中横で1マス、ぶら下げ考慮）
 export function countGridRows(line, cols) {
   return countWrappedRows(normalizeTcy(stripInlineMarkup(line)), cols);
 }
 
-// ルビ・傍点の記法を除いた、実際に紙面に出るテキスト（エピグラフ含む）
 export function bodyDisplayText(lines) {
   return lines.map(l => {
     if (isEpigraphLine(l)) {
@@ -142,12 +141,11 @@ export function bodyDisplayText(lines) {
   }).join('');
 }
 
-// 実際に表示される本文の字数（空白・ふりがなを含まない）
 export function countBodyChars(lines) {
   return countTextChars(bodyDisplayText(lines));
 }
 
-// docPropsのタイトル・作成者をテンプレート作成者から差し替える（作者名を出さない応募先では author に空文字を渡す）
+// テンプレート配布元の名前が作成者に残らないよう差し替える（作者名を出さない応募先では author に空文字を渡す）
 export function updateCoreProps(coreXml, title, author) {
   return coreXml
     .replace(/<dc:title>.*?<\/dc:title>/s, `<dc:title>${escapeXml(title)}</dc:title>`)
@@ -155,11 +153,6 @@ export function updateCoreProps(coreXml, title, author) {
     .replace(/<cp:lastModifiedBy>.*?<\/cp:lastModifiedBy>/s, `<cp:lastModifiedBy>${escapeXml(author)}</cp:lastModifiedBy>`);
 }
 
-/**
- * 本文のXMLを組む。
- *   headParagraphs / tailParagraphs: 本文の前後に置く段落XML（扉・＜終＞など）
- *   pageBreakBeforeBody: 本文の先頭で改ページする（扉を1ページ独立させるとき）
- */
 export function buildBodyXml(lines, { cols, headParagraphs = [], tailParagraphs = [], pageBreakBeforeBody = false }) {
   const paragraphs = [...headParagraphs];
 
@@ -181,7 +174,6 @@ export function buildBodyXml(lines, { cols, headParagraphs = [], tailParagraphs 
   return [...paragraphs, ...tailParagraphs].join('');
 }
 
-// buildBodyXmlと同じ流し込み規則で、本文が何ページになるかを見積もる
 export function estimateBodyPages(lines, { cols, rows, headLines = [], tailLines = [], pageBreakBeforeBody = false }) {
   let pages = 1;
   let pageRows = 0;
@@ -210,12 +202,8 @@ export function estimateBodyPages(lines, { cols, rows, headLines = [], tailLines
   return pages;
 }
 
-/**
- * テンプレートの本文（空の1段落）を差し替える。
- * あらすじがある場合は2セクション構成にする:
- *   セクション1 = あらすじ（フッター参照を外してノンブルなし）
- *   セクション2 = 本文（ページ番号を1から振り直す）
- */
+// 応募規定が「あらすじにはノンブルを振らず、本文1ページ目から番号を振る」ことを求めるため、
+// あらすじがあるときはセクションを分ける
 export function injectBody(documentXml, bodyXml, synopsisXml = null) {
   const sectPrMatch = documentXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/);
   if (!sectPrMatch || !documentXml.includes('<w:body>')) {
@@ -282,4 +270,187 @@ export function applyDocGrid(documentXml, { cols, rows, fontPt = 10.5 }) {
       ? section.replace(/<w:docGrid[^>]*\/>/, docGrid)
       : section.replace('</w:sectPr>', `${docGrid}</w:sectPr>`)),
   );
+}
+
+if (import.meta.vitest) {
+  const { describe, test, expect } = import.meta.vitest;
+
+  const texts = xml => [...xml.matchAll(/<w:t [^>]*>(.*?)<\/w:t>/g)].map(m => m[1]);
+
+  describe('textRunXml', () => {
+    test('2桁の数字だけ縦中横にし、1桁・3桁以上は全角化して1字ずつ立てる', () => {
+      const xml = textRunXml('7月15日、123号');
+      expect(texts(xml)).toEqual(['７', '月', '15', '日、', '１２３', '号']);
+      expect(xml.match(/w:vertCompress="1"/g)).toHaveLength(1);
+    });
+    test('隣り合う縦中横には別々のidを振る', () => {
+      const ids = [...textRunXml('10と20').matchAll(/w:eastAsianLayout w:id="(\d+)"/g)].map(m => m[1]);
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).not.toBe(ids[1]);
+    });
+    test('半角英字は全角化し、ダッシュと矢印は縦書き用に正規化する', () => {
+      expect(texts(textRunXml('AI—→'))).toEqual(['ＡＩ―↓']);
+    });
+    test('空文字はrunを作らない', () => {
+      expect(textRunXml('')).toBe('');
+    });
+  });
+
+  describe('lineToRunsXml', () => {
+    test('ルビはw:rubyになり、親文字とルビを別に持つ', () => {
+      const xml = lineToRunsXml('|漢字《かんじ》を読む');
+      expect(xml).toContain('<w:rt>');
+      expect(texts(xml)).toEqual(['かんじ', '漢字', 'を読む']);
+    });
+    test('傍点はw:em、イタリックはw:i', () => {
+      expect(lineToRunsXml('《《強調》》')).toContain('<w:em w:val="dot"/>');
+      expect(lineToRunsXml('*word*')).toContain('<w:i/>');
+    });
+    test('横倒しは半角のまま出す', () => {
+      expect(texts(lineToRunsXml('<<ABC>>'))).toEqual(['ABC']);
+    });
+    test('XML特殊文字をエスケープする', () => {
+      expect(texts(lineToRunsXml('＜&＞'))).toEqual(['＜&amp;＞']);
+    });
+  });
+
+  describe('paragraphXml', () => {
+    test('揃えと改ページを段落に付ける', () => {
+      expect(paragraphXml('R')).toBe('<w:p>R</w:p>');
+      expect(paragraphXml('R', { center: true })).toContain('<w:jc w:val="center"/>');
+      expect(paragraphXml('R', { right: true })).toContain('<w:jc w:val="right"/>');
+      expect(paragraphXml('R', { pageBreakBefore: true })).toBe('<w:p><w:r><w:br w:type="page"/></w:r>R</w:p>');
+    });
+  });
+
+  describe('walkBodyLines', () => {
+    const walk = (lines, opts = {}) => {
+      const out = [];
+      walkBodyLines(lines, { cols: 40, ...opts }, (line, { pageBreakBefore, epigraph }) => {
+        out.push({ line, pageBreakBefore, epigraph });
+      });
+      return out;
+    };
+
+    test('2つ目以降の視点行で改ページする（冒頭の視点行はしない）', () => {
+      const out = walk(['【1】', '本文', '【2】', '本文']);
+      expect(out.map(o => o.pageBreakBefore)).toEqual([false, false, true, false]);
+    });
+    test('pageBreakBeforeBodyなら本文の先頭で改ページする', () => {
+      const out = walk(['【1】', '本文'], { pageBreakBeforeBody: true });
+      expect(out.map(o => o.pageBreakBefore)).toEqual([true, false]);
+    });
+    test('エピグラフは表示行に展開して渡し、直後に空行がなければ1行補う', () => {
+      const out = walk(['【1】', 'Epigraph: 引用——出典', '本文']);
+      expect(out[1].epigraph).toEqual(['引用——出典']);
+      expect(out[2]).toEqual({ line: '', pageBreakBefore: false, epigraph: null });
+      expect(out[3].line).toBe('本文');
+    });
+    test('エピグラフの直後に空行があれば補わない', () => {
+      expect(walk(['Epigraph: 引用', '', '本文']).map(o => o.line)).toEqual(['Epigraph: 引用', '', '本文']);
+    });
+    test('1行に収まらないエピグラフは引用行と出典行に分ける', () => {
+      const out = walk([`Epigraph: ${'あ'.repeat(10)}——出典`], { cols: 10 });
+      expect(out[0].epigraph).toEqual(['あ'.repeat(10), '——出典']);
+    });
+  });
+
+  describe('countGridRows / countBodyChars', () => {
+    test('記法を除き、2桁数字を1マスとして行数を数える', () => {
+      expect(countGridRows('|漢字《かんじ》12', 3)).toBe(1);
+      expect(countGridRows('|漢字《かんじ》123', 3)).toBe(2);
+    });
+    test('字数は空白・ふりがな・Epigraph: プレフィックスを含まない', () => {
+      expect(countBodyChars(['　|漢字《かんじ》', 'Epigraph: 引用——出典'])).toBe(8);
+    });
+  });
+
+  describe('buildBodyXml', () => {
+    test('空行・区切り・エピグラフ・本文を段落にし、前後に扉と終了記号を置く', () => {
+      const xml = buildBodyXml(['【1】', 'Epigraph: 引用', '', '本文', '◇◇◇'], {
+        cols: 40,
+        headParagraphs: ['<HEAD/>'],
+        tailParagraphs: ['<TAIL/>'],
+      });
+      const paragraphs = xml.match(/<w:p>.*?<\/w:p>/g);
+      expect(xml.startsWith('<HEAD/>')).toBe(true);
+      expect(xml.endsWith('<TAIL/>')).toBe(true);
+      expect(paragraphs).toHaveLength(5);
+      expect(paragraphs[1]).toContain('<w:jc w:val="right"/>');
+      expect(paragraphs[2]).toBe('<w:p></w:p>');
+      expect(paragraphs[4]).toContain('<w:jc w:val="center"/>');
+    });
+  });
+
+  describe('estimateBodyPages', () => {
+    test('行数がrowsを超えたら次のページへ送る', () => {
+      expect(estimateBodyPages(['一', '二'], { cols: 10, rows: 2 })).toBe(1);
+      expect(estimateBodyPages(['一', '二', '三'], { cols: 10, rows: 2 })).toBe(2);
+    });
+    test('折り返した行も1行ずつ数える', () => {
+      expect(estimateBodyPages(['あ'.repeat(25)], { cols: 10, rows: 2 })).toBe(2);
+    });
+    test('章ごとの改ページで余白が出てもページを進める', () => {
+      expect(estimateBodyPages(['【1】', '本文', '【2】', '本文'], { cols: 10, rows: 10 })).toBe(2);
+    });
+    test('扉と終了記号の行も数え、pageBreakBeforeBodyなら扉で1ページ使う', () => {
+      expect(estimateBodyPages(['本文'], { cols: 10, rows: 2, headLines: ['題', ''], tailLines: ['終'] })).toBe(2);
+      expect(estimateBodyPages(['本文'], { cols: 10, rows: 10, headLines: ['題'], pageBreakBeforeBody: true })).toBe(2);
+    });
+  });
+
+  describe('updateCoreProps', () => {
+    test('タイトル・作成者・最終更新者を差し替え、空文字なら作者名を消す', () => {
+      const core = '<dc:title>雛形</dc:title><dc:creator>配布元</dc:creator><cp:lastModifiedBy>配布元</cp:lastModifiedBy>';
+      expect(updateCoreProps(core, 'A&B', '')).toBe(
+        '<dc:title>A&amp;B</dc:title><dc:creator></dc:creator><cp:lastModifiedBy></cp:lastModifiedBy>',
+      );
+    });
+  });
+
+  const SECT_PR = '<w:sectPr><w:footerReference w:type="default" r:id="rId1"/><w:type w:val="continuous"/>' +
+    '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1080" w:bottom="1440" w:left="1080"/>' +
+    '<w:cols w:space="425"/><w:docGrid w:type="lines" w:linePitch="386"/></w:sectPr>';
+  const TEMPLATE = `<w:document><w:body><w:p/>${SECT_PR}</w:body></w:document>`;
+
+  describe('injectBody', () => {
+    test('あらすじなしなら本文を差し替え、セクション書式はテンプレートのまま', () => {
+      expect(injectBody(TEMPLATE, '<BODY/>')).toBe(`<w:document><w:body><BODY/>${SECT_PR}</w:body></w:document>`);
+    });
+    test('あらすじありならノンブルなしのセクションを前に置き、本文のページ番号を1から振り直す', () => {
+      const xml = injectBody(TEMPLATE, '<BODY/>', '<SYN/>');
+      const [synopsisSect, bodySect] = xml.match(/<w:sectPr>.*?<\/w:sectPr>/g);
+      expect(xml.indexOf('<SYN/>')).toBeLessThan(xml.indexOf('<BODY/>'));
+      expect(synopsisSect).not.toContain('w:footerReference');
+      expect(bodySect).toContain('w:footerReference');
+      expect(bodySect).toContain('<w:pgNumType w:start="1"/>');
+      expect(xml).not.toContain('continuous');
+    });
+    test('本文中の $ を置換パターンとして解釈しない', () => {
+      expect(injectBody(TEMPLATE, "<w:t>$&amp;$'</w:t>")).toContain("<w:t>$&amp;$'</w:t>");
+    });
+    test('w:bodyやw:sectPrのないテンプレートはエラー', () => {
+      expect(() => injectBody('<w:document/>', '')).toThrow('テンプレート');
+    });
+  });
+
+  describe('applyDocGrid', () => {
+    test('用紙と余白から指定の字詰めが収まる刻み幅を切り捨てで出す', () => {
+      // 行方向: (11906-1080*2)/40=243.65→243、字方向: ((16838-1440*2)/40-210)/20*4096=28456.9→28456
+      expect(applyDocGrid(TEMPLATE, { cols: 40, rows: 40 })).toContain(
+        '<w:docGrid w:type="linesAndChars" w:linePitch="243" w:charSpace="28456"/>',
+      );
+    });
+    test('あらすじと本文の両方のセクションに適用する', () => {
+      const xml = applyDocGrid(injectBody(TEMPLATE, '<BODY/>', '<SYN/>'), { cols: 40, rows: 40 });
+      expect(xml.match(/w:type="linesAndChars"/g)).toHaveLength(2);
+    });
+    test('docGridのないセクションには追加する', () => {
+      const noGrid = TEMPLATE.replace(/<w:docGrid[^>]*\/>/, '');
+      expect(applyDocGrid(noGrid, { cols: 40, rows: 40 })).toContain('w:charSpace="28456"/></w:sectPr>');
+    });
+    test('用紙サイズの読めないテンプレートはエラー', () => {
+      expect(() => applyDocGrid(TEMPLATE.replace(/<w:pgSz[^>]*\/>/, ''), { cols: 40, rows: 40 })).toThrow('w:h');
+    });
+  });
 }
