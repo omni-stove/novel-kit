@@ -213,7 +213,8 @@ export function logSections(sections, inputFiles) {
 }
 
 // 応募用テンプレート（docx/docm）へ流し込む1本の行列
-export function mergeManuscriptLines(filePaths, { keepEpigraphs = false } = {}) {
+// blankAfterHeading: 視点行（章見出し）の直後に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）
+export function mergeManuscriptLines(filePaths, { keepEpigraphs = false, blankAfterHeading = false } = {}) {
   const allLines = [];
   let sectionNumber = 1;
 
@@ -236,7 +237,8 @@ export function mergeManuscriptLines(filePaths, { keepEpigraphs = false } = {}) 
         allLines.push(line);
       }
       // エピグラフが続くときの空行は、表示行に展開する出力側がエピグラフの後ろに補う
-      if (!isEpigraphLine(bodyLines[j + 1] ?? '')) allLines.push('');
+      const next = bodyLines[j + 1] ?? '';
+      if (blankAfterHeading && !isEpigraphLine(next) && next.trim() !== '') allLines.push('');
     });
   }
 
@@ -425,13 +427,22 @@ if (import.meta.vitest) {
   });
 
   describe('mergeManuscriptLines', () => {
-    test('空の【】を採番し、視点行の直後に空行を入れ、視点行なしのファイル前に◇◇◇を挟む', () => {
+    test('空の【】を採番し、視点行なしのファイル前に◇◇◇を挟む（視点行の直後に空行は補わない）', () => {
       withTmpFiles(['【】\n本文一\n\n', '\n続き\n', 'POV: A\n【夜】\n本文二\n【】\n'], (paths) => {
         expect(mergeManuscriptLines(paths)).toEqual([
-          '【1】', '', '本文一',
+          '【1】', '本文一',
           '', '◇◇◇', '',
           '続き',
-          '【夜】', '', '本文二',
+          '【夜】', '本文二',
+        ]);
+      });
+    });
+
+    test('blankAfterHeading: 視点行の直後に空行を1行補い、原稿側にあれば二重にしない', () => {
+      withTmpFiles(['【】\n本文一\n', '【】\n\n本文二\n'], (paths) => {
+        expect(mergeManuscriptLines(paths, { blankAfterHeading: true })).toEqual([
+          '【1】', '', '本文一',
+          '【2】', '', '本文二',
         ]);
       });
     });
@@ -444,6 +455,11 @@ if (import.meta.vitest) {
           'Epigraph: 二', '続き',
         ]);
         expect(mergeManuscriptLines(paths)).toEqual([
+          '【1】', '本文',
+          '', '◇◇◇', '',
+          '続き',
+        ]);
+        expect(mergeManuscriptLines(paths, { blankAfterHeading: true })).toEqual([
           '【1】', '', '本文',
           '', '◇◇◇', '',
           '続き',

@@ -439,7 +439,8 @@ function epigraphsToHtml(epigraphs, escapeOpts, chars = null) {
   }).join('\n');
 }
 
-export function parseTextFile(filePath, { vertical = true, separateSymbolClasses = false, sectionNumber = null, chars = null } = {}) {
+// blankAfterHeading: 視点行（章見出し）と本文の間に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）
+export function parseTextFile(filePath, { vertical = true, separateSymbolClasses = false, sectionNumber = null, chars = null, blankAfterHeading = false } = {}) {
   const lines = readLines(filePath);
   const htmlParts = [];
 
@@ -494,7 +495,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
         lastWasViewpoint = true;
       } else {
         htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
-        lastWasViewpoint = true;
+        lastWasViewpoint = blankAfterHeading;
       }
       continue;
     }
@@ -917,6 +918,35 @@ if (import.meta.vitest) {
     });
     test('\u30E9\u30C6\u30F3\u8A9E\u9593\u306E\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u3082\u5168\u89D2\u5316\u3055\u308C\u5358\u8A9E\u9023\u7D50\u306F\u7DAD\u6301\u3055\u308C\u308B', () => {
       expect(escapeHtml('ab cd', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>\u3000<span class="latin">c</span><span class="latin">d</span>');
+    });
+  });
+
+  describe('parseTextFile 視点行', () => {
+    test('既定では視点行と本文の間に空行を補わない（原稿側の空行はそのまま）', () => {
+      const tmp = join(tmpdir(), `vp-noblank-${Date.now()}.txt`);
+      try {
+        writeFileSync(tmp, '【】\n本文1行目\n');
+        expect(parseTextFile(tmp, { vertical: false }).html)
+          .toMatch(/<p class="viewpoint">【】<\/p>\n<p[^>]*>本文1行目<\/p>/);
+        writeFileSync(tmp, '【】\n\n本文1行目\n');
+        expect(parseTextFile(tmp, { vertical: false }).html)
+          .toMatch(/<p class="viewpoint">【】<\/p>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
+      } finally {
+        unlinkSync(tmp);
+      }
+    });
+
+    test('blankAfterHeading: 視点行の直後に空行を1つ補い、原稿側にあれば二重にしない', () => {
+      const tmp = join(tmpdir(), `vp-blank-${Date.now()}.txt`);
+      try {
+        for (const src of ['【】\n本文1行目\n', '【】\n\n本文1行目\n']) {
+          writeFileSync(tmp, src);
+          expect(parseTextFile(tmp, { vertical: false, blankAfterHeading: true }).html)
+            .toMatch(/<p class="viewpoint">【】<\/p>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
+        }
+      } finally {
+        unlinkSync(tmp);
+      }
     });
   });
 

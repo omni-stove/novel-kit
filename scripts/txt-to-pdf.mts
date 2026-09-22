@@ -26,6 +26,7 @@
  *   --no-synopsis        梗概（synopsis.txt）を入れない
  *   --coverless          表紙ページを作らず、梗概と本文の頭にタイトル・著者名を本文サイズで表示
  *   --open               生成後にプレビューを開く
+ *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
  *   --count-only         原稿用紙換算（文字数・行数・枚数）のみを表示して終了
  *                        --size 未指定時は 20x20（400字詰め原稿用紙）
  *   --review             下読み用モード。表紙・梗概・人物紹介・部構成（--part）をすべて無視し、
@@ -122,6 +123,7 @@ function parseArgs(argv) {
     ARG.parts,
     { key: 'review', flags: ['--review'] },
     { key: 'pages', flags: ['--pages'], takesValue: true, parse: parsePageSpec },
+    { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
   ], { pageBreak: true, chapterBreak: true, vertical: true, chars: null, lines: null });
   if (args.size) {
     args.chars = args.size.cols;
@@ -536,6 +538,7 @@ async function main() {
     vertical: args.vertical,
     chars: args.chars || 30,
     partFirstIndices,
+    blankAfterHeading: args.blankAfterHeading,
   });
   logSections(sections, inputFiles);
 
