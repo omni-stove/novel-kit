@@ -23,6 +23,7 @@
  *                        同一章内のファイル境界には区切り字「◇◇◇」を挟む。
  *                        1始まりのファイル順インデックス指定もフォールバックで受け付ける。
  *   --synopsis-on-title   梗概をタイトルページに表示（デフォルト: 別ページ）
+ *   --no-synopsis        梗概（synopsis.txt）を入れない
  *   --coverless          表紙ページを作らず、梗概と本文の頭にタイトル・著者名を本文サイズで表示
  *   --open               生成後にプレビューを開く
  *   --count-only         原稿用紙換算（文字数・行数・枚数）のみを表示して終了
@@ -114,6 +115,7 @@ function parseArgs(argv) {
     ARG.size,
     { key: 'limit', flags: ['--limit'], takesValue: true, parse: v => parseInt(v, 10) },
     { key: 'synopsisOnTitle', flags: ['--synopsis-on-title'] },
+    { key: 'noSynopsis', flags: ['--no-synopsis'] },
     { key: 'coverless', flags: ['--coverless'] },
     ARG.open,
     { key: 'countOnly', flags: ['--count-only'] },
@@ -506,7 +508,7 @@ async function main() {
     return;
   }
 
-  const synopsisPath = args.review ? null : findSidecarFile(inputFiles, args.files, SYNOPSIS_FILENAME);
+  const synopsisPath = args.review || args.noSynopsis ? null : findSidecarFile(inputFiles, args.files, SYNOPSIS_FILENAME);
   let synopsisHtml = null;
   let synopsisCharCount = 0;
   if (synopsisPath) {
