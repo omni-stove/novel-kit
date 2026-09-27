@@ -90,6 +90,8 @@ export function buildPdfFromHtml(html, outputPath, opts) {
 }
 
 export function openFile(path) {
+  // AUTO_OPEN=0 のときは --open 指定があっても開かない
+  if (process.env.AUTO_OPEN === '0') return;
   // openコマンドが使えない環境（CI等）では黙って無視する
   try {
     execSync(`open "${resolve(path)}"`);
