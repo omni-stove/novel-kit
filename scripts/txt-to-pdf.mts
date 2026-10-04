@@ -168,8 +168,8 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
 
   const sectionHtmls = sections.map((s, i) => {
     const html = s.html
-      .replace(/(<p class="empty">&nbsp;<\/p>\n?)+$/, '')
-      .replace(/^(<p class="empty">&nbsp;<\/p>\n)+/, '');
+      .replace(/(<p class="empty"[^>]*>&nbsp;<\/p>\n?)+$/, '')
+      .replace(/^(<p class="empty"[^>]*>&nbsp;<\/p>\n)+/, '');
 
     if (partFirstIndexSet?.has(i)) return sectionDiv('section page-break part-section', html);
     if (i === 0) return sectionDiv('section', html);

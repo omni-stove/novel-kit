@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "小説プレビューの設定（レイアウト定義と表示設定）",
+  "type": "object",
+  "properties": {
+    "writingMode": {
+      "enum": [
+        "vertical",
+        "horizontal"
+      ],
+      "description": "文字方向（縦書き / 横書き）"
+    },
+    "paper": {
+      "enum": [
+        "A4",
+        "B5",
+        "A5",
+        "B6",
+        "A6"
+      ],
+      "description": "用紙サイズ"
+    },
+    "orientation": {
+      "enum": [
+        "landscape",
+        "portrait"
+      ],
+      "description": "用紙の向き"
+    },
+    "margin": {
+      "type": "object",
+      "description": "余白（mm）",
+      "properties": {
+        "top": {
+          "type": "number"
+        },
+        "right": {
+          "type": "number"
+        },
+        "bottom": {
+          "type": "number"
+        },
+        "left": {
+          "type": "number"
+        }
+      }
+    },
+    "chars": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 100,
+      "description": "1行の文字数"
+    },
+    "lines": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 100,
+      "description": "1ページの行数（null で行送り自動）"
+    },
+    "fontFamily": {
+      "type": "string",
+      "description": "本文フォント（空なら PDF 出力と同じ明朝）"
+    },
+    "view": {
+      "type": "object",
+      "description": "表示設定",
+      "properties": {
+        "scope": {
+          "enum": [
+            "work",
+            "file"
+          ],
+          "description": "表示範囲（work: 同じディレクトリの本文ファイルを連結 / file: 開いているファイルだけ）"
+        },
+        "zoom": {
+          "description": "表示倍率（fit-width: 幅に合わせる / fit-page: ページ全体 / 数値: %）",
+          "anyOf": [
+            {
+              "enum": [
+                "fit-width",
+                "fit-page"
+              ]
+            },
+            {
+              "type": "number",
+              "minimum": 10,
+              "maximum": 400
+            }
+          ]
+        },
+        "edit": {
+          "type": "boolean",
+          "description": "プレビュー上で段落をクリックして編集する"
+        }
+      }
+    }
+  }
+}

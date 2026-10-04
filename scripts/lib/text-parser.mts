@@ -440,12 +440,22 @@ function epigraphsToHtml(epigraphs, escapeOpts, chars = null) {
 }
 
 // blankAfterHeading: 視点行（章見出し）と本文の間に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）
-export function parseTextFile(filePath, { vertical = true, separateSymbolClasses = false, sectionNumber = null, chars = null, blankAfterHeading = false } = {}) {
-  const lines = readLines(filePath);
+export function parseTextFile(filePath, opts = {}) {
+  return parseTextLines(readLines(filePath), opts);
+}
+
+// ファイルを介さず行列から変換する（未保存のエディタ内容をプレビューする VS Code 拡張用）
+// lineNumbers: 段落・視点行・空行に元テキストの行番号（0始まり）を data-line で付ける
+export function parseTextLines(lines, { vertical = true, separateSymbolClasses = false, sectionNumber = null, chars = null, blankAfterHeading = false, lineNumbers = false } = {}) {
   const htmlParts = [];
 
   const { hasViewpointStart, hasViewpointEnd, hasEmptyViewpointStart, endViewpointLineIndex, epigraphs, pov } = analyzeLines(lines);
   const processLines = selectBodyLines(lines, endViewpointLineIndex);
+  // selectBodyLines が落とす行（メタ行・末尾の視点行）を同じ条件で除き、processLines の添字から元の行番号を引けるようにする
+  const sourceLineNumbers = lineNumbers
+    ? lines.map((_, i) => i).filter(i => !isMetaLine(lines[i]) && i !== endViewpointLineIndex)
+    : null;
+  const lineAttr = (i) => sourceLineNumbers ? ` data-line="${sourceLineNumbers[i]}"` : '';
 
   let lastWasViewpoint = false;
 
@@ -464,7 +474,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       const hasNextEmpty = nextLine !== null && nextLine.trim() === '';
 
       if (hasPrevEmpty && hasNextEmpty) {
-        if (htmlParts.length > 0 && htmlParts[htmlParts.length - 1] === '<p class="empty">&nbsp;</p>') {
+        if (htmlParts.length > 0 && /^<p class="empty"[^>]*>&nbsp;<\/p>$/.test(htmlParts[htmlParts.length - 1])) {
           htmlParts.pop();
         }
         htmlParts.push(`<div class="separator-block"><p class="separator">${escapeHtml(line, escapeOpts)}</p></div>`);
@@ -479,7 +489,7 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
     }
 
     if (line.trim() === '') {
-      htmlParts.push('<p class="empty">&nbsp;</p>');
+      htmlParts.push(`<p class="empty"${lineAttr(i)}>&nbsp;</p>`);
       lastWasViewpoint = false;
       continue;
     }
@@ -488,13 +498,13 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
       const viewpointLine = sectionNumber !== null ? applyViewpointLabel(line, sectionNumber) : line;
       const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
       if (pendingEpigraphs) {
-        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>\n${epigraphsToHtml(pendingEpigraphs, escapeOpts, chars)}\n</div>`);
+        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint"${lineAttr(i)}>${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>\n${epigraphsToHtml(pendingEpigraphs, escapeOpts, chars)}\n</div>`);
         pendingEpigraphs = null;
         // エピグラフの直後には空行を1つ挟んでから本文を始める
         // （視点行と同じ扱いにすることで、原稿側に空行があっても二重にならない）
         lastWasViewpoint = true;
       } else {
-        htmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
+        htmlParts.push(`<p class="viewpoint"${lineAttr(i)}>${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
         lastWasViewpoint = blankAfterHeading;
       }
       continue;
@@ -516,10 +526,10 @@ export function parseTextFile(filePath, { vertical = true, separateSymbolClasses
     const estimatedLines = Math.ceil([...line].length / charsPerLine);
     if (estimatedLines <= 3) {
       const cls = line.startsWith('「') ? 'dialogue-short' : 'paragraph-short';
-      htmlParts.push(`<p class="${cls}">${escapeHtml(line, escapeOpts)}</p>`);
+      htmlParts.push(`<p class="${cls}"${lineAttr(i)}>${escapeHtml(line, escapeOpts)}</p>`);
     } else {
       const cls = line.startsWith('「') ? 'dialogue-long' : 'paragraph-long';
-      htmlParts.push(`<p class="${cls}">${escapeHtml(line, escapeOpts)}</p>`);
+      htmlParts.push(`<p class="${cls}"${lineAttr(i)}>${escapeHtml(line, escapeOpts)}</p>`);
     }
   }
 
@@ -947,6 +957,25 @@ if (import.meta.vitest) {
       } finally {
         unlinkSync(tmp);
       }
+    });
+  });
+
+  describe('parseTextLines lineNumbers', () => {
+    test('メタ行と末尾の視点行を飛ばした元テキストの行番号を data-line に付ける', () => {
+      const { html } = parseTextLines(['POV: A', '【】', '', '本文一', 'Memo: x', '「台詞」', '【】'], { lineNumbers: true });
+      expect(html).toContain('<p class="viewpoint" data-line="1">');
+      expect(html).toContain('<p class="paragraph-short" data-line="3">本文一</p>');
+      expect(html).toContain('<p class="dialogue-short" data-line="5">');
+      expect(html).toContain('<p class="empty" data-line="2">&nbsp;</p>');
+      expect(html).not.toContain('data-line="6"');
+    });
+    test('行番号つきの空行も、区切り行の前後では区切りブロックに吸収される', () => {
+      const { html } = parseTextLines(['一', '', '◇◇◇', '', '二'], { lineNumbers: true });
+      expect(html).not.toContain('class="empty"');
+      expect(html).toContain('<div class="separator-block">');
+    });
+    test('既定では data-line を付けない', () => {
+      expect(parseTextLines(['本文']).html).toBe('<p class="paragraph-short">本文</p>');
     });
   });
 

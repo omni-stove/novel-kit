@@ -1,0 +1,215 @@
+/* 用紙と本文の色はエディタのテーマ（ダーク/ライト）に合わせる */
+:root {
+  --sheet-bg: var(--vscode-editor-background, #fff);
+  --sheet-fg: var(--vscode-editor-foreground, #000);
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+#toolbar, #setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+#setup {
+  align-items: flex-start;
+  gap: 10px 16px;
+}
+
+#setup[hidden] {
+  display: none;
+}
+
+#toolbar label, #setup label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 4px 10px 8px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  border-radius: 4px;
+}
+
+legend {
+  padding: 0 4px;
+  color: var(--vscode-descriptionForeground);
+}
+
+input, select, button {
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.4));
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+select {
+  color: var(--vscode-dropdown-foreground);
+  background: var(--vscode-dropdown-background);
+}
+
+input[type="number"] {
+  width: 3.6em;
+}
+
+input[type="radio"] {
+  margin: 0 2px 0 0;
+}
+
+#font-family {
+  width: 16em;
+}
+
+button {
+  cursor: pointer;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border-color: transparent;
+}
+
+button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+button[aria-pressed="true"] {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.segmented {
+  display: inline-flex;
+}
+
+.segmented button {
+  border-radius: 0;
+}
+
+.segmented button:first-child {
+  border-radius: 3px 0 0 3px;
+}
+
+.segmented button:last-child {
+  border-radius: 0 3px 3px 0;
+}
+
+#stats {
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#derived, #layout-file {
+  color: var(--vscode-descriptionForeground);
+  align-self: center;
+}
+
+#viewport {
+  flex: 1;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 0 24px;
+  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.15));
+}
+
+#stage {
+  position: relative;
+  margin: 24px auto;
+}
+
+#message {
+  padding: 32px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+.sheet {
+  position: absolute;
+  background: var(--sheet-bg);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+.sheet .nombre {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--sheet-fg);
+  font-family: Helvetica, Arial, sans-serif;
+}
+
+/* 版面。1段組みの段を1ページに見立て、あふれた段を次の用紙の位置へ送る
+   （字数ぶんの長さと段間は preview.js が用紙寸法から計算して入れる） */
+#flow {
+  position: absolute;
+  margin: 0;
+  column-count: 1;
+  column-fill: auto;
+  color: var(--sheet-fg);
+  cursor: default;
+}
+
+/* PDF 用スタイルが黒で実描画している全角ハイフンの棒も本文色にする */
+#flow .hyphen::before {
+  background: var(--sheet-fg);
+}
+
+/* PDF の改ページ（page-break-before: always）を段の区切りに置き換える */
+#flow .section.page-break {
+  break-before: column;
+}
+
+#flow .title-page,
+#flow .synopsis-page,
+#flow .characters-page {
+  break-after: column;
+}
+
+#flow .cursor-line {
+  background: rgba(255, 200, 0, 0.22);
+}
+
+#flow.editable [data-line] {
+  cursor: text;
+}
+
+/* 編集中の段落（元テキストを表示している） */
+#flow .editing {
+  outline: 1px solid rgba(0, 110, 220, 0.55);
+  background: rgba(0, 110, 220, 0.07);
+  min-block-size: 1lh;
+  break-inside: auto;
+  white-space: pre-wrap;
+}

@@ -1,0 +1,192 @@
+{
+  "name": "novel-preview",
+  "displayName": "小説プレビュー",
+  "description": "原稿テキスト（.txt）を PDF 出力と同じ組版でページ表示する。字数×行数などのレイアウトは Word のページ設定のように定義できる。",
+  "version": "0.6.9",
+  "publisher": "omnistove",
+  "private": true,
+  "license": "ISC",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "novelPreview.editor",
+        "displayName": "小説プレビュー",
+        "selector": [
+          {
+            "filenamePattern": "*.txt"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "novelPreview.open",
+        "title": "小説プレビューを横に開く",
+        "category": "小説",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "novelPreview.reopenAsPreview",
+        "title": "小説プレビューに切り替える",
+        "category": "小説",
+        "icon": "$(book)"
+      },
+      {
+        "command": "novelPreview.selectLayout",
+        "title": "レイアウト（字数×行数）を選ぶ",
+        "category": "小説"
+      },
+      {
+        "command": "novelPreview.exportPdf",
+        "title": "現在のレイアウトでPDFを出力",
+        "category": "小説"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "novelPreview.open",
+          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor",
+          "group": "navigation"
+        },
+        {
+          "command": "novelPreview.reopenAsPreview",
+          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor",
+          "group": "navigation"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "novelPreview.reopenAsPreview",
+          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor",
+          "group": "1_open"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "novelPreview.open",
+          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor"
+        },
+        {
+          "command": "novelPreview.reopenAsPreview",
+          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor"
+        },
+        {
+          "command": "novelPreview.selectLayout",
+          "when": "resourceExtname == .txt"
+        },
+        {
+          "command": "novelPreview.exportPdf",
+          "when": "resourceExtname == .txt"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "novelPreview.open",
+        "key": "ctrl+k v",
+        "mac": "cmd+k v",
+        "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor"
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": "novel-layout.json",
+        "url": "./schemas/layout.schema.json"
+      }
+    ],
+    "configuration": {
+      "title": "小説プレビュー",
+      "properties": {
+        "novelPreview.defaultPreset": {
+          "type": "string",
+          "default": "標準（30字・行数自動）",
+          "description": "原稿から上へたどっても novel-layout.json が見つからないときに使うプリセット名。"
+        },
+        "novelPreview.presets": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "追加のレイアウトプリセット（名前 → 定義）。プレビューの「ページ設定 > プリセットとして保存」でも追加できる。",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "writingMode": {
+                "enum": [
+                  "vertical",
+                  "horizontal"
+                ],
+                "description": "文字方向（縦書き / 横書き）"
+              },
+              "paper": {
+                "enum": [
+                  "A4",
+                  "B5",
+                  "A5",
+                  "B6",
+                  "A6"
+                ],
+                "description": "用紙サイズ"
+              },
+              "orientation": {
+                "enum": [
+                  "landscape",
+                  "portrait"
+                ],
+                "description": "用紙の向き"
+              },
+              "margin": {
+                "type": "object",
+                "description": "余白（mm）",
+                "properties": {
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  },
+                  "left": {
+                    "type": "number"
+                  }
+                }
+              },
+              "chars": {
+                "type": "integer",
+                "description": "1行の文字数"
+              },
+              "lines": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "1ページの行数（null で行送り自動）"
+              },
+              "fontFamily": {
+                "type": "string",
+                "description": "本文フォント（空なら PDF 出力と同じ明朝）"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.mts --bundle --platform=node --format=cjs --target=node20 --external:vscode --define:import.meta.vitest=undefined --log-override:empty-import-meta=silent --outfile=dist/extension.cjs",
+    "package": "pnpm run build && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license -o dist/novel-preview.vsix",
+    "install-extension": "pnpm run package && code --install-extension dist/novel-preview.vsix --force"
+  }
+}
