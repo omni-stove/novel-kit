@@ -4,7 +4,7 @@
   const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
   // 用紙と用紙の間隔（mm）と、表示領域の縁の余白（px。preview.css の #stage の margin と同じ）
-  const SHEET_GAP_MM = 8;
+  const SHEET_GAP_MM = 2;
   const STAGE_MARGIN_PX = 24;
   const PX_PER_MM = 96 / 25.4;
 
@@ -25,8 +25,12 @@
 
   // ---- ページ割り ----
 
+  // 「幅に合わせる」では左右の余白を取らず、用紙を表示領域の幅いっぱいに広げる
+  const sideMarginPx = () => (zoom === 'fit-width' ? 0 : STAGE_MARGIN_PX);
+
   function pxPerMm(metrics) {
-    const fitWidth = (viewport.clientWidth - STAGE_MARGIN_PX * 2) / metrics.paperW;
+    viewport.classList.toggle('fit-width', zoom === 'fit-width');
+    const fitWidth = (viewport.clientWidth - sideMarginPx() * 2) / metrics.paperW;
     const fitHeight = (viewport.clientHeight - STAGE_MARGIN_PX * 2) / metrics.paperH;
     if (zoom === 'fit-width') return Math.max(fitWidth, 0.5);
     if (zoom === 'fit-page') return Math.max(Math.min(fitWidth, fitHeight), 0.5);
@@ -91,7 +95,7 @@
     const offset = geometry.vertical
       ? viewport.scrollTop + viewport.clientHeight / 2
       : viewport.scrollLeft + viewport.clientWidth / 2;
-    const page = Math.floor((offset - STAGE_MARGIN_PX) / geometry.period) + 1;
+    const page = Math.floor((offset - (geometry.vertical ? STAGE_MARGIN_PX : sideMarginPx())) / geometry.period) + 1;
     return Math.min(Math.max(page, 1), geometry.pages);
   }
 
@@ -138,7 +142,7 @@
       }
     } else {
       const page = Math.floor((rect.left - stageRect.left) / geometry.period);
-      viewport.scrollLeft = STAGE_MARGIN_PX + page * geometry.period - 12;
+      viewport.scrollLeft = sideMarginPx() + page * geometry.period - 12;
       if (rect.bottom > view.bottom || rect.top < view.top) {
         viewport.scrollTop += (rect.top + rect.bottom) / 2 - (view.top + view.bottom) / 2;
       }
@@ -442,6 +446,18 @@
       if (!editing && staleDom) vscode.postMessage({ type: 'refresh' });
     }, 150);
   });
+
+  // 取り消し・やり直しは VS Code に渡さず拡張機能に頼む。カスタムエディタのタブでは VS Code の取り消しが
+  // 開いたファイルにしか効かず、作品全体の表示で別のファイルを編集したあとに無関係な変更を取り消してしまうため。
+  // VS Code が webview のキー入力を拾うのは window のバブリング段階なので、キャプチャ段階で止める
+  window.addEventListener('keydown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.isComposing) return;
+    const key = e.key.toLowerCase();
+    if (key !== 'z' && key !== 'y') return;
+    e.preventDefault();
+    e.stopPropagation();
+    vscode.postMessage({ type: key === 'y' || e.shiftKey ? 'redo' : 'undo' });
+  }, true);
 
   window.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {

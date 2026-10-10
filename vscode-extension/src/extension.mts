@@ -12,6 +12,8 @@ import { renderWebviewHtml } from './webview.mts';
 
 const PDF_SCRIPT = 'scripts/txt-to-pdf.mts';
 const RENDER_DELAY_MS = 250;
+// 同じ段落への入力がこの間隔以内に続けば、取り消しの1回分にまとめる
+const UNDO_GROUP_MS = 1500;
 // package.json の customEditors と同じID。workbench.editorAssociations で .txt の既定にできる
 const EDITOR_VIEW_TYPE = 'novelPreview.editor';
 
@@ -138,6 +140,16 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     externalChange: false,
     // 表示範囲。描画のたびに設定ファイルの値（既定は作品全体）で更新する
     scope: DEFAULT_VIEW.scope,
+    // プレビューでの編集の取り消し・やり直し。カスタムエディタの Cmd+Z は開いたファイルにしか効かず、
+    // 作品全体の表示で別のファイルを編集したときに無関係な変更を取り消してしまうので、自前で持つ
+    // 要素: { filePath, startLine, before: 行の配列, after: 行の配列, time }
+    undoStack: [],
+    redoStack: [],
+    // プレビューの外でファイルが変わったら、そのファイルの履歴は行位置が当てにならないので捨てる
+    dropHistory(filePath) {
+      session.undoStack = session.undoStack.filter(e => e.filePath !== filePath);
+      session.redoStack = session.redoStack.filter(e => e.filePath !== filePath);
+    },
     render,
     scheduleRender() {
       clearTimeout(renderTimer);
@@ -221,25 +233,81 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
 
     const edit = new vscode.WorkspaceEdit();
     let focusEdit = msg.focus ?? null;
+    let change;
     if (msg.type === 'merge') {
       if (msg.line === 0) return;
       const prev = target.lineAt(msg.line - 1);
+      const cur = target.lineAt(msg.line).text;
       edit.delete(target.uri, new vscode.Range(prev.range.end, new vscode.Position(msg.line, 0)));
       focusEdit = { fileIndex: msg.fileIndex, line: msg.line - 1, offset: prev.text.length };
+      change = { startLine: msg.line - 1, before: [prev.text, cur], after: [prev.text + cur] };
     } else {
-      if (target.lineAt(msg.line).text === msg.text) return;
+      const before = target.lineAt(msg.line).text;
+      if (before === msg.text) return;
       edit.replace(target.uri, target.lineAt(msg.line).range, msg.text);
+      change = { startLine: msg.line, before: [before], after: msg.text.split(/\r?\n/) };
     }
-    session.applying = true;
-    try {
-      await vscode.workspace.applyEdit(edit);
-    } finally {
-      session.applying = false;
-    }
+    if (!(await applyTracked(edit))) return;
+    recordHistory({ filePath, ...change });
 
     // 行数が変わると行番号がずれるので、すぐ組み直して編集位置を渡す
     // （1行の中の変更はプレビュー側が自分で表示を保つので、通常の遅延描画に任せる）
     if (msg.type === 'merge' || msg.text.includes('\n')) render({ focusEdit });
+  }
+
+  async function applyTracked(edit) {
+    session.applying = true;
+    try {
+      return await vscode.workspace.applyEdit(edit);
+    } finally {
+      session.applying = false;
+    }
+  }
+
+  function recordHistory(entry) {
+    session.redoStack = [];
+    const now = Date.now();
+    const last = session.undoStack.at(-1);
+    // 1つの段落の中で打ち続けている間は1回分にまとめる（行数が変わる編集はまとめない）
+    const typing = (e) => e.before.length === 1 && e.after.length === 1;
+    if (last && typing(last) && typing(entry) && last.filePath === entry.filePath
+      && last.startLine === entry.startLine && now - last.time < UNDO_GROUP_MS) {
+      last.after = entry.after;
+      last.time = now;
+      return;
+    }
+    session.undoStack.push({ ...entry, time: now });
+  }
+
+  // redo: false で取り消し、true でやり直し
+  async function undoPreviewEdit(redo) {
+    const from = redo ? session.redoStack : session.undoStack;
+    const to = redo ? session.undoStack : session.redoStack;
+    const entry = from.pop();
+    if (!entry) return;
+    const [current, restored] = redo ? [entry.before, entry.after] : [entry.after, entry.before];
+
+    const target = await vscode.workspace.openTextDocument(entry.filePath);
+    const endLine = entry.startLine + current.length - 1;
+    const intact = endLine < target.lineCount
+      && current.every((text, i) => target.lineAt(entry.startLine + i).text === text);
+    if (!intact) {
+      session.dropHistory(entry.filePath);
+      vscode.window.showWarningMessage(`${basename(entry.filePath)} がプレビューの外で変更されているため、${redo ? 'やり直せません' : '取り消せません'}。`);
+      return;
+    }
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(target.uri, new vscode.Range(entry.startLine, 0, endLine, target.lineAt(endLine).text.length), restored.join('\n'));
+    if (!(await applyTracked(edit))) return;
+    // まとめた入力の途中から打ち直しても、この取り消しとは別の1回にする
+    entry.time = 0;
+    to.push(entry);
+
+    // 変わった段落の末尾で編集を続ける（別のファイルなら、そこまで表示を動かす）
+    const fileIndex = session.files.indexOf(entry.filePath);
+    const line = entry.startLine + restored.length - 1;
+    render({ focusEdit: fileIndex < 0 ? null : { fileIndex, line, offset: restored.at(-1).length } });
   }
 
   async function saveFiles() {
@@ -272,6 +340,12 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         // 入力のたびに届くので、適用順が前後しないよう直列にする
         editQueue = editQueue.then(() => applyPreviewEdit(msg))
           .catch(err => vscode.window.showErrorMessage(`プレビューでの編集を反映できませんでした: ${err.message}`));
+        return editQueue;
+      case 'undo':
+      case 'redo':
+        // 直前の入力の反映が終わってから取り消す
+        editQueue = editQueue.then(() => undoPreviewEdit(msg.type === 'redo'))
+          .catch(err => vscode.window.showErrorMessage(`プレビューでの編集を${msg.type === 'redo' ? 'やり直せ' : '取り消せ'}ませんでした: ${err.message}`));
         return editQueue;
       case 'save':
         return saveFiles();
@@ -542,6 +616,7 @@ export function activate(ctx) {
       for (const session of sessions) {
         if (!session.files.includes(e.document.uri.fsPath)) continue;
         if (undoRedo || !session.applying) session.externalChange = true;
+        if (!session.applying) session.dropHistory(e.document.uri.fsPath);
         // 取り消し・やり直しは待たせず、すぐ表示に反映する
         if (undoRedo) session.render();
         else session.scheduleRender();

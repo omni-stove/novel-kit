@@ -2,7 +2,7 @@
   "name": "novel-preview",
   "displayName": "小説プレビュー",
   "description": "原稿テキスト（.txt）を PDF 出力と同じ組版でページ表示する。字数×行数などのレイアウトは Word のページ設定のように定義できる。",
-  "version": "0.6.9",
+  "version": "0.6.11",
   "publisher": "omnistove",
   "private": true,
   "license": "ISC",
