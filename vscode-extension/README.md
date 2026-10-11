@@ -39,7 +39,7 @@ Word の「ページ設定 > 文字数と行数」と同じ考え方で、用紙
   - 上位（例: `src/`）に置けば複数作品の共通設定になり、作品側に置いたものが優先される
   - 手で書き換えてもプレビューに即反映される。省略した項目は既定値
   - 表示範囲（このファイル / 作品全体）・表示倍率・「編集」のオンオフも同じファイルの `view` に保存する:
-    `"view": { "scope": "work", "zoom": "fit-width", "edit": true }`（`zoom` は `fit-width` / `fit-page` / 数値%）
+    `"view": { "scope": "work", "zoom": "fit", "edit": true }`（`zoom` は `fit`（画面に合わせる） / 数値%）
   - 見つからないときは `novelPreview.defaultPreset` のプリセットで表示する
 - 「プリセットとして保存…」で `.vscode/settings.json` の `novelPreview.presets` に保存する。手で書くなら:
 

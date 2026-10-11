@@ -76,13 +76,20 @@
           "description": "表示範囲（work: 同じディレクトリの本文ファイルを連結 / file: 開いているファイルだけ）"
         },
         "zoom": {
-          "description": "表示倍率（fit-width: 幅に合わせる / fit-page: ページ全体 / 数値: %）",
+          "description": "表示倍率（fit: 画面に合わせる / 数値: %）",
           "anyOf": [
+            {
+              "enum": [
+                "fit"
+              ]
+            },
             {
               "enum": [
                 "fit-width",
                 "fit-page"
-              ]
+              ],
+              "deprecated": true,
+              "description": "旧い値。fit として扱う"
             },
             {
               "type": "number",

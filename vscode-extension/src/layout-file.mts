@@ -32,8 +32,8 @@ export function findLayoutFile(startDir, rootDir = startDir) {
 export const DEFAULT_VIEW = {
   // 表示範囲: 'work' = 同じディレクトリの本文ファイルを連結 / 'file' = 開いているファイルだけ
   scope: 'work',
-  // 表示倍率: 'fit-width' / 'fit-page' / 数値（%）
-  zoom: 'fit-width',
+  // 表示倍率: 'fit'（用紙を幅・高さとも表示領域に収める） / 数値（%）
+  zoom: 'fit',
   // プレビュー上で段落をクリックして編集するか
   edit: true,
 };
@@ -43,9 +43,7 @@ export function normalizeView(raw) {
   const percent = Number(r.zoom);
   return {
     scope: r.scope === 'file' ? 'file' : DEFAULT_VIEW.scope,
-    zoom: r.zoom === 'fit-page' ? 'fit-page'
-      : Number.isFinite(percent) && percent >= 10 && percent <= 400 ? Math.round(percent)
-        : DEFAULT_VIEW.zoom,
+    zoom: Number.isFinite(percent) && percent >= 10 && percent <= 400 ? Math.round(percent) : DEFAULT_VIEW.zoom,
     edit: typeof r.edit === 'boolean' ? r.edit : DEFAULT_VIEW.edit,
   };
 }
@@ -123,8 +121,10 @@ if (import.meta.vitest) {
   describe('normalizeView', () => {
     test('不正値は既定に戻す', () => {
       expect(normalizeView({ scope: 'x', zoom: 'big', edit: 'yes' })).toEqual(DEFAULT_VIEW);
-      expect(normalizeView({ zoom: 'fit-page' }).zoom).toBe('fit-page');
-      expect(normalizeView({ zoom: 5000 }).zoom).toBe('fit-width');
+      expect(normalizeView({ zoom: 'fit-page' }).zoom).toBe('fit');
+      expect(normalizeView({ zoom: 'fit-width' }).zoom).toBe('fit');
+      expect(normalizeView({ zoom: 120 }).zoom).toBe(120);
+      expect(normalizeView({ zoom: 5000 }).zoom).toBe('fit');
     });
   });
 }

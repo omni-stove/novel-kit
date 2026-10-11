@@ -6,8 +6,7 @@
 import { PAPER_SIZES } from './layout.mts';
 
 const ZOOM_OPTIONS = [
-  ['fit-width', '幅に合わせる'],
-  ['fit-page', 'ページ全体'],
+  ['fit', '画面に合わせる'],
   ...[50, 75, 100, 125, 150, 200].map(p => [String(p), `${p}%`]),
 ];
 

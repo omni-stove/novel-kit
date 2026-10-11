@@ -17,7 +17,9 @@
   let geometry = null;
   let lastReveal = null;
   // 表示倍率と編集のオンオフは設定ファイル（render で届く view）の値に従う
-  let zoom = 'fit-width';
+  // 数値（%）でなければ「画面に合わせる」。旧い値（fit-width / fit-page）もここに寄せる
+  const normalizeZoom = (value) => (Number(value) > 0 ? String(value) : 'fit');
+  let zoom = 'fit';
   $('zoom').value = zoom;
 
   const formatNumber = (n) => n.toLocaleString('ja-JP');
@@ -25,15 +27,14 @@
 
   // ---- ページ割り ----
 
-  // 「幅に合わせる」では左右の余白を取らず、用紙を表示領域の幅いっぱいに広げる
-  const sideMarginPx = () => (zoom === 'fit-width' ? 0 : STAGE_MARGIN_PX);
+  // 「画面に合わせる」では左右の余白を取らず、幅が決め手になるときは用紙を表示領域の幅いっぱいに広げる
+  const sideMarginPx = () => (zoom === 'fit' ? 0 : STAGE_MARGIN_PX);
 
   function pxPerMm(metrics) {
-    viewport.classList.toggle('fit-width', zoom === 'fit-width');
+    viewport.classList.toggle('fit', zoom === 'fit');
     const fitWidth = (viewport.clientWidth - sideMarginPx() * 2) / metrics.paperW;
     const fitHeight = (viewport.clientHeight - STAGE_MARGIN_PX * 2) / metrics.paperH;
-    if (zoom === 'fit-width') return Math.max(fitWidth, 0.5);
-    if (zoom === 'fit-page') return Math.max(Math.min(fitWidth, fitHeight), 0.5);
+    if (zoom === 'fit') return Math.max(Math.min(fitWidth, fitHeight), 0.5);
     return PX_PER_MM * Number(zoom) / 100;
   }
 
@@ -86,7 +87,7 @@
     stage.style.width = `${m.vertical ? sheetW : pages * period - gap}px`;
     stage.style.height = `${m.vertical ? pages * period - gap : sheetH}px`;
 
-    geometry = { vertical: m.vertical, period, pages };
+    geometry = { vertical: m.vertical, period, pages, sheet: m.vertical ? sheetH : sheetW };
     updateStats();
   }
 
@@ -545,8 +546,8 @@
       : { type: 'openText' });
   });
   $('zoom').addEventListener('change', (e) => {
-    zoom = e.target.value;
-    vscode.postMessage({ type: 'view', view: { zoom: zoom.startsWith('fit') ? zoom : Number(zoom) } });
+    zoom = normalizeZoom(e.target.value);
+    vscode.postMessage({ type: 'view', view: { zoom: zoom === 'fit' ? zoom : Number(zoom) } });
     layoutStage();
     reveal(lastReveal);
   });
@@ -573,7 +574,7 @@
       clearTimeout(refreshTimer);
       model = data;
       staleDom = false;
-      zoom = String(data.view.zoom);
+      zoom = normalizeZoom(data.view.zoom);
       $('zoom').value = zoom;
       if (data.view.edit !== editEnabled) setEditEnabled(data.view.edit);
       $('message').hidden = true;
@@ -635,6 +636,85 @@
     cancelAnimationFrame(saveScrollFrame);
     saveScrollFrame = requestAnimationFrame(saveScroll);
   }, { passive: true });
+
+  // ---- ホイールでのページ送り ----
+  // ひと払い（トラックパッドなら慣性まで含めたひと続き）で1ページだけ送る。
+  // 送ったあとの入力は、途切れる・向きが変わる・慣性で弱まったあとに強まる（＝次を払った）まで捨てる
+
+  const WHEEL_THRESHOLD_PX = 8;
+  const WHEEL_QUIET_MS = 150;
+  const WHEEL_MIN_INTERVAL_MS = 250;
+  const wheel = { armed: true, accum: 0, lastAt: 0, lastAbs: 0, lastSign: 0, peak: 0, decaying: false, turnedAt: 0 };
+
+  function scrollToPage(page) {
+    if (!geometry) return;
+    const index = Math.min(Math.max(page, 1), geometry.pages) - 1;
+    const start = (geometry.vertical ? STAGE_MARGIN_PX : sideMarginPx()) + index * geometry.period;
+    const client = geometry.vertical ? viewport.clientHeight : viewport.clientWidth;
+    // 用紙が表示領域に収まるなら真ん中に、収まらなければ用紙の頭を表示領域の頭に合わせる
+    const offset = start - Math.max(0, (client - geometry.sheet) / 2);
+    if (geometry.vertical) viewport.scrollTop = offset;
+    else viewport.scrollLeft = offset;
+  }
+
+  function isNewWheelGesture(now, abs, sign) {
+    if (now - wheel.lastAt > WHEEL_QUIET_MS) return true;
+    if (sign !== wheel.lastSign) return true;
+    if (now - wheel.turnedAt < WHEEL_MIN_INTERVAL_MS) return false;
+    return wheel.decaying && abs > wheel.lastAbs * 1.5 + 2;
+  }
+
+  viewport.addEventListener('wheel', (e) => {
+    // ピンチ（Ctrl+ホイール）は VS Code の拡大縮小に任せる
+    if (!geometry || e.ctrlKey) return;
+    // 縦書きで横方向に回したときは、ページ内の左右の移動として通常どおりスクロールさせる
+    if (geometry.vertical && Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    if (delta === 0) return;
+    const now = e.timeStamp;
+    const abs = Math.abs(delta);
+    const sign = Math.sign(delta);
+    if (!wheel.armed && isNewWheelGesture(now, abs, sign)) {
+      wheel.armed = true;
+      wheel.accum = 0;
+    }
+    wheel.lastAt = now;
+    wheel.lastAbs = abs;
+    wheel.lastSign = sign;
+    wheel.peak = Math.max(wheel.peak, abs);
+    if (abs < wheel.peak * 0.5) wheel.decaying = true;
+    if (!wheel.armed) return;
+    wheel.accum += delta;
+    if (Math.abs(wheel.accum) < WHEEL_THRESHOLD_PX) return;
+    wheel.armed = false;
+    wheel.turnedAt = now;
+    wheel.peak = abs;
+    wheel.decaying = false;
+    scrollToPage(currentPage() + Math.sign(wheel.accum));
+  }, { passive: false });
+
+  // ---- キーでのページ送り ----
+  // 段落を編集していないとき（入力欄にもいないとき）は、カーソルキーなどで1ページずつ送る。
+  // 縦書きは左へ読み進めるので ← を次のページにする
+
+  const PAGE_KEYS_VERTICAL = { ArrowDown: 1, ArrowLeft: 1, PageDown: 1, ' ': 1, ArrowUp: -1, ArrowRight: -1, PageUp: -1 };
+  const PAGE_KEYS_HORIZONTAL = { ArrowDown: 1, ArrowRight: 1, PageDown: 1, ' ': 1, ArrowUp: -1, ArrowLeft: -1, PageUp: -1 };
+
+  window.addEventListener('keydown', (e) => {
+    if (!geometry || editing || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
+    const target = /** @type {HTMLElement} */ (e.target);
+    if (target.isContentEditable || target.closest('input, select, textarea, #setup')) return;
+    if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      scrollToPage(e.key === 'Home' ? 1 : geometry.pages);
+      return;
+    }
+    const step = (geometry.vertical ? PAGE_KEYS_VERTICAL : PAGE_KEYS_HORIZONTAL)[e.key];
+    if (!step) return;
+    e.preventDefault();
+    scrollToPage(currentPage() + (e.key === ' ' && e.shiftKey ? -step : step));
+  });
 
   let resizeFrame = 0;
   new ResizeObserver(() => {

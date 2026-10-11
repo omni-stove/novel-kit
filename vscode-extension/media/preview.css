@@ -144,7 +144,7 @@ button:disabled {
   background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.15));
 }
 
-#viewport.fit-width {
+#viewport.fit {
   padding: 0;
 }
 
