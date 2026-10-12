@@ -14,9 +14,12 @@ export function googleFontsLinks(family) {
  * txt-to-pdf / txt-to-novel-pdf が共有する。
  */
 export const VERTICAL_GLYPH_CSS = `
+    /* 1文字ずつの欧文・数字（.latin / .upright）。text-combine-upright: all だと
+       Chromium は合成した横組みをフォントの ascent/descent で配置するため、
+       Noto Serif JP（Web フォント版）では列の中央より約 0.2em 右・やや下へ寄る。
+       フォントの縦組み用メトリクス（vmtx）で配置する upright なら列の中央に揃う。 */
     .latin {
-      text-combine-upright: all;
-      -webkit-text-combine: horizontal;
+      text-orientation: upright;
     }
 
     .sideways-latin {
@@ -28,8 +31,7 @@ export const VERTICAL_GLYPH_CSS = `
     }
 
     .upright {
-      text-combine-upright: all;
-      -webkit-text-combine: horizontal;
+      text-orientation: upright;
     }
 
     /* 縦中横（1〜2桁の数字・!?等）。
@@ -95,13 +97,17 @@ export const VERTICAL_GLYPH_CSS = `
       position: relative;
     }
 
+    /* ルビは親文字の右（block-start 側）に絶対配置する。
+       プレビューは段組み（multicol）で頁を送るため、rt の箱を段の端より外に置くと
+       Chromium が段の内側へ押し戻して親文字に重ねて描く（各頁の先頭行だけルビが潰れる）。
+       箱は親文字の右端に揃えて段内に置き、レイアウトに影響しない transform で
+       自分の幅ぶん（-0.4em の食い込み込み）右へ見かけだけずらす。 */
     rt {
       font-size: 0.5em;
       position: absolute;
-      left: 100%;
-      margin-left: -0.4em;
+      right: 0;
       top: 50%;
-      transform: translateY(-50%);
+      transform: translate(calc(100% - 0.4em), -50%);
       white-space: nowrap;
     }
 
@@ -119,12 +125,10 @@ export const VERTICAL_GLYPH_CSS = `
 
     ruby.fit > rt {
       top: auto;
-      left: auto;
-      margin-left: 0;
+      right: auto;
       inset-inline-start: calc(var(--rt-off, 0) * 1em);
-      inset-block-end: 100%;
-      margin-block-end: -0.4em;
-      transform: none;
+      inset-block-start: 0;
+      transform: translateX(calc(100% - 0.4em));
       letter-spacing: calc(var(--rt-ls, 0) * 1em);
     }
 `;

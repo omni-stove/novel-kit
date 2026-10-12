@@ -266,7 +266,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       r = r.replace(/\.?\d[\d,.]*\d|\d/g, (match) => {
         const converted = match.replace(/\./g, '．').replace(/,/g, '，');
         if (/^\d{1,2}$/.test(match)) return phSpan(`<span class="tcy">${match}</span>`);
-        // 3桁以上の数字も1文字ずつ独立した正方セルへ（text-combine-upright: all で中央寄せ）
+        // 3桁以上の数字も1文字ずつ独立した正方セルへ（CSS .upright 側の text-orientation: upright で中央寄せ）
         return [...converted].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
       });
       // 拡張ラテン文字（À–ɏ, Ḁ–1EFF）も含めて upright 化。
@@ -274,7 +274,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       const latinChar = 'a-zA-Z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u024F\\u1E00-\\u1EFF';
       const latinRe = new RegExp(`[${latinChar}]+(?:\\s[${latinChar}]+)*`, 'g');
       // 1文字ずつ独立した正方セルに収めることで、y/g/p/j のディセンダがベースラインで
-      // 下にずれないようにする（CSS .latin 側で text-combine-upright: all を適用）。
+      // 下にずれないようにする（CSS .latin 側で text-orientation: upright を適用）。
       r = r.replace(latinRe, (match) => {
         return [...match].map(c => /\s/.test(c) ? c : phSpan(`<span class="latin">${c}</span>`)).join('');
       });
@@ -858,7 +858,7 @@ if (import.meta.vitest) {
       expect(escapeHtml('1-1', { vertical: true, separateSymbolClasses: true })).toBe('<span class="tcy">1</span><span class="dash">\uFF0D</span><span class="tcy">1</span>');
     });
     test('\u7E26\u66F8\u304D\u3067\u30A2\u30AF\u30BB\u30F3\u30C8\u4ED8\u304D\u30E9\u30C6\u30F3\u6587\u5B57\u3082 latin \u30AF\u30E9\u30B9\u3067\u7ACB\u3066\u308B', () => {
-      // 1文字ずつ独立した span に分けて、各文字を text-combine-upright で正方セルに収める
+      // 1文字ずつ独立した span に分けて、各文字を text-orientation: upright で正方セルに収める
       expect(escapeHtml('ab', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>');
       expect(escapeHtml('C\u00F4te', { vertical: true })).toBe('<span class="latin">C</span><span class="latin">\u00F4</span><span class="latin">t</span><span class="latin">e</span>');
       expect(escapeHtml('\u00DCber', { vertical: true })).toBe('<span class="latin">\u00DC</span><span class="latin">b</span><span class="latin">e</span><span class="latin">r</span>');
