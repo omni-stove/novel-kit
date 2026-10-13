@@ -117,17 +117,13 @@
         "novelPreview.presets": {
           "type": "object",
           "default": {},
-          "markdownDescription": "追加のレイアウトプリセット（名前 → 定義）。プレビューの「ページ設定 > プリセットとして保存」でも追加できる。",
+          "markdownDescription": "追加のレイアウトプリセット（名前 → 定義）。プレビューの「ページ設定 > プリセットとして保存」でも追加できる。`\"english\": true` のものは英語の原稿用。",
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "language": {
-                "enum": [
-                  "auto",
-                  "ja",
-                  "en"
-                ],
-                "description": "組版の言語（auto: 原稿の文字で判定。アルファベットが多ければ英語 / ja / en）"
+              "english": {
+                "type": "boolean",
+                "description": "英語のレイアウト（用紙・余白・fontSize・lineHeight）。英語の原稿のときだけ出す"
               },
               "writingMode": {
                 "enum": [
@@ -185,18 +181,12 @@
                 "description": "1ページの行数（null で行送り自動）"
               },
               "fontSize": {
-                "type": [
-                  "number",
-                  "null"
-                ],
-                "description": "英語組版の本文の文字サイズ（pt。null で 11pt）"
+                "type": "number",
+                "description": "英語のレイアウトの本文の文字サイズ（pt）"
               },
               "lineHeight": {
-                "type": [
-                  "number",
-                  "null"
-                ],
-                "description": "英語組版の行送り（倍率。null で 1.4）"
+                "type": "number",
+                "description": "英語のレイアウトの行送り（倍率）"
               },
               "fontFamily": {
                 "type": "string",

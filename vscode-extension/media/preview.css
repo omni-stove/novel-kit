@@ -134,7 +134,7 @@ button:disabled {
   white-space: nowrap;
 }
 
-#derived, #layout-file {
+#derived, #layout-file, #language-note {
   color: var(--vscode-descriptionForeground);
   align-self: center;
 }

@@ -34,11 +34,15 @@
   // （ペーパーバックを1ページずつめくる見え方）ので、先頭のページが中央に来るぶんの余白を取る
   const leadPx = () => geometry?.lead ?? sideMarginPx();
 
+  // 横書きで縦長の用紙（英語のペーパーバックなど）は、幅が狭くても高さに合わせて1ページを丸ごと見せる
+  // （幅が足りないぶんは左右の余白が切れるだけで、本文は見える）。上下の余白は取らず、表示領域の高さいっぱいに使う
+  const fitsHeight = (metrics) => !metrics.vertical && metrics.paperH > metrics.paperW;
+
   function pxPerMm(metrics) {
     viewport.classList.toggle('fit', zoom === 'fit');
     const fitWidth = (viewport.clientWidth - sideMarginPx() * 2) / metrics.paperW;
     const fitHeight = (viewport.clientHeight - STAGE_MARGIN_PX * 2) / metrics.paperH;
-    if (zoom === 'fit') return Math.max(Math.min(fitWidth, fitHeight), 0.5);
+    if (zoom === 'fit') return Math.max(fitsHeight(metrics) ? viewport.clientHeight / metrics.paperH : Math.min(fitWidth, fitHeight), 0.5);
     return PX_PER_MM * Number(zoom) / 100;
   }
 
@@ -70,8 +74,8 @@
     const gap = SHEET_GAP_MM * u;
     const centered = !m.vertical && zoom === 'fit';
     const lead = centered ? Math.max(0, (viewport.clientWidth - sheetW) / 2) : sideMarginPx();
-    // 先頭と末尾のページも中央に置けるよう、並びの両側に同じ余白を取る
-    stage.style.margin = centered ? `${STAGE_MARGIN_PX}px ${lead}px` : '';
+    // 先頭と末尾のページも中央に置けるよう、並びの両側に同じ余白を取る。上下は高さに合わせた用紙なら余白なし
+    stage.style.margin = centered ? `${fitsHeight(m) ? 0 : STAGE_MARGIN_PX}px ${lead}px` : '';
 
     while (sheets.children.length > pages) sheets.lastChild.remove();
     while (sheets.children.length < pages) {
@@ -95,7 +99,10 @@
     stage.style.width = `${m.vertical ? sheetW : pages * period - gap}px`;
     stage.style.height = `${m.vertical ? pages * period - gap : sheetH}px`;
 
+    const first = !geometry;
     geometry = { vertical: m.vertical, period, pages, sheet: m.vertical ? sheetH : sheetW, lead, centered };
+    // 用紙が表示領域より広いときは、最初の表示で先頭ページの真ん中（本文）が見えるようにする
+    if (first && centered && sheetW > viewport.clientWidth) scrollToPage(1);
     updateStats();
   }
 
@@ -503,22 +510,17 @@
 
     $('grid-fields').hidden = english;
     $('en-fields').hidden = !english;
-    $('chars').value = layout.chars;
+    $('chars').value = layout.chars ?? '';
     $('lines').value = layout.lines ?? '';
     $('lines').placeholder = `自動(${metrics.lines})`;
-    $('font-size').value = layout.fontSize ?? '';
-    $('font-size').placeholder = String(metrics.fontSizePt);
-    $('line-height').value = layout.lineHeight ?? '';
-    $('line-height').placeholder = String(metrics.lineHeight);
+    $('font-size').value = english ? layout.fontSize : '';
+    $('line-height').value = english ? layout.lineHeight : '';
 
-    $('language').value = layout.language;
-    $('language-note').textContent = english && layout.language !== 'en'
-      ? '原稿の文字から英語と判定（English の組版）'
-      : english ? 'English の組版（横書き固定）' : '日本語の組版';
-    // 英語は横書き固定
+    // 言語は原稿の文字から判定する。英語は横書き固定で、設定ファイルの "english" のレイアウトを使う
+    $('language-note').textContent = english ? '英語の原稿（横書き固定。設定は english に保存）' : '';
     $('writing-mode-fields').hidden = english;
     for (const radio of document.querySelectorAll('input[name="writing-mode"]')) {
-      radio.checked = radio.value === layout.writingMode;
+      radio.checked = radio.value === (layout.writingMode ?? 'horizontal');
     }
     $('paper').value = layout.paper;
     $('orientation').value = layout.orientation;
@@ -540,7 +542,6 @@
 
   function readForm() {
     return {
-      language: $('language').value,
       writingMode: document.querySelector('input[name="writing-mode"]:checked')?.value,
       paper: $('paper').value,
       orientation: $('orientation').value,
@@ -743,7 +744,9 @@
     const start = (geometry.vertical ? STAGE_MARGIN_PX : leadPx()) + index * geometry.period;
     const client = geometry.vertical ? viewport.clientHeight : viewport.clientWidth;
     // 用紙が表示領域に収まるなら真ん中に、収まらなければ用紙の頭を表示領域の頭に合わせる
-    const offset = start - Math.max(0, (client - geometry.sheet) / 2);
+    // （横書きで1ページずつ中央に出す表示では、収まらなくても真ん中を見せる＝左右の余白だけが切れる）
+    const slack = (client - geometry.sheet) / 2;
+    const offset = start - (geometry.centered ? slack : Math.max(0, slack));
     if (geometry.vertical) viewport.scrollTop = offset;
     else viewport.scrollLeft = offset;
   }

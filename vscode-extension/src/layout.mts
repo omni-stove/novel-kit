@@ -1,7 +1,9 @@
 /**
  * ページレイアウト定義（Word の「ページ設定 > 文字数と行数」に相当）と、そこから導く組版寸法。
- * 用紙・余白・字数・行数を決めると、文字サイズと行送りが決まる。
+ * 日本語は用紙・余白・字数・行数を決めると、文字サイズと行送りが決まる。
  * 既定値（A4横・余白 20/20/25/20mm）は scripts/txt-to-pdf.mts の calcVerticalLayout と同じ寸法になる。
+ * 英語（原稿の文字で判定）は用紙・余白・文字サイズ・行送りを決め、横書き固定で、行数は版面から決まる。
+ * 既定値（6×9in）は scripts/txt-to-en-pdf.mts の PAGE_SIZES と同じ。
  */
 
 // 短辺 x 長辺（mm）。6x9in / 5x8in は英語ペーパーバックの判型（scripts/txt-to-en-pdf.mts の --6x9 / --5x8）
@@ -19,15 +21,10 @@ const MM_PER_PT = 0.3528;
 const MM_PER_IN = 25.4;
 // 行数を指定しないときの行送り（txt-to-pdf の既定と同じ）
 const AUTO_LINE_HEIGHT = { vertical: 1.125, horizontal: 1.8 };
-// 英語組版で文字サイズ・行送りを指定しないときの値（txt-to-en-pdf の 6×9in と同じ）
-export const EN_DEFAULT_FONT_SIZE = 11;
-export const EN_DEFAULT_LINE_HEIGHT = 1.4;
 // 英文の平均字幅の目安（em）。字数×行数の表示に使う
 const EN_AVERAGE_CHAR_WIDTH = 0.5;
 
 export const DEFAULT_LAYOUT = {
-  // 組版の言語。'auto' は原稿の文字で判定（アルファベットが多ければ英語）、'ja' / 'en' は固定
-  language: 'auto',
   writingMode: 'vertical',
   paper: 'A4',
   orientation: 'landscape',
@@ -35,16 +32,21 @@ export const DEFAULT_LAYOUT = {
   chars: 30,
   // null は行送りを自動（字送りの 1.125 倍）にして、入るだけ行を入れる
   lines: null,
-  // 英語組版の本文の文字サイズ（pt）と行送り（倍率）。null は既定（11pt / 1.4）。日本語組版では字数から決まるので使わない
-  fontSize: null,
-  lineHeight: null,
   fontFamily: '',
 };
 
 const inMm = (inch) => Math.round(inch * MM_PER_IN * 100) / 100;
 
-// 英語ペーパーバック（txt-to-en-pdf.mts の PAGE_SIZES と同じ判型・余白。見開きの内側の余白を左に置く）
-const EN_LAYOUT = { ...DEFAULT_LAYOUT, language: 'en', writingMode: 'horizontal', orientation: 'portrait' };
+// 英語の組版。見開きの内側の余白を左、外側を右に置く（プレビューは単ページ）
+export const DEFAULT_ENGLISH_LAYOUT = {
+  paper: '6x9in',
+  orientation: 'portrait',
+  margin: { top: inMm(0.7), right: inMm(0.6), bottom: inMm(0.6), left: inMm(0.8) },
+  // 本文の文字サイズ（pt）と行送り（倍率）
+  fontSize: 11,
+  lineHeight: 1.4,
+  fontFamily: '',
+};
 
 export const BUILTIN_PRESETS = {
   '標準（30字・行数自動）': DEFAULT_LAYOUT,
@@ -60,26 +62,22 @@ export const BUILTIN_PRESETS = {
     chars: 40,
     lines: 17,
   },
-  'English 6×9in（US Trade）': {
-    ...EN_LAYOUT,
-    paper: '6x9in',
-    margin: { top: inMm(0.7), right: inMm(0.6), bottom: inMm(0.6), left: inMm(0.8) },
-    fontSize: 11,
-    lineHeight: 1.4,
-  },
-  'English 5×8in（Trade Paperback）': {
-    ...EN_LAYOUT,
+};
+
+// 英語のプリセット（txt-to-en-pdf.mts の PAGE_SIZES と同じ判型・余白・文字サイズ）
+export const BUILTIN_ENGLISH_PRESETS = {
+  '6×9in（US Trade）': DEFAULT_ENGLISH_LAYOUT,
+  '5×8in（Trade Paperback）': {
+    ...DEFAULT_ENGLISH_LAYOUT,
     paper: '5x8in',
     margin: { top: inMm(0.6), right: inMm(0.5), bottom: inMm(0.55), left: inMm(0.7) },
     fontSize: 10.5,
     lineHeight: 1.35,
   },
-  'English A5': {
-    ...EN_LAYOUT,
+  A5: {
+    ...DEFAULT_ENGLISH_LAYOUT,
     paper: 'A5',
     margin: { top: 16, right: 15, bottom: 14, left: 18 },
-    fontSize: 11,
-    lineHeight: 1.4,
   },
 };
 
@@ -93,35 +91,53 @@ const clampMm = (v, fallback) => {
   return Number.isFinite(n) && n >= 0 ? Math.min(n, 100) : fallback;
 };
 
-// 空・null は「既定」。それ以外は範囲に収めた数値（0.01 刻み）
-const optionalNumber = (v, min, max) => {
-  if (v == null || v === '') return null;
+// 範囲に収めた数値（0.01 刻み）。範囲外・不正値は既定
+const clampNumber = (v, min, max, fallback) => {
   const n = Math.round(Number(v) * 100) / 100;
-  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+  return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
 };
 
-// 設定ファイルや webview から来た値を、欠けや不正値を既定で埋めたレイアウトにする
-export function normalizeLayout(raw) {
+const normalizeMargin = (raw, d) => {
+  const m = raw && typeof raw === 'object' ? raw : {};
+  return {
+    top: clampMm(m.top, d.top),
+    right: clampMm(m.right, d.right),
+    bottom: clampMm(m.bottom, d.bottom),
+    left: clampMm(m.left, d.left),
+  };
+};
+
+/**
+ * 設定ファイルや webview から来た値を、欠けや不正値を既定で埋めたレイアウトにする。
+ * english: true なら英語のレイアウト（用紙・余白・文字サイズ・行送り・フォント）
+ */
+export function normalizeLayout(raw, { english = false } = {}) {
   const r = raw && typeof raw === 'object' ? raw : {};
-  const m = r.margin && typeof r.margin === 'object' ? r.margin : {};
+  if (english) {
+    const d = DEFAULT_ENGLISH_LAYOUT;
+    return {
+      paper: r.paper in PAPER_SIZES ? r.paper : d.paper,
+      orientation: r.orientation === 'landscape' ? 'landscape' : r.orientation === 'portrait' ? 'portrait' : d.orientation,
+      margin: normalizeMargin(r.margin, d.margin),
+      fontSize: clampNumber(r.fontSize, 5, 40, d.fontSize),
+      lineHeight: clampNumber(r.lineHeight, 1, 3, d.lineHeight),
+      fontFamily: typeof r.fontFamily === 'string' ? r.fontFamily.trim() : '',
+    };
+  }
   const d = DEFAULT_LAYOUT;
   return {
-    language: r.language === 'en' || r.language === 'ja' ? r.language : d.language,
     writingMode: r.writingMode === 'horizontal' ? 'horizontal' : 'vertical',
     paper: r.paper in PAPER_SIZES ? r.paper : d.paper,
     orientation: r.orientation === 'portrait' ? 'portrait' : r.orientation === 'landscape' ? 'landscape' : d.orientation,
-    margin: {
-      top: clampMm(m.top, d.margin.top),
-      right: clampMm(m.right, d.margin.right),
-      bottom: clampMm(m.bottom, d.margin.bottom),
-      left: clampMm(m.left, d.margin.left),
-    },
+    margin: normalizeMargin(r.margin, d.margin),
     chars: clampInt(r.chars, 5, 100, d.chars),
     lines: r.lines == null || r.lines === '' ? null : clampInt(r.lines, 1, 100, null),
-    fontSize: optionalNumber(r.fontSize, 5, 40),
-    lineHeight: optionalNumber(r.lineHeight, 1, 3),
     fontFamily: typeof r.fontFamily === 'string' ? r.fontFamily.trim() : '',
   };
+}
+
+export function layoutsEqual(a, b, opts = {}) {
+  return JSON.stringify(normalizeLayout(a, opts)) === JSON.stringify(normalizeLayout(b, opts));
 }
 
 // 原稿の文字から組版の言語を判定する。本文（メタ行を除く）のアルファベットが日本語の文字より多ければ英語
@@ -136,24 +152,12 @@ export function detectLanguage(lines, isMetaLine = () => false) {
   return latin > japanese ? 'en' : 'ja';
 }
 
-// 原稿に効く言語。自動判定で英語ならそれを優先し、そうでなければ設定ファイルの language に従う
-export function resolveLanguage(rawLayout, detected) {
-  if (detected === 'en') return 'en';
-  const { language } = normalizeLayout(rawLayout);
-  return language === 'en' ? 'en' : 'ja';
-}
-
-export function layoutsEqual(a, b) {
-  return JSON.stringify(normalizeLayout(a)) === JSON.stringify(normalizeLayout(b));
-}
-
 /**
- * language: 'ja' | 'en'（省略時は layout.language。'auto' は日本語扱い。原稿から判定した値は resolveLanguage で決めて渡す）
- * 日本語は字数から文字サイズが決まる。英語は文字サイズ・行送りを直接指定し、横書き固定で、chars は版面幅を字面の大きさで割った値になる
+ * english: true なら英語のレイアウトとして組む（横書き固定。chars は版面幅を文字サイズで割った値）。
+ * 日本語は字数から文字サイズが決まる
  */
-export function computeMetrics(rawLayout, { language = null } = {}) {
-  const layout = normalizeLayout(rawLayout);
-  const english = (language ?? layout.language) === 'en';
+export function computeMetrics(rawLayout, { english = false } = {}) {
+  const layout = normalizeLayout(rawLayout, { english });
   const vertical = !english && layout.writingMode === 'vertical';
   const [short, long] = PAPER_SIZES[layout.paper];
   const paperW = layout.orientation === 'landscape' ? long : short;
@@ -175,9 +179,9 @@ export function computeMetrics(rawLayout, { language = null } = {}) {
   };
 
   if (english) {
-    const fontSizePt = layout.fontSize ?? EN_DEFAULT_FONT_SIZE;
+    const fontSizePt = layout.fontSize;
     const fontSizeMm = fontSizePt * MM_PER_PT;
-    const lineHeight = layout.lineHeight ?? EN_DEFAULT_LINE_HEIGHT;
+    const lineHeight = layout.lineHeight;
     return {
       ...base,
       // 版面幅を em で表した値（プレビューが版面の幅を chars × 文字サイズで決めるため、整数にしない）
@@ -222,14 +226,14 @@ export function matchesPdfScriptPage(rawLayout) {
 
 // scripts/txt-to-en-pdf.mts の判型（--5x8 / --6x9 / --a5）に対応する用紙かどうか。向きが縦でなければ null
 export function enPdfPageSize(rawLayout) {
-  const { paper, orientation } = normalizeLayout(rawLayout);
+  const { paper, orientation } = normalizeLayout(rawLayout, { english: true });
   if (orientation !== 'portrait') return null;
   return { '5x8in': '5x8', '6x9in': '6x9', A5: 'a5' }[paper] ?? null;
 }
 
-export function describeLayout(rawLayout, { language = null } = {}) {
-  const m = computeMetrics(rawLayout, { language });
-  if (m.language === 'en') return `${m.fontSizePt}pt・行送り${m.lineHeight}（約${m.charsApprox}字×${m.lines}行）`;
+export function describeLayout(rawLayout, { english = false } = {}) {
+  const m = computeMetrics(rawLayout, { english });
+  if (english) return `${m.fontSizePt}pt・行送り${m.lineHeight}（約${m.charsApprox}字×${m.lines}行）`;
   return `${m.chars}字×${m.lines}行`;
 }
 
@@ -258,25 +262,9 @@ if (import.meta.vitest) {
     });
   });
 
-  describe('normalizeLayout', () => {
-    test('欠けた値・不正値は既定で埋める', () => {
-      expect(normalizeLayout(null)).toEqual(DEFAULT_LAYOUT);
-      expect(normalizeLayout({ chars: 'x', lines: '', paper: 'Z9', margin: { top: -1 } })).toEqual(DEFAULT_LAYOUT);
-    });
-    test('指定値は丸めて採用する', () => {
-      const l = normalizeLayout({ chars: '40', lines: 34.4, paper: 'B5', orientation: 'portrait', margin: { top: 10 } });
-      expect(l).toMatchObject({ chars: 40, lines: 34, paper: 'B5', orientation: 'portrait' });
-      expect(l.margin).toEqual({ top: 10, right: 20, bottom: 25, left: 20 });
-    });
-    test('言語・文字サイズ・行送りは不正値を既定に戻す', () => {
-      expect(normalizeLayout({ language: 'en', fontSize: '10.5', lineHeight: 1.35 })).toMatchObject({ language: 'en', fontSize: 10.5, lineHeight: 1.35 });
-      expect(normalizeLayout({ language: 'fr', fontSize: 'big', lineHeight: 9 })).toMatchObject({ language: 'auto', fontSize: null, lineHeight: null });
-    });
-  });
-
-  describe('英語組版', () => {
+  describe('英語の組版', () => {
     test('文字サイズと行送りを直接指定し、横書き固定で、行数は版面から決まる', () => {
-      const m = computeMetrics(BUILTIN_PRESETS['English 6×9in（US Trade）']);
+      const m = computeMetrics(DEFAULT_ENGLISH_LAYOUT, { english: true });
       expect(m.language).toBe('en');
       expect(m.vertical).toBe(false);
       expect(m.fontSizePt).toBe(11);
@@ -286,13 +274,12 @@ if (import.meta.vitest) {
       expect(m.chars * m.fontSizeMm).toBeCloseTo(116.84, 6);
       expect(m.lines).toBe(Math.floor((228.6 - 17.78 - 15.24) / (11 * 0.3528 * 1.4)));
     });
-    test('language を渡すと設定ファイルの値より優先し、既定の文字サイズ・行送りを使う', () => {
-      const m = computeMetrics(DEFAULT_LAYOUT, { language: 'en' });
-      expect(m.language).toBe('en');
-      expect(m.vertical).toBe(false);
-      expect(m.fontSizePt).toBe(EN_DEFAULT_FONT_SIZE);
-      expect(m.lineHeight).toBe(EN_DEFAULT_LINE_HEIGHT);
-      expect(computeMetrics(DEFAULT_LAYOUT, { language: 'ja' }).vertical).toBe(true);
+    test('英語のレイアウトは欠けを 6×9in の既定で埋め、writingMode を持たない', () => {
+      expect(normalizeLayout(null, { english: true })).toEqual(DEFAULT_ENGLISH_LAYOUT);
+      const l = normalizeLayout({ paper: 'A5', fontSize: '10.5', lineHeight: 9, writingMode: 'vertical' }, { english: true });
+      expect(l).toMatchObject({ paper: 'A5', fontSize: 10.5, lineHeight: 1.4 });
+      expect(l).not.toHaveProperty('writingMode');
+      expect(computeMetrics({ writingMode: 'vertical' }, { english: true }).vertical).toBe(false);
     });
     test('detectLanguage は本文のアルファベットが日本語の文字より多ければ英語', () => {
       expect(detectLanguage(['As a child, I could go anywhere.', '【-21Y】'])).toBe('en');
@@ -300,22 +287,32 @@ if (import.meta.vitest) {
       expect(detectLanguage(['POV: Nadia Solis', '私'], l => l.startsWith('POV:'))).toBe('ja');
       expect(detectLanguage([])).toBe('ja');
     });
-    test('resolveLanguage は判定が英語ならそれを優先し、そうでなければ設定の language に従う', () => {
-      expect(resolveLanguage({ language: 'ja' }, 'en')).toBe('en');
-      expect(resolveLanguage({ language: 'en' }, 'ja')).toBe('en');
-      expect(resolveLanguage({ language: 'auto' }, 'ja')).toBe('ja');
-      expect(resolveLanguage(null, 'ja')).toBe('ja');
-    });
     test('enPdfPageSize は英語PDFスクリプトの判型に対応する用紙を返す', () => {
-      expect(enPdfPageSize(BUILTIN_PRESETS['English 6×9in（US Trade）'])).toBe('6x9');
-      expect(enPdfPageSize(BUILTIN_PRESETS['English 5×8in（Trade Paperback）'])).toBe('5x8');
-      expect(enPdfPageSize(BUILTIN_PRESETS['English A5'])).toBe('a5');
+      expect(enPdfPageSize(BUILTIN_ENGLISH_PRESETS['6×9in（US Trade）'])).toBe('6x9');
+      expect(enPdfPageSize(BUILTIN_ENGLISH_PRESETS['5×8in（Trade Paperback）'])).toBe('5x8');
+      expect(enPdfPageSize(BUILTIN_ENGLISH_PRESETS.A5)).toBe('a5');
       expect(enPdfPageSize({ paper: 'A5', orientation: 'landscape' })).toBeNull();
-      expect(enPdfPageSize(DEFAULT_LAYOUT)).toBeNull();
+      expect(enPdfPageSize({ paper: 'A4' })).toBeNull();
     });
     test('describeLayout は英語では文字サイズと行送りを出す', () => {
       expect(describeLayout(DEFAULT_LAYOUT)).toBe('30字×41行');
-      expect(describeLayout(BUILTIN_PRESETS['English A5'])).toMatch(/^11pt・行送り1\.4（約\d+字×\d+行）$/);
+      expect(describeLayout(BUILTIN_ENGLISH_PRESETS.A5, { english: true })).toMatch(/^11pt・行送り1\.4（約\d+字×\d+行）$/);
+    });
+    test('layoutsEqual は英語のレイアウトも比べられる', () => {
+      expect(layoutsEqual({ paper: '6x9in' }, DEFAULT_ENGLISH_LAYOUT, { english: true })).toBe(true);
+      expect(layoutsEqual({ paper: 'A5' }, DEFAULT_ENGLISH_LAYOUT, { english: true })).toBe(false);
+    });
+  });
+
+  describe('normalizeLayout', () => {
+    test('欠けた値・不正値は既定で埋める', () => {
+      expect(normalizeLayout(null)).toEqual(DEFAULT_LAYOUT);
+      expect(normalizeLayout({ chars: 'x', lines: '', paper: 'Z9', margin: { top: -1 } })).toEqual(DEFAULT_LAYOUT);
+    });
+    test('指定値は丸めて採用する', () => {
+      const l = normalizeLayout({ chars: '40', lines: 34.4, paper: 'B5', orientation: 'portrait', margin: { top: 10 } });
+      expect(l).toMatchObject({ chars: 40, lines: 34, paper: 'B5', orientation: 'portrait' });
+      expect(l.margin).toEqual({ top: 10, right: 20, bottom: 25, left: 20 });
     });
   });
 

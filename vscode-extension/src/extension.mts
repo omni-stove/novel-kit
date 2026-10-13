@@ -4,8 +4,8 @@ import { basename, dirname, join, relative } from 'path';
 import { randomBytes } from 'crypto';
 import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../scripts/lib/text-parser.mts';
 import {
-  BUILTIN_PRESETS, computeMetrics, describeLayout, enPdfPageSize, layoutsEqual, matchesPdfScriptPage, normalizeLayout,
-  resolveLanguage,
+  BUILTIN_ENGLISH_PRESETS, BUILTIN_PRESETS, computeMetrics, describeLayout, enPdfPageSize, layoutsEqual,
+  matchesPdfScriptPage, normalizeLayout,
 } from './layout.mts';
 import { buildDocument, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mts';
 import { DEFAULT_VIEW, LAYOUT_FILENAME, findLayoutFile, readSettingsFile, writeSettingsFile } from './layout-file.mts';
@@ -35,14 +35,16 @@ const isManuscript = (doc) =>
 
 const config = () => vscode.workspace.getConfiguration('novelPreview');
 
-function userPresets() {
+// 利用者のプリセット。"english": true のものは英語用
+function userPresets(english = false) {
   const raw = config().get('presets');
-  return raw && typeof raw === 'object' ? raw : {};
+  const all = raw && typeof raw === 'object' ? raw : {};
+  return Object.fromEntries(Object.entries(all).filter(([, layout]) => !!layout?.english === english));
 }
 
-function allPresets() {
-  const merged = { ...BUILTIN_PRESETS, ...userPresets() };
-  return Object.fromEntries(Object.entries(merged).map(([name, layout]) => [name, normalizeLayout(layout)]));
+function allPresets(english = false) {
+  const merged = { ...(english ? BUILTIN_ENGLISH_PRESETS : BUILTIN_PRESETS), ...userPresets(english) };
+  return Object.fromEntries(Object.entries(merged).map(([name, layout]) => [name, normalizeLayout(layout, { english })]));
 }
 
 // レイアウトは原稿から一番近い novel-layout.json に持つ（ワークスペースの外までは探さない）
@@ -54,7 +56,7 @@ function layoutFileFor(doc) {
 
 let warnedLayoutFile = null;
 
-// 原稿に効いている設定（レイアウトと表示設定）。設定ファイルが無い・読めないときは既定のプリセットと既定の表示設定
+// 原稿に効いている設定（日本語・英語のレイアウトと表示設定）。設定ファイルが無い・読めないときは既定のプリセットと既定の表示設定
 function settingsFor(doc) {
   const file = layoutFileFor(doc);
   if (file) {
@@ -71,20 +73,30 @@ function settingsFor(doc) {
   }
   return {
     layout: allPresets()[config().get('defaultPreset')] ?? normalizeLayout(null),
+    english: normalizeLayout(null, { english: true }),
     view: { ...DEFAULT_VIEW },
   };
 }
 
-const layoutFor = (doc) => settingsFor(doc).layout;
+// 原稿の文字がアルファベット中心なら英語の組版
+const isEnglishManuscript = (doc) => detectLanguageOfLines(splitLines(doc.getText())) === 'en';
 
-// 原稿に効く組版の言語。原稿の文字がアルファベット中心なら英語、そうでなければ設定ファイルの language に従う
-const languageFor = (doc, layout = layoutFor(doc)) =>
-  resolveLanguage(layout, detectLanguageOfLines(splitLines(doc.getText())));
+// 原稿に効く設定。原稿の言語に応じて日本語か英語のレイアウトを layout として返す
+function resolvedSettingsFor(doc) {
+  const { layout, english, view } = settingsFor(doc);
+  const en = isEnglishManuscript(doc);
+  return { layout: en ? english : layout, view, english: en };
+}
 
-const metricsFor = (doc, layout = layoutFor(doc)) => computeMetrics(layout, { language: languageFor(doc, layout) });
+const layoutFor = (doc) => resolvedSettingsFor(doc).layout;
+
+function metricsFor(doc) {
+  const { layout, english } = resolvedSettingsFor(doc);
+  return computeMetrics(layout, { english });
+}
 
 // 一番近い設定ファイルへ書く。まだ無ければ原稿と同じディレクトリに作る
-// patch: { layout } でレイアウトを差し替え、{ view } で表示設定の一部を上書きする
+// patch: { layout } で原稿の言語のレイアウト（日本語か英語）を差し替え、{ view } で表示設定の一部を上書きする
 function updateSettings(doc, patch) {
   const current = settingsFor(doc);
   const file = layoutFileFor(doc) ?? join(dirname(doc.uri.fsPath), LAYOUT_FILENAME);
@@ -92,9 +104,11 @@ function updateSettings(doc, patch) {
     vscode.window.showErrorMessage(`${vscode.workspace.asRelativePath(file)} が壊れているため、設定を保存できません。ファイルを直すか削除してください。`);
     return;
   }
+  const english = isEnglishManuscript(doc);
   try {
     writeSettingsFile(file, {
-      layout: patch.layout ?? current.layout,
+      layout: !english && patch.layout ? patch.layout : current.layout,
+      english: english && patch.layout ? patch.layout : current.english,
       view: { ...current.view, ...patch.view },
     });
   } catch (err) {
@@ -193,13 +207,13 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     }
 
     const filePath = session.doc.uri.fsPath;
-    const { layout, view } = settingsFor(session.doc);
+    const { layout, view, english } = resolvedSettingsFor(session.doc);
     session.scope = view.scope;
-    const metrics = metricsFor(session.doc, layout);
+    const metrics = computeMetrics(layout, { english });
     try {
       const built = buildDocument({ filePath, scope: session.scope, metrics, linesOf });
       session.files = built.files;
-      const presets = allPresets();
+      const presets = allPresets(english);
       const initialReveal = takeInitialReveal();
       const layoutFile = layoutFileFor(session.doc);
       if (follow) panel.title = `プレビュー: ${built.files.length > 1 ? basename(dirname(filePath)) : basename(filePath)}`;
@@ -212,9 +226,9 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         language: metrics.language,
         layout: metrics.layout,
         presets,
-        presetName: Object.keys(presets).find(name => layoutsEqual(presets[name], layout)) ?? null,
+        presetName: Object.keys(presets).find(name => layoutsEqual(presets[name], layout, { english })) ?? null,
         layoutFile: layoutFile ? vscode.workspace.asRelativePath(layoutFile) : null,
-        userPresetNames: Object.keys(userPresets()),
+        userPresetNames: Object.keys(userPresets(english)),
         scope: session.scope,
         view,
         canShowWork: listWorkFiles(filePath).includes(filePath),
@@ -331,8 +345,8 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
       case 'layout':
         return session.doc && setLayout(session.doc, msg.layout);
       case 'preset': {
-        const preset = allPresets()[msg.name];
-        return session.doc && preset && setLayout(session.doc, preset);
+        const preset = session.doc && allPresets(isEnglishManuscript(session.doc))[msg.name];
+        return preset && setLayout(session.doc, preset);
       }
       case 'view':
         // 表示範囲・倍率・編集のオンオフ。設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する
@@ -461,20 +475,22 @@ async function replaceWithPreview() {
 const presetTarget = () =>
   vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
 
+// 英語のレイアウトは "english": true を付けて保存し、英語の原稿のときだけ出す
 async function savePreset(doc) {
-  const layout = layoutFor(doc);
+  const { layout, english } = resolvedSettingsFor(doc);
   const name = await vscode.window.showInputBox({
-    title: 'レイアウトをプリセットとして保存',
+    title: `レイアウトをプリセットとして保存${english ? '（English）' : ''}`,
     prompt: 'プリセット名',
-    value: describeLayout(layout, { language: languageFor(doc, layout) }),
+    value: describeLayout(layout, { english }),
     validateInput: v => (v.trim() ? null : '名前を入力してください'),
   });
   if (!name) return;
-  await config().update('presets', { ...userPresets(), [name.trim()]: layout }, presetTarget());
+  const saved = english ? { ...layout, english: true } : layout;
+  await config().update('presets', { ...userPresets(false), ...userPresets(true), [name.trim()]: saved }, presetTarget());
 }
 
 async function deletePreset(name) {
-  const presets = { ...userPresets() };
+  const presets = { ...userPresets(false), ...userPresets(true) };
   if (!(name in presets)) return;
   delete presets[name];
   await config().update('presets', presets, presetTarget());
@@ -483,20 +499,23 @@ async function deletePreset(name) {
 async function selectLayout() {
   const doc = activeManuscript();
   if (!doc) return;
-  const presets = allPresets();
-  const current = layoutFor(doc);
+  const { layout: current, english } = resolvedSettingsFor(doc);
+  const presets = allPresets(english);
   const describePreset = (layout) => {
     const paper = `${layout.paper}${layout.orientation === 'landscape' ? '横' : '縦'}`;
-    if (layout.language === 'en') return `${paper}・English`;
+    if (english) return `${paper}・${layout.fontSize}pt`;
     return `${paper}・${layout.writingMode === 'vertical' ? '縦書き' : '横書き'}`;
   };
   const picked = await vscode.window.showQuickPick(
     Object.entries(presets).map(([name, layout]) => ({
       label: name,
       description: describePreset(layout),
-      picked: layoutsEqual(layout, current),
+      picked: layoutsEqual(layout, current, { english }),
     })),
-    { title: `レイアウト（${basename(dirname(doc.uri.fsPath))}）`, placeHolder: describeLayout(current, { language: languageFor(doc, current) }) },
+    {
+      title: `レイアウト（${basename(dirname(doc.uri.fsPath))}${english ? '・English' : ''}）`,
+      placeHolder: describeLayout(current, { english }),
+    },
   );
   if (picked) setLayout(doc, presets[picked.label]);
 }
@@ -512,9 +531,8 @@ function exportPdf(session = activeSession()) {
   if (!doc) return;
   const filePath = doc.uri.fsPath;
   const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
-  const layout = layoutFor(doc);
-  const metrics = metricsFor(doc, layout);
-  const english = metrics.language === 'en';
+  const { layout, english } = resolvedSettingsFor(doc);
+  const metrics = computeMetrics(layout, { english });
   const script = english ? EN_PDF_SCRIPT : PDF_SCRIPT;
   if (!root || !existsSync(join(root, script))) {
     vscode.window.showErrorMessage(`${script} が見つからないため、PDFを出力できません。`);
@@ -575,7 +593,7 @@ function updateStatusBar() {
     return;
   }
   const layout = layoutFor(doc);
-  const metrics = metricsFor(doc, layout);
+  const metrics = metricsFor(doc);
   const stats = computeStats([splitLines(doc.getText())], metrics);
 
   const editor = vscode.window.activeTextEditor;
@@ -585,7 +603,7 @@ function updateStatusBar() {
     const selectedWords = selectedText.split(/\s+/).filter(Boolean).length;
     const parts = [
       selectedWords > 0 ? `選択 ${selectedWords.toLocaleString('en-US')} / ${stats.words.toLocaleString('en-US')} words` : `${stats.words.toLocaleString('en-US')} words`,
-      describeLayout(layout, { language: 'en' }),
+      describeLayout(layout, { english: true }),
     ];
     statusBar.text = `$(book) ${parts.join(' ・ ')}`;
     statusBar.tooltip = '語数（メタ行を除く）・現在のレイアウト（English）\nクリックでレイアウトを選ぶ';

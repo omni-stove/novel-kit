@@ -150,7 +150,7 @@ if (import.meta.vitest) {
   const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
   const { join } = await import('path');
-  const { BUILTIN_PRESETS, computeMetrics, DEFAULT_LAYOUT } = await import('./layout.mts');
+  const { BUILTIN_ENGLISH_PRESETS, computeMetrics, DEFAULT_LAYOUT } = await import('./layout.mts');
 
   const withWork = (files, fn) => {
     const dir = mkdtempSync(join(tmpdir(), 'novel-preview-'));
@@ -181,7 +181,7 @@ if (import.meta.vitest) {
   });
 
   describe('英語組版', () => {
-    const metrics = computeMetrics(BUILTIN_PRESETS['English A5']);
+    const metrics = computeMetrics(BUILTIN_ENGLISH_PRESETS.A5, { english: true });
 
     test('txt-to-en-pdf の組版で、段落にファイル番号と行番号が付き、@page は残らない', () => {
       withWork({ '010.txt': 'POV: Nol\n【One】\nFirst "para".\n【】\n', '020.txt': 'Second para.\n' }, (dir) => {

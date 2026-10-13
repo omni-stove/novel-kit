@@ -17,11 +17,6 @@ const marginInput = (side, label) =>
 
 const PAPER_LABELS = { '6x9in': '6×9in', '5x8in': '5×8in' };
 
-const LANGUAGE_OPTIONS = [
-  ['auto', '自動'],
-  ['ja', '日本語'],
-  ['en', 'English'],
-];
 
 export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
   const csp = [
@@ -60,11 +55,6 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
     <span id="stats"></span>
   </header>
   <section id="setup" hidden>
-    <fieldset>
-      <legend>言語</legend>
-      <label><select id="language" data-layout-field>${options(LANGUAGE_OPTIONS)}</select></label>
-      <span id="language-note"></span>
-    </fieldset>
     <fieldset id="writing-mode-fields">
       <legend>文字方向</legend>
       <label><input type="radio" name="writing-mode" value="vertical" data-layout-field>縦書き</label>
@@ -86,6 +76,7 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
       <legend>フォント</legend>
       <input id="font-family" data-layout-field type="text">
     </fieldset>
+    <span id="language-note"></span>
     <span id="derived"></span>
     <span id="layout-file"></span>
     <button id="save-preset">プリセットとして保存…</button>

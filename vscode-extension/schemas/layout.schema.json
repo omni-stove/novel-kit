@@ -3,20 +3,12 @@
   "title": "小説プレビューの設定（レイアウト定義と表示設定）",
   "type": "object",
   "properties": {
-    "language": {
-      "enum": [
-        "auto",
-        "ja",
-        "en"
-      ],
-      "description": "組版の言語（auto: 原稿の文字で判定。アルファベットが多ければ英語 / ja: 日本語 / en: English）"
-    },
     "writingMode": {
       "enum": [
         "vertical",
         "horizontal"
       ],
-      "description": "文字方向（縦書き / 横書き。英語組版は横書き固定）"
+      "description": "文字方向（縦書き / 横書き）"
     },
     "paper": {
       "enum": [
@@ -70,27 +62,68 @@
       "maximum": 100,
       "description": "1ページの行数（null で行送り自動）"
     },
-    "fontSize": {
-      "type": [
-        "number",
-        "null"
-      ],
-      "minimum": 5,
-      "maximum": 40,
-      "description": "英語組版の本文の文字サイズ（pt。null で 11pt）"
-    },
-    "lineHeight": {
-      "type": [
-        "number",
-        "null"
-      ],
-      "minimum": 1,
-      "maximum": 3,
-      "description": "英語組版の行送り（倍率。null で 1.4）"
-    },
     "fontFamily": {
       "type": "string",
       "description": "本文フォント（空なら PDF 出力と同じ。日本語は明朝、英語は EB Garamond）"
+    },
+    "english": {
+      "type": "object",
+      "description": "英語の原稿（本文のアルファベットが日本語の文字より多いもの）のレイアウト。横書き固定で、文字サイズと行送りを指定する。省略時は 6×9in ペーパーバック",
+      "properties": {
+        "paper": {
+          "enum": [
+            "A4",
+            "B5",
+            "A5",
+            "B6",
+            "A6",
+            "6x9in",
+            "5x8in"
+          ],
+          "description": "用紙サイズ（6x9in / 5x8in は英語ペーパーバックの判型）"
+        },
+        "orientation": {
+          "enum": [
+            "landscape",
+            "portrait"
+          ],
+          "description": "用紙の向き"
+        },
+        "margin": {
+          "type": "object",
+          "description": "余白（mm。見開きの内側を左、外側を右に置く）",
+          "properties": {
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            },
+            "left": {
+              "type": "number"
+            }
+          }
+        },
+        "fontSize": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 40,
+          "description": "本文の文字サイズ（pt）"
+        },
+        "lineHeight": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3,
+          "description": "行送り（倍率）"
+        },
+        "fontFamily": {
+          "type": "string",
+          "description": "本文フォント（空なら PDF 出力と同じ EB Garamond）"
+        }
+      }
     },
     "view": {
       "type": "object",

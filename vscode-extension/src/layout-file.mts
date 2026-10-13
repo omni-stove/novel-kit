@@ -1,7 +1,9 @@
 /**
- * 設定ファイル（novel-layout.json）の探索と読み書き。レイアウト定義と、表示範囲・倍率などの表示設定を持つ。
+ * 設定ファイル（novel-layout.json）の探索と読み書き。
+ * 日本語のレイアウト（トップレベル）、英語のレイアウト（"english"）、表示範囲・倍率などの表示設定（"view"）を持つ。
  * 原稿のあるディレクトリから上へ向かって探し、最初に見つかったもの（＝一番近いもの）を使う。
  * 作品ごと（src/<作品>/story/）にも、上位ディレクトリに置いて複数作品の共通設定にもできる。
+ * 英訳（story/en/ など）も同じファイルの "english" を使うので、作品ごとに1つで済む。
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
@@ -51,12 +53,20 @@ export function normalizeView(raw) {
 // 壊れたJSONは例外にする（黙って既定に戻すと、次の保存で中身を上書きしてしまうため）
 export function readSettingsFile(filePath) {
   const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
-  return { layout: normalizeLayout(raw), view: normalizeView(raw?.view) };
+  return {
+    layout: normalizeLayout(raw),
+    english: normalizeLayout(raw?.english, { english: true }),
+    view: normalizeView(raw?.view),
+  };
 }
 
-// レイアウトの項目はトップレベルに、表示設定は "view" に書く
-export function writeSettingsFile(filePath, { layout, view }) {
-  const data = { ...normalizeLayout(layout), view: normalizeView(view) };
+// 日本語のレイアウトの項目はトップレベルに、英語のレイアウトは "english" に、表示設定は "view" に書く
+export function writeSettingsFile(filePath, { layout, english, view }) {
+  const data = {
+    ...normalizeLayout(layout),
+    english: normalizeLayout(english, { english: true }),
+    view: normalizeView(view),
+  };
   writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
@@ -64,7 +74,7 @@ if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
   const { mkdtempSync, mkdirSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
-  const { DEFAULT_LAYOUT } = await import('./layout.mts');
+  const { DEFAULT_LAYOUT, DEFAULT_ENGLISH_LAYOUT } = await import('./layout.mts');
 
   const withTree = (fn) => {
     const root = mkdtempSync(join(tmpdir(), 'novel-layout-'));
@@ -101,12 +111,19 @@ if (import.meta.vitest) {
       withTree(({ story }) => {
         const file = join(story, LAYOUT_FILENAME);
         writeFileSync(file, '{ "chars": 42, "lines": 34 }');
-        expect(readSettingsFile(file)).toEqual({ layout: { ...DEFAULT_LAYOUT, chars: 42, lines: 34 }, view: DEFAULT_VIEW });
-        writeSettingsFile(file, { layout: { chars: 40, lines: 40 }, view: { scope: 'file', zoom: '150', edit: false } });
+        expect(readSettingsFile(file)).toEqual({
+          layout: { ...DEFAULT_LAYOUT, chars: 42, lines: 34 }, english: DEFAULT_ENGLISH_LAYOUT, view: DEFAULT_VIEW,
+        });
+        writeSettingsFile(file, {
+          layout: { chars: 40, lines: 40 }, english: { paper: 'A5' }, view: { scope: 'file', zoom: '150', edit: false },
+        });
         expect(JSON.parse(readFileSync(file, 'utf-8'))).toEqual({
-          ...DEFAULT_LAYOUT, chars: 40, lines: 40, view: { scope: 'file', zoom: 150, edit: false },
+          ...DEFAULT_LAYOUT, chars: 40, lines: 40,
+          english: { ...DEFAULT_ENGLISH_LAYOUT, paper: 'A5' },
+          view: { scope: 'file', zoom: 150, edit: false },
         });
         expect(readSettingsFile(file).view).toEqual({ scope: 'file', zoom: 150, edit: false });
+        expect(readSettingsFile(file).english.paper).toBe('A5');
       });
     });
     test('壊れたJSONは例外', () => {
