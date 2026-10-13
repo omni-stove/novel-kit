@@ -4,13 +4,15 @@ import { basename, dirname, join, relative } from 'path';
 import { randomBytes } from 'crypto';
 import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../scripts/lib/text-parser.mts';
 import {
-  BUILTIN_PRESETS, computeMetrics, describeLayout, layoutsEqual, matchesPdfScriptPage, normalizeLayout,
+  BUILTIN_PRESETS, computeMetrics, describeLayout, enPdfPageSize, layoutsEqual, matchesPdfScriptPage, normalizeLayout,
+  resolveLanguage,
 } from './layout.mts';
-import { buildDocument, computeStats, listWorkFiles } from './document.mts';
+import { buildDocument, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mts';
 import { DEFAULT_VIEW, LAYOUT_FILENAME, findLayoutFile, readSettingsFile, writeSettingsFile } from './layout-file.mts';
 import { renderWebviewHtml } from './webview.mts';
 
 const PDF_SCRIPT = 'scripts/txt-to-pdf.mts';
+const EN_PDF_SCRIPT = 'scripts/txt-to-en-pdf.mts';
 const RENDER_DELAY_MS = 250;
 // 同じ段落への入力がこの間隔以内に続けば、取り消しの1回分にまとめる
 const UNDO_GROUP_MS = 1500;
@@ -74,6 +76,12 @@ function settingsFor(doc) {
 }
 
 const layoutFor = (doc) => settingsFor(doc).layout;
+
+// 原稿に効く組版の言語。原稿の文字がアルファベット中心なら英語、そうでなければ設定ファイルの language に従う
+const languageFor = (doc, layout = layoutFor(doc)) =>
+  resolveLanguage(layout, detectLanguageOfLines(splitLines(doc.getText())));
+
+const metricsFor = (doc, layout = layoutFor(doc)) => computeMetrics(layout, { language: languageFor(doc, layout) });
 
 // 一番近い設定ファイルへ書く。まだ無ければ原稿と同じディレクトリに作る
 // patch: { layout } でレイアウトを差し替え、{ view } で表示設定の一部を上書きする
@@ -187,7 +195,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     const filePath = session.doc.uri.fsPath;
     const { layout, view } = settingsFor(session.doc);
     session.scope = view.scope;
-    const metrics = computeMetrics(layout);
+    const metrics = metricsFor(session.doc, layout);
     try {
       const built = buildDocument({ filePath, scope: session.scope, metrics, linesOf });
       session.files = built.files;
@@ -201,6 +209,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         body: built.body,
         stats: built.stats,
         metrics,
+        language: metrics.language,
         layout: metrics.layout,
         presets,
         presetName: Object.keys(presets).find(name => layoutsEqual(presets[name], layout)) ?? null,
@@ -457,7 +466,7 @@ async function savePreset(doc) {
   const name = await vscode.window.showInputBox({
     title: 'レイアウトをプリセットとして保存',
     prompt: 'プリセット名',
-    value: describeLayout(layout),
+    value: describeLayout(layout, { language: languageFor(doc, layout) }),
     validateInput: v => (v.trim() ? null : '名前を入力してください'),
   });
   if (!name) return;
@@ -476,13 +485,18 @@ async function selectLayout() {
   if (!doc) return;
   const presets = allPresets();
   const current = layoutFor(doc);
+  const describePreset = (layout) => {
+    const paper = `${layout.paper}${layout.orientation === 'landscape' ? '横' : '縦'}`;
+    if (layout.language === 'en') return `${paper}・English`;
+    return `${paper}・${layout.writingMode === 'vertical' ? '縦書き' : '横書き'}`;
+  };
   const picked = await vscode.window.showQuickPick(
     Object.entries(presets).map(([name, layout]) => ({
       label: name,
-      description: `${layout.paper}${layout.orientation === 'landscape' ? '横' : '縦'}・${layout.writingMode === 'vertical' ? '縦書き' : '横書き'}`,
+      description: describePreset(layout),
       picked: layoutsEqual(layout, current),
     })),
-    { title: `レイアウト（${basename(dirname(doc.uri.fsPath))}）`, placeHolder: describeLayout(current) },
+    { title: `レイアウト（${basename(dirname(doc.uri.fsPath))}）`, placeHolder: describeLayout(current, { language: languageFor(doc, current) }) },
   );
   if (picked) setLayout(doc, presets[picked.label]);
 }
@@ -491,31 +505,48 @@ async function selectLayout() {
 
 const shellQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-// session があればその表示範囲（このファイル / 作品全体）で、無ければ開いている原稿1ファイルを出力する
+// session があればその表示範囲（このファイル / 作品全体）で、無ければ開いている原稿1ファイルを出力する。
+// 日本語は scripts/txt-to-pdf.mts、英語は scripts/txt-to-en-pdf.mts（判型は用紙から選ぶ）
 function exportPdf(session = activeSession()) {
   const doc = session?.doc ?? activeManuscript();
   if (!doc) return;
   const filePath = doc.uri.fsPath;
   const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
-  if (!root || !existsSync(join(root, PDF_SCRIPT))) {
-    vscode.window.showErrorMessage(`${PDF_SCRIPT} が見つからないため、PDFを出力できません。`);
-    return;
-  }
-
   const layout = layoutFor(doc);
-  const metrics = computeMetrics(layout);
-  if (!matchesPdfScriptPage(layout)) {
-    vscode.window.showWarningMessage('PDF出力は A4横・既定の余白で組みます。用紙・余白の設定はプレビューにだけ反映されます。');
+  const metrics = metricsFor(doc, layout);
+  const english = metrics.language === 'en';
+  const script = english ? EN_PDF_SCRIPT : PDF_SCRIPT;
+  if (!root || !existsSync(join(root, script))) {
+    vscode.window.showErrorMessage(`${script} が見つからないため、PDFを出力できません。`);
+    return;
   }
 
   const dir = dirname(filePath);
   const whole = session?.doc === doc && session.scope === 'work' && session.files.length > 1;
-  const work = basename(dir) === 'story' ? basename(dirname(dir)) : basename(dir);
+  // 英訳は story/en/ に置くので、作品名は en の親から取る
+  const workDir = basename(dir) === 'en' ? dirname(dir) : dir;
+  const work = basename(workDir) === 'story' ? basename(dirname(workDir)) : basename(workDir);
   const name = whole ? work : `${work}-${basename(filePath, '.txt')}`;
-  const size = `${metrics.chars}x${metrics.lines}`;
-  const out = `out/preview/${name}-${metrics.vertical ? size : 'horizontal'}.pdf`;
-  // 行数自動（既定の30字組）はスクリプトの既定そのものなので --size を付けない
-  const sizeOpt = !metrics.vertical ? '--horizontal' : layout.lines == null && layout.chars === 30 ? '' : `--size ${size}`;
+  const input = shellQuote(relative(root, whole ? dir : filePath));
+
+  let out;
+  let options;
+  if (english) {
+    const pageSize = enPdfPageSize(layout);
+    if (!pageSize) {
+      vscode.window.showWarningMessage('英語のPDF出力は 6×9in / 5×8in / A5（縦）のどれかで組みます。今の用紙はどれでもないため 6×9in で出力します。');
+    }
+    out = `out/preview/${name}-en-${pageSize ?? '6x9'}.pdf`;
+    options = `--${pageSize ?? '6x9'}`;
+  } else {
+    if (!matchesPdfScriptPage(layout)) {
+      vscode.window.showWarningMessage('PDF出力は A4横・既定の余白で組みます。用紙・余白の設定はプレビューにだけ反映されます。');
+    }
+    const size = `${metrics.chars}x${metrics.lines}`;
+    out = `out/preview/${name}-${metrics.vertical ? size : 'horizontal'}.pdf`;
+    // 行数自動（既定の30字組）はスクリプトの既定そのものなので --size を付けない
+    options = !metrics.vertical ? '--horizontal' : layout.lines == null && layout.chars === 30 ? '' : `--size ${size}`;
+  }
 
   if (!pdfTerminal || pdfTerminal.exitStatus) {
     pdfTerminal = vscode.window.createTerminal({ name: '小説PDF出力', cwd: root });
@@ -523,10 +554,10 @@ function exportPdf(session = activeSession()) {
   pdfTerminal.show(true);
   pdfTerminal.sendText([
     'mkdir -p out/preview &&',
-    `AUTO_OPEN=1 node ${PDF_SCRIPT}`,
-    sizeOpt,
+    `AUTO_OPEN=1 node ${script}`,
+    options,
     `-o ${shellQuote(out)}`,
-    shellQuote(relative(root, whole ? dir : filePath)),
+    input,
     '--open',
   ].filter(Boolean).join(' '));
 }
@@ -544,13 +575,25 @@ function updateStatusBar() {
     return;
   }
   const layout = layoutFor(doc);
-  const metrics = computeMetrics(layout);
+  const metrics = metricsFor(doc, layout);
   const stats = computeStats([splitLines(doc.getText())], metrics);
 
   const editor = vscode.window.activeTextEditor;
-  const selected = editor?.document === doc
-    ? editor.selections.reduce((sum, sel) => sum + countTextChars(stripInlineMarkup(doc.getText(sel))), 0)
-    : 0;
+  const selectedText = editor?.document === doc ? editor.selections.map(sel => doc.getText(sel)).join('\n') : '';
+
+  if (metrics.language === 'en') {
+    const selectedWords = selectedText.split(/\s+/).filter(Boolean).length;
+    const parts = [
+      selectedWords > 0 ? `選択 ${selectedWords.toLocaleString('en-US')} / ${stats.words.toLocaleString('en-US')} words` : `${stats.words.toLocaleString('en-US')} words`,
+      describeLayout(layout, { language: 'en' }),
+    ];
+    statusBar.text = `$(book) ${parts.join(' ・ ')}`;
+    statusBar.tooltip = '語数（メタ行を除く）・現在のレイアウト（English）\nクリックでレイアウトを選ぶ';
+    statusBar.show();
+    return;
+  }
+
+  const selected = countTextChars(stripInlineMarkup(selectedText));
   const parts = [
     selected > 0 ? `選択 ${selected.toLocaleString('ja-JP')}字 / ${stats.chars.toLocaleString('ja-JP')}字` : `${stats.chars.toLocaleString('ja-JP')}字`,
     `400字詰め ${formatPages(stats.genkoPages)}枚`,

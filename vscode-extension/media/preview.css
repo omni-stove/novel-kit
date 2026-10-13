@@ -34,7 +34,10 @@ body {
   gap: 10px 16px;
 }
 
-#setup[hidden] {
+/* display を指定した要素でも hidden 属性で隠せるようにする（言語で切り替える入力欄など） */
+#setup[hidden],
+#toolbar label[hidden],
+#setup fieldset[hidden] {
   display: none;
 }
 
@@ -190,9 +193,46 @@ button:disabled {
   background: var(--sheet-fg);
 }
 
+/* ぶら下げ（preview.js の wrapHangingPunctuation）。
+   .hang は句読点を文字送り 0 にし、::after の隠しスペースで 1 マスぶん（--hang-cell）を補う。
+   スペースは行末に来ると消えるので、そのとき句読点だけが版面の外へはみ出す */
+@property --hang-cell {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+#flow .hang {
+  letter-spacing: -1em;
+  --hang-cell: 1em;
+}
+
+#flow .hang::after {
+  content: " ";
+  font-size: 0;
+  line-height: 0;
+  letter-spacing: 0;
+  word-spacing: var(--hang-cell);
+}
+
+#flow .hang-last {
+  letter-spacing: -1em;
+}
+
 /* PDF の改ページ（page-break-before: always）を段の区切りに置き換える */
 #flow .section.page-break {
   break-before: column;
+}
+
+/* 英語組版（txt-to-en-pdf.mts）の章扉・部扉の改ページも同じく段の区切りにする */
+#flow .chapter,
+#flow .part-page {
+  break-before: column;
+}
+
+#flow .chapter:first-child,
+#flow .part-page:first-child {
+  break-before: auto;
 }
 
 #flow .title-page,

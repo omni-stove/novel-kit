@@ -3,12 +3,20 @@
   "title": "小説プレビューの設定（レイアウト定義と表示設定）",
   "type": "object",
   "properties": {
+    "language": {
+      "enum": [
+        "auto",
+        "ja",
+        "en"
+      ],
+      "description": "組版の言語（auto: 原稿の文字で判定。アルファベットが多ければ英語 / ja: 日本語 / en: English）"
+    },
     "writingMode": {
       "enum": [
         "vertical",
         "horizontal"
       ],
-      "description": "文字方向（縦書き / 横書き）"
+      "description": "文字方向（縦書き / 横書き。英語組版は横書き固定）"
     },
     "paper": {
       "enum": [
@@ -16,9 +24,11 @@
         "B5",
         "A5",
         "B6",
-        "A6"
+        "A6",
+        "6x9in",
+        "5x8in"
       ],
-      "description": "用紙サイズ"
+      "description": "用紙サイズ（6x9in / 5x8in は英語ペーパーバックの判型）"
     },
     "orientation": {
       "enum": [
@@ -60,9 +70,27 @@
       "maximum": 100,
       "description": "1ページの行数（null で行送り自動）"
     },
+    "fontSize": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 5,
+      "maximum": 40,
+      "description": "英語組版の本文の文字サイズ（pt。null で 11pt）"
+    },
+    "lineHeight": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 3,
+      "description": "英語組版の行送り（倍率。null で 1.4）"
+    },
     "fontFamily": {
       "type": "string",
-      "description": "本文フォント（空なら PDF 出力と同じ明朝）"
+      "description": "本文フォント（空なら PDF 出力と同じ。日本語は明朝、英語は EB Garamond）"
     },
     "view": {
       "type": "object",

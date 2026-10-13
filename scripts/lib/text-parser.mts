@@ -101,15 +101,20 @@ function analyzeLines(lines) {
   };
 }
 
-function selectBodyLines(lines, endViewpointLineIndex, { keepEpigraphs = false, keepPov = false } = {}) {
+// 残す行の元の添字（0始まり）。selectBodyLines と同じ条件で落とす
+function selectBodyLineIndices(lines, endViewpointLineIndex, { keepEpigraphs = false, keepPov = false } = {}) {
   const result = [];
   for (let i = 0; i < lines.length; i++) {
     const kept = (keepEpigraphs && isEpigraphLine(lines[i])) || (keepPov && isPovLine(lines[i]));
     if (isMetaLine(lines[i]) && !kept) continue;
     if (i === endViewpointLineIndex) continue;
-    result.push(lines[i]);
+    result.push(i);
   }
   return result;
+}
+
+function selectBodyLines(lines, endViewpointLineIndex, opts = {}) {
+  return selectBodyLineIndices(lines, endViewpointLineIndex, opts).map(i => lines[i]);
 }
 
 export function trimBlankEdges(lines) {
@@ -610,10 +615,13 @@ export function getBodyLinesFromContent(content, opts = {}) {
   return getBodyLines(splitLines(content), opts);
 }
 
+// indices: 返した各行の元の行番号（0始まり。プレビューで段落から元テキストの行を引くため）
 export function getBodyLines(lines, { keepEpigraphs = false, keepPov = false } = {}) {
   const { hasViewpointStart, hasViewpointEnd, endViewpointLineIndex, pov } = analyzeLines(lines);
+  const indices = selectBodyLineIndices(lines, endViewpointLineIndex, { keepEpigraphs, keepPov });
   return {
-    lines: selectBodyLines(lines, endViewpointLineIndex, { keepEpigraphs, keepPov }),
+    lines: indices.map(i => lines[i]),
+    indices,
     hasViewpointStart,
     hasViewpointEnd,
     pov,

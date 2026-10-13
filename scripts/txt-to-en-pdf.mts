@@ -51,7 +51,7 @@ import { chapterNumberWord } from './lib/english.mts';
 import { googleFontsLinks } from './lib/html.mts';
 import { parseCliArgs, ARG, buildPdfFromHtml, openFile, requireOutput, runMain } from './lib/cli.mts';
 
-const PAGE_SIZES = {
+export const PAGE_SIZES = {
   '5x8': {
     name: '5×8in Trade Paperback', width: '5in', height: '8in',
     fontSize: '10.5pt', lineHeight: '1.35',
@@ -114,39 +114,51 @@ export function formatInline(text, { curly = true } = {}) {
 }
 
 export function parseEnglishFile(filePath) {
+  return parseEnglishLines(readLines(filePath));
+}
+
+// ファイルを介さず行列から解釈する（未保存のエディタ内容をプレビューする VS Code 拡張用）。
+// 各ブロックの line は元テキストの行番号（0始まり）
+export function parseEnglishLines(sourceLines) {
   // 罫線（--- / * * *）は翻訳作業用の目印で、紙面にも章頭・章末の判定にも関わらせない
-  const { lines, hasViewpointStart, hasViewpointEnd, pov } = getBodyLines(
-    readLines(filePath).filter(l => !isRuleLine(l)),
+  const kept = sourceLines.map((text, line) => ({ text, line })).filter(e => !isRuleLine(e.text));
+  const { lines, indices, hasViewpointStart, hasViewpointEnd, pov } = getBodyLines(
+    kept.map(e => e.text),
     { keepEpigraphs: true },
   );
   const epigraphs = lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l));
-  const bodyLines = lines.filter(l => !isEpigraphLine(l));
-  const headingIndex = hasViewpointStart ? bodyLines.findIndex(l => l.trim() !== '') : -1;
+  const bodyLines = lines
+    .map((text, i) => ({ text, line: kept[indices[i]].line }))
+    .filter(e => !isEpigraphLine(e.text));
+  const headingIndex = hasViewpointStart ? bodyLines.findIndex(e => e.text.trim() !== '') : -1;
 
   let chapterTitle = null;
+  let titleLine = null;
   const blocks = [];
 
-  bodyLines.forEach((line, i) => {
+  bodyLines.forEach(({ text: line, line: n }, i) => {
     if (line.trim() === '') {
-      blocks.push({ type: 'space' });
+      blocks.push({ type: 'space', line: n });
     } else if (isSeparator(line) || isVerbatimSeparator(line)) {
-      blocks.push({ type: 'ornament', mark: isVerbatimSeparator(line) ? line.trim() : null });
+      blocks.push({ type: 'ornament', mark: isVerbatimSeparator(line) ? line.trim() : null, line: n });
     } else if (i === headingIndex) {
       const { title, rest } = parseViewpointLine(line);
       chapterTitle = title || null;
-      if (rest) blocks.push({ type: 'para', text: rest });
+      titleLine = n;
+      if (rest) blocks.push({ type: 'para', text: rest, line: n });
     } else {
-      blocks.push({ type: 'para', text: line.trim() });
+      blocks.push({ type: 'para', text: line.trim(), line: n });
     }
   });
 
   while (blocks.length > 0 && blocks[0].type !== 'para') blocks.shift();
   while (blocks.length > 0 && blocks[blocks.length - 1].type !== 'para') blocks.pop();
 
-  return { blocks, chapterTitle, pov, epigraphs, hasViewpointStart, hasViewpointEnd };
+  return { blocks, chapterTitle, titleLine, pov, epigraphs, hasViewpointStart, hasViewpointEnd };
 }
 
-// partFirstIndices は先頭の 0 を含む（第1部にも部扉を付けるため）
+// partFirstIndices は先頭の 0 を含む（第1部にも部扉を付けるため）。
+// 各ブロックと章題には由来のファイル番号（parsedFiles の添字）を file として付ける
 export function buildChapters(parsedFiles, partFirstIndices = null) {
   const partSet = partFirstIndices ? new Set(partFirstIndices) : null;
   const chapters = [];
@@ -155,6 +167,7 @@ export function buildChapters(parsedFiles, partFirstIndices = null) {
 
   parsedFiles.forEach((f, i) => {
     const startsPart = partSet !== null && partSet.has(i);
+    const blocks = f.blocks.map(b => ({ ...b, file: i }));
 
     if (startsPart || startsNewChapter(parsedFiles, i)) {
       if (startsPart) {
@@ -167,14 +180,16 @@ export function buildChapters(parsedFiles, partFirstIndices = null) {
         part: partSet ? partNumber : null,
         startsPart,
         title: f.chapterTitle,
+        titleLine: f.titleLine ?? null,
+        file: i,
         pov: f.pov,
         epigraphs: [...f.epigraphs],
-        blocks: [...f.blocks],
+        blocks,
       });
     } else {
       const ch = chapters[chapters.length - 1];
       // 継続ファイルとの継ぎ目は場面区切りとして扱う
-      ch.blocks.push({ type: 'ornament' }, ...f.blocks);
+      ch.blocks.push({ type: 'ornament' }, ...blocks);
       ch.epigraphs.push(...f.epigraphs);
     }
   });
@@ -189,9 +204,11 @@ export function buildChapters(parsedFiles, partFirstIndices = null) {
   return chapters;
 }
 
-function chapterHtml(ch, opts) {
+// lineNumbers: 段落・区切り・章題に元テキストの位置（data-file: ファイル番号 / data-line: 0始まりの行番号）を付ける
+export function chapterHtml(ch, opts) {
   const inline = t => formatInline(t, { curly: opts.smartQuotes });
   const parts = [];
+  const lineAttr = (file, line) => (opts.lineNumbers && line != null ? ` data-file="${file}" data-line="${line}"` : '');
 
   // 章が1つだけの作品で章題も無い場合は章ヘッダを出さない。
   // ただし柱のstring-setを担うため、要素自体は空で残す
@@ -199,7 +216,7 @@ function chapterHtml(ch, opts) {
   parts.push(`<header class="chapter-head${bareHead ? ' chapter-head-bare' : ''}">`);
   if (!bareHead) {
     if (!ch.soleInPart) parts.push(`<p class="chapter-number">${chapterNumberWord(ch.number)}</p>`);
-    if (ch.title) parts.push(`<h2 class="chapter-title">${inline(ch.title)}</h2>`);
+    if (ch.title) parts.push(`<h2 class="chapter-title"${lineAttr(ch.file, ch.titleLine)}>${inline(ch.title)}</h2>`);
     else parts.push(`<h2 class="chapter-title chapter-title-hidden">Chapter ${chapterNumberWord(ch.number)}</h2>`);
     if (ch.pov) parts.push(`<p class="chapter-pov">${inline(ch.pov)}</p>`);
   }
@@ -214,17 +231,18 @@ function chapterHtml(ch, opts) {
 
   let afterBreak = true; // 章頭・場面区切り直後の段落は字下げしない
   for (const block of ch.blocks) {
+    const attr = lineAttr(block.file, block.line);
     if (block.type === 'space') {
-      parts.push('<div class="scene-space"></div>');
+      parts.push(`<div class="scene-space"${attr}></div>`);
       afterBreak = true;
     } else if (block.type === 'ornament') {
       // mark付きは記号をそのまま出力（>>> 等）。* * * と同じく各記号の間にenスペースを挟む
       parts.push(block.mark
-        ? `<p class="ornament">${[...block.mark].map(escapeXml).join('&#x2002;')}</p>`
-        : '<p class="ornament">*&#x2002;*&#x2002;*</p>');
+        ? `<p class="ornament"${attr}>${[...block.mark].map(escapeXml).join('&#x2002;')}</p>`
+        : `<p class="ornament"${attr}>*&#x2002;*&#x2002;*</p>`);
       afterBreak = true;
     } else {
-      parts.push(`<p${afterBreak ? ' class="noindent"' : ''}>${inline(block.text)}</p>`);
+      parts.push(`<p${afterBreak ? ' class="noindent"' : ''}${attr}>${inline(block.text)}</p>`);
       afterBreak = false;
     }
   }
@@ -236,7 +254,8 @@ function chapterHtml(ch, opts) {
   return `${partPage}<section class="${cls}">\n${parts.join('\n')}\n</section>`;
 }
 
-function generateHtml(chapters, size, opts) {
+// size: PAGE_SIZES の1つ（または同じ形のオブジェクト）。opts: title / author / recto / smartQuotes / lineNumbers
+export function generateHtml(chapters, size, opts) {
   const m = size.margin;
   const inline = t => formatInline(t, { curly: opts.smartQuotes });
   const versoHeader = opts.author || opts.title || '';
@@ -659,10 +678,11 @@ if (import.meta.vitest) {
         expect(parsed.chapterTitle).toBe('-21Y');
         expect(parsed.hasViewpointStart).toBe(true);
         expect(parsed.hasViewpointEnd).toBe(true);
+        expect(parsed.titleLine).toBe(1);
         expect(parsed.blocks).toEqual([
-          { type: 'para', text: 'First paragraph.' },
-          { type: 'space' },
-          { type: 'para', text: 'Second paragraph.' },
+          { type: 'para', text: 'First paragraph.', line: 2 },
+          { type: 'space', line: 3 },
+          { type: 'para', text: 'Second paragraph.', line: 4 },
         ]);
       } finally {
         ul(tmp);
@@ -674,7 +694,7 @@ if (import.meta.vitest) {
       wf(tmp, 'Title: The Sirens Sing Nevermore\nPOV: Outi\nFirst paragraph.\n');
       try {
         const parsed = parseEnglishFile(tmp);
-        expect(parsed.blocks).toEqual([{ type: 'para', text: 'First paragraph.' }]);
+        expect(parsed.blocks).toEqual([{ type: 'para', text: 'First paragraph.', line: 2 }]);
       } finally {
         ul(tmp);
       }
@@ -727,6 +747,26 @@ if (import.meta.vitest) {
         expect(html).toContain('<p class="ornament">&gt;&#x2002;&gt;&#x2002;&gt;</p>');
       } finally {
         ul(tmp);
+      }
+    });
+
+    test('lineNumbers で段落にファイル番号と行番号を付け、継ぎ目の区切りには付けない', () => {
+      const a = join(tmpdir(), `en-pdf-${process.pid}-ln-a.txt`);
+      const b = join(tmpdir(), `en-pdf-${process.pid}-ln-b.txt`);
+      wf(a, 'POV: X\n【One】\nBody A.\n\nBody A2.\n');
+      wf(b, 'Body B.\n');
+      try {
+        const chapters = buildChapters([parseEnglishFile(a), parseEnglishFile(b)]);
+        const html = chapterHtml(chapters[0], { smartQuotes: true, lineNumbers: true });
+        expect(html).toContain('<h2 class="chapter-title" data-file="0" data-line="1">One</h2>');
+        expect(html).toContain('<p class="noindent" data-file="0" data-line="2">Body A.</p>');
+        expect(html).toContain('<div class="scene-space" data-file="0" data-line="3"></div>');
+        expect(html).toContain('<p class="noindent" data-file="0" data-line="4">Body A2.</p>');
+        expect(html).toContain('<p class="ornament">*&#x2002;*&#x2002;*</p>');
+        expect(html).toContain('<p class="noindent" data-file="1" data-line="0">Body B.</p>');
+        expect(chapterHtml(chapters[0], { smartQuotes: true })).not.toContain('data-line');
+      } finally {
+        ul(a); ul(b);
       }
     });
 

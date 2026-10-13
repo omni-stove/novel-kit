@@ -24,11 +24,15 @@
 
   const formatNumber = (n) => n.toLocaleString('ja-JP');
   const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
+  const isEnglish = () => model?.language === 'en';
 
   // ---- ページ割り ----
 
   // 「画面に合わせる」では左右の余白を取らず、幅が決め手になるときは用紙を表示領域の幅いっぱいに広げる
   const sideMarginPx = () => (zoom === 'fit' ? 0 : STAGE_MARGIN_PX);
+  // 用紙の並びの先頭の余白。横書きの「画面に合わせる」では用紙を高さに合わせ、1ページずつ表示領域の中央に置く
+  // （ペーパーバックを1ページずつめくる見え方）ので、先頭のページが中央に来るぶんの余白を取る
+  const leadPx = () => geometry?.lead ?? sideMarginPx();
 
   function pxPerMm(metrics) {
     viewport.classList.toggle('fit', zoom === 'fit');
@@ -64,6 +68,10 @@
     const sheetW = m.paperW * u;
     const sheetH = m.paperH * u;
     const gap = SHEET_GAP_MM * u;
+    const centered = !m.vertical && zoom === 'fit';
+    const lead = centered ? Math.max(0, (viewport.clientWidth - sheetW) / 2) : sideMarginPx();
+    // 先頭と末尾のページも中央に置けるよう、並びの両側に同じ余白を取る
+    stage.style.margin = centered ? `${STAGE_MARGIN_PX}px ${lead}px` : '';
 
     while (sheets.children.length > pages) sheets.lastChild.remove();
     while (sheets.children.length < pages) {
@@ -87,7 +95,7 @@
     stage.style.width = `${m.vertical ? sheetW : pages * period - gap}px`;
     stage.style.height = `${m.vertical ? pages * period - gap : sheetH}px`;
 
-    geometry = { vertical: m.vertical, period, pages, sheet: m.vertical ? sheetH : sheetW };
+    geometry = { vertical: m.vertical, period, pages, sheet: m.vertical ? sheetH : sheetW, lead, centered };
     updateStats();
   }
 
@@ -96,27 +104,39 @@
     const offset = geometry.vertical
       ? viewport.scrollTop + viewport.clientHeight / 2
       : viewport.scrollLeft + viewport.clientWidth / 2;
-    const page = Math.floor((offset - (geometry.vertical ? STAGE_MARGIN_PX : sideMarginPx())) / geometry.period) + 1;
+    const page = Math.floor((offset - (geometry.vertical ? STAGE_MARGIN_PX : leadPx())) / geometry.period) + 1;
     return Math.min(Math.max(page, 1), geometry.pages);
   }
 
   function updateStats() {
     if (!model || !geometry) return;
+    if (isEnglish()) {
+      const { words, chars } = model.stats;
+      $('stats').textContent = `${words.toLocaleString('en-US')} words ・ ${formatNumber(chars)}字 ・ ${currentPage()} / ${geometry.pages}頁`;
+      return;
+    }
     const { chars, genkoPages } = model.stats;
     $('stats').textContent = `${formatNumber(chars)}字 ・ 400字詰め ${formatPages(genkoPages)}枚 ・ ${currentPage()} / ${geometry.pages}頁`;
   }
 
   // ---- エディタとの行の行き来 ----
+  // 日本語組版はファイルごとに #flow 直下の .section になる。英語組版はファイルが章にまとめられるので、
+  // 各段落の data-file でファイルを指す
+
+  function lineElementsOf(fileIndex) {
+    const section = flow.querySelectorAll(':scope > .section')[fileIndex];
+    if (section) return [...section.querySelectorAll('[data-line]')];
+    return [...flow.querySelectorAll(`[data-file="${fileIndex}"][data-line]`)];
+  }
 
   function findLineElement(fileIndex, line) {
-    const section = flow.querySelectorAll(':scope > .section')[fileIndex];
-    if (!section) return null;
+    const elements = lineElementsOf(fileIndex);
     let found = null;
-    for (const el of section.querySelectorAll('[data-line]')) {
+    for (const el of elements) {
       if (Number(el.dataset.line) > line) break;
       found = el;
     }
-    return found ?? section.querySelector('[data-line]');
+    return found ?? elements[0] ?? null;
   }
 
   function reveal(target) {
@@ -143,14 +163,17 @@
       }
     } else {
       const page = Math.floor((rect.left - stageRect.left) / geometry.period);
-      viewport.scrollLeft = sideMarginPx() + page * geometry.period - 12;
+      if (geometry.centered) scrollToPage(page + 1);
+      else viewport.scrollLeft = leadPx() + page * geometry.period - 12;
       if (rect.bottom > view.bottom || rect.top < view.top) {
         viewport.scrollTop += (rect.top + rect.bottom) / 2 - (view.top + view.bottom) / 2;
       }
     }
   }
 
-  const sectionIndexOf = (el) => [...flow.querySelectorAll(':scope > .section')].indexOf(el.closest('#flow > .section'));
+  const sectionIndexOf = (el) => (el.dataset.file !== undefined
+    ? Number(el.dataset.file)
+    : [...flow.querySelectorAll(':scope > .section')].indexOf(el.closest('#flow > .section')));
 
   function jumpToEditor(el) {
     vscode.postMessage({ type: 'jump', fileIndex: sectionIndexOf(el), line: Number(el.dataset.line) });
@@ -384,10 +407,9 @@
     if (e.metaKey || e.ctrlKey) return jumpToEditor(el);
     if (!editEnabled || el === editing?.el) return;
 
-    // 見出しは表示（章番号つき）と元テキストが一致しないので、行末にカーソルを置く
-    const visible = el.classList.contains('viewpoint') || el.classList.contains('empty')
-      ? null
-      : visibleOffsetAt(el, e.clientX, e.clientY);
+    // 見出しは表示（章番号つき・【】なし）と元テキストが一致しないので、行末にカーソルを置く
+    const heading = el.classList.contains('viewpoint') || el.classList.contains('empty') || el.classList.contains('chapter-title');
+    const visible = heading ? null : visibleOffsetAt(el, e.clientX, e.clientY);
     const raw = model.sources[sectionIndexOf(el)]?.[Number(el.dataset.line)] ?? '';
     // 変更ずみで元テキストのまま表示している段落は、表示位置がそのまま元テキストの位置
     const offset = visible == null ? raw.length
@@ -470,7 +492,8 @@
   // ---- ツールバー / ページ設定 ----
 
   function fillForm() {
-    const { layout, metrics, presets, presetName, scope, canShowWork, userPresetNames, layoutFile } = model;
+    const { layout, metrics, presets, presetName, scope, canShowWork, userPresetNames, layoutFile, language } = model;
+    const english = language === 'en';
 
     const preset = $('preset');
     preset.replaceChildren();
@@ -478,9 +501,22 @@
     for (const name of Object.keys(presets)) preset.append(new Option(name, name));
     preset.value = presetName ?? '';
 
+    $('grid-fields').hidden = english;
+    $('en-fields').hidden = !english;
     $('chars').value = layout.chars;
     $('lines').value = layout.lines ?? '';
     $('lines').placeholder = `自動(${metrics.lines})`;
+    $('font-size').value = layout.fontSize ?? '';
+    $('font-size').placeholder = String(metrics.fontSizePt);
+    $('line-height').value = layout.lineHeight ?? '';
+    $('line-height').placeholder = String(metrics.lineHeight);
+
+    $('language').value = layout.language;
+    $('language-note').textContent = english && layout.language !== 'en'
+      ? '原稿の文字から英語と判定（English の組版）'
+      : english ? 'English の組版（横書き固定）' : '日本語の組版';
+    // 英語は横書き固定
+    $('writing-mode-fields').hidden = english;
     for (const radio of document.querySelectorAll('input[name="writing-mode"]')) {
       radio.checked = radio.value === layout.writingMode;
     }
@@ -488,7 +524,11 @@
     $('orientation').value = layout.orientation;
     for (const side of ['top', 'bottom', 'left', 'right']) $(`margin-${side}`).value = layout.margin[side];
     $('font-family').value = layout.fontFamily;
-    $('derived').textContent = `文字サイズ ${metrics.fontSizePt}pt ・ 行送り ${(Math.round(metrics.linePitchMm * 100) / 100)}mm（${metrics.chars}字×${metrics.lines}行）`;
+    $('font-family').placeholder = english ? '既定（EB Garamond / Georgia）' : '既定（Noto Serif JP / 游明朝）';
+    const pitch = `行送り ${(Math.round(metrics.linePitchMm * 100) / 100)}mm`;
+    $('derived').textContent = english
+      ? `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（約${metrics.charsApprox}字×${metrics.lines}行）`
+      : `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（${metrics.chars}字×${metrics.lines}行）`;
     $('layout-file').textContent = layoutFile ? `設定ファイル: ${layoutFile}` : '設定ファイル: なし（変更すると原稿と同じ場所に novel-layout.json を作ります）';
     $('delete-preset').disabled = !userPresetNames.includes(presetName);
 
@@ -500,6 +540,7 @@
 
   function readForm() {
     return {
+      language: $('language').value,
       writingMode: document.querySelector('input[name="writing-mode"]:checked')?.value,
       paper: $('paper').value,
       orientation: $('orientation').value,
@@ -511,6 +552,8 @@
       },
       chars: $('chars').value,
       lines: $('lines').value,
+      fontSize: $('font-size').value,
+      lineHeight: $('line-height').value,
       fontFamily: $('font-family').value,
     };
   }
@@ -555,6 +598,50 @@
   $('delete-preset').addEventListener('click', () => vscode.postMessage({ type: 'deletePreset', name: $('preset').value }));
   $('export-pdf').addEventListener('click', () => vscode.postMessage({ type: 'exportPdf' }));
 
+  // ---- ぶら下げ ----
+  // PDF 用 CSS の hanging-punctuation: allow-end last は Chromium では効かないので、Vivliostyle と同じ方法で再現する。
+  // 句読点を文字送り 0（letter-spacing: -1em）にし、直後に 1 字ぶんの隠しスペースを置く（preview.css の .hang）。
+  // 行の途中ではスペースが句読点のマスを埋めて見た目が変わらず、行末に来たときだけスペースが行末の空白として消え、
+  // 句読点が版面の外にぶら下がる。段落末の閉じ括弧は常に文字送り 0 にして、最後のマスからはみ出せるようにする
+  const HANG_RE = /[、。，．]/;
+  // Vivliostyle と同じく、直後が閉じ括弧・句読点などの行頭禁則文字ならぶら下げない（括弧だけが次行へ逃げるため）
+  const NO_HANG_BEFORE_RE = /^[\p{Pe}\p{Pf}·‧・　：；、。，．]/u;
+  const HANG_LAST_RE = /[\p{Pe}\p{Pf}\p{Pi}'"]$/u;
+
+  function wrapChar(node, index, className) {
+    const target = index > 0 ? node.splitText(index) : node;
+    if (target.length > 1) target.splitText(1);
+    const span = document.createElement('span');
+    span.className = className;
+    target.replaceWith(span);
+    span.append(target);
+  }
+
+  function wrapHangingPunctuation(root) {
+    for (const p of root.querySelectorAll('p')) {
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => (n.parentElement.closest('rt, rp') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      if (nodes.length === 0) continue;
+      const text = nodes.map(n => n.data).join('');
+      const targets = [];
+      let base = 0;
+      for (const node of nodes) {
+        for (const m of node.data.matchAll(new RegExp(HANG_RE, 'g'))) {
+          const next = text.slice(base + m.index + 1, base + m.index + 2);
+          if (!NO_HANG_BEFORE_RE.test(next)) targets.push([node, m.index, 'hang']);
+        }
+        base += node.length;
+      }
+      const last = nodes[nodes.length - 1];
+      if (HANG_LAST_RE.test(last.data)) targets.push([last, last.length - 1, 'hang-last']);
+      // 後ろから包めば、splitText で前の位置がずれない
+      for (const [node, i, cls] of targets.reverse()) wrapChar(node, i, cls);
+    }
+  }
+
   // ---- 拡張機能本体とのやりとり ----
 
   window.addEventListener('message', ({ data }) => {
@@ -580,7 +667,11 @@
       $('message').hidden = true;
       stage.hidden = false;
       $('doc-style').textContent = data.css;
+      // 言語は hyphens: auto（英語の分綴）と、ぶら下げ（日本語だけ）の切り替えに使う
+      flow.lang = data.language;
+      flow.classList.toggle('en', isEnglish());
       flow.innerHTML = data.body;
+      if (!isEnglish()) wrapHangingPunctuation(flow);
       // ルビは検索（Cmd+F）の対象から外す。親文字の間に読みが挟まると「鯨渕」のような語が見つからなくなるため
       for (const rt of flow.querySelectorAll('rt')) rt.inert = true;
       fillForm();
@@ -649,7 +740,7 @@
   function scrollToPage(page) {
     if (!geometry) return;
     const index = Math.min(Math.max(page, 1), geometry.pages) - 1;
-    const start = (geometry.vertical ? STAGE_MARGIN_PX : sideMarginPx()) + index * geometry.period;
+    const start = (geometry.vertical ? STAGE_MARGIN_PX : leadPx()) + index * geometry.period;
     const client = geometry.vertical ? viewport.clientHeight : viewport.clientWidth;
     // 用紙が表示領域に収まるなら真ん中に、収まらなければ用紙の頭を表示領域の頭に合わせる
     const offset = start - Math.max(0, (client - geometry.sheet) / 2);

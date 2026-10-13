@@ -1,8 +1,8 @@
 {
   "name": "novel-preview",
   "displayName": "小説プレビュー",
-  "description": "原稿テキスト（.txt）を PDF 出力と同じ組版でページ表示する。字数×行数などのレイアウトは Word のページ設定のように定義できる。",
-  "version": "0.6.11",
+  "description": "原稿テキスト（.txt）を PDF 出力と同じ組版でページ表示する。字数×行数などのレイアウトは Word のページ設定のように定義できる。英語原稿は自動判定してペーパーバック風の組版にする。",
+  "version": "0.7.0",
   "publisher": "omnistove",
   "private": true,
   "license": "ISC",
@@ -121,12 +121,20 @@
           "additionalProperties": {
             "type": "object",
             "properties": {
+              "language": {
+                "enum": [
+                  "auto",
+                  "ja",
+                  "en"
+                ],
+                "description": "組版の言語（auto: 原稿の文字で判定。アルファベットが多ければ英語 / ja / en）"
+              },
               "writingMode": {
                 "enum": [
                   "vertical",
                   "horizontal"
                 ],
-                "description": "文字方向（縦書き / 横書き）"
+                "description": "文字方向（縦書き / 横書き。英語は横書き固定）"
               },
               "paper": {
                 "enum": [
@@ -134,9 +142,11 @@
                   "B5",
                   "A5",
                   "B6",
-                  "A6"
+                  "A6",
+                  "6x9in",
+                  "5x8in"
                 ],
-                "description": "用紙サイズ"
+                "description": "用紙サイズ（6x9in / 5x8in は英語ペーパーバックの判型）"
               },
               "orientation": {
                 "enum": [
@@ -174,9 +184,23 @@
                 ],
                 "description": "1ページの行数（null で行送り自動）"
               },
+              "fontSize": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "英語組版の本文の文字サイズ（pt。null で 11pt）"
+              },
+              "lineHeight": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "英語組版の行送り（倍率。null で 1.4）"
+              },
               "fontFamily": {
                 "type": "string",
-                "description": "本文フォント（空なら PDF 出力と同じ明朝）"
+                "description": "本文フォント（空なら PDF 出力と同じ。日本語は明朝、英語は EB Garamond）"
               }
             }
           }

@@ -13,7 +13,15 @@ const ZOOM_OPTIONS = [
 const options = (pairs) => pairs.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
 
 const marginInput = (side, label) =>
-  `<label>${label}<input id="margin-${side}" data-layout-field type="number" min="0" max="100" step="1">mm</label>`;
+  `<label>${label}<input id="margin-${side}" data-layout-field type="number" min="0" max="100" step="any">mm</label>`;
+
+const PAPER_LABELS = { '6x9in': '6×9in', '5x8in': '5×8in' };
+
+const LANGUAGE_OPTIONS = [
+  ['auto', '自動'],
+  ['ja', '日本語'],
+  ['en', 'English'],
+];
 
 export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
   const csp = [
@@ -30,14 +38,17 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
   <style id="doc-style"></style>
   <link rel="stylesheet" href="${cssUri}">
 </head>
 <body>
   <header id="toolbar">
     <label>レイアウト<select id="preset"></select></label>
-    <label><input id="chars" data-layout-field type="number" min="5" max="100">字 ×
+    <label id="grid-fields"><input id="chars" data-layout-field type="number" min="5" max="100">字 ×
       <input id="lines" data-layout-field type="number" min="1" max="100">行</label>
+    <label id="en-fields" hidden><input id="font-size" data-layout-field type="number" min="5" max="40" step="0.5">pt ×
+      行送り<input id="line-height" data-layout-field type="number" min="1" max="3" step="0.05"></label>
     <button id="toggle-setup" aria-pressed="false">ページ設定</button>
     <span id="scope" class="segmented">
       <button data-scope="file">このファイル</button><button data-scope="work">作品全体</button>
@@ -45,18 +56,23 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
     <button id="toggle-edit" aria-pressed="true" title="オン: 段落をクリックしてその場で編集（Cmd/Ctrl+クリックでエディタの該当行へ）&#10;オフ: ダブルクリックでエディタの該当行へ">編集</button>
     <button id="open-text" title="このタブをテキストエディタに切り替える（見ている位置の行で開く）">テキストで開く</button>
     <label>表示<select id="zoom">${options(ZOOM_OPTIONS)}</select></label>
-    <button id="export-pdf" title="scripts/txt-to-pdf.mts でこの字数×行数のPDFを出力">PDF出力</button>
+    <button id="export-pdf" title="日本語: scripts/txt-to-pdf.mts でこの字数×行数のPDFを出力&#10;English: scripts/txt-to-en-pdf.mts でこの判型のPDFを出力">PDF出力</button>
     <span id="stats"></span>
   </header>
   <section id="setup" hidden>
     <fieldset>
+      <legend>言語</legend>
+      <label><select id="language" data-layout-field>${options(LANGUAGE_OPTIONS)}</select></label>
+      <span id="language-note"></span>
+    </fieldset>
+    <fieldset id="writing-mode-fields">
       <legend>文字方向</legend>
       <label><input type="radio" name="writing-mode" value="vertical" data-layout-field>縦書き</label>
       <label><input type="radio" name="writing-mode" value="horizontal" data-layout-field>横書き</label>
     </fieldset>
     <fieldset>
       <legend>用紙</legend>
-      <label>サイズ<select id="paper" data-layout-field>${options(Object.keys(PAPER_SIZES).map(p => [p, p]))}</select></label>
+      <label>サイズ<select id="paper" data-layout-field>${options(Object.keys(PAPER_SIZES).map(p => [p, PAPER_LABELS[p] ?? p]))}</select></label>
       <label>向き<select id="orientation" data-layout-field>${options([['landscape', '横'], ['portrait', '縦']])}</select></label>
     </fieldset>
     <fieldset>
@@ -68,7 +84,7 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
     </fieldset>
     <fieldset>
       <legend>フォント</legend>
-      <input id="font-family" data-layout-field type="text" placeholder="既定（Noto Serif JP / 游明朝）">
+      <input id="font-family" data-layout-field type="text">
     </fieldset>
     <span id="derived"></span>
     <span id="layout-file"></span>

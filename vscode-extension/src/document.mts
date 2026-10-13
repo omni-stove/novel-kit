@@ -1,15 +1,21 @@
 /**
  * 原稿テキストからプレビュー用の HTML/CSS と文字数統計を作る（vscode API に依存しない）。
- * 組版は PDF 出力と同じ scripts/lib のパーサと scripts/txt-to-pdf.mts の generateHtml を使う。
+ * 組版は PDF 出力と同じ scripts/lib のパーサと、日本語は scripts/txt-to-pdf.mts、
+ * 英語は scripts/txt-to-en-pdf.mts の generateHtml を使う。
  */
 
 import { dirname } from 'path';
-import { parseTextLines, readLines } from '../../scripts/lib/text-parser.mts';
+import { isMetaLine, parseTextLines, readLines } from '../../scripts/lib/text-parser.mts';
 import {
   computeSectionLabels, getTextFilesFromDir, countGenkoRows,
   SYNOPSIS_FILENAME, CHARACTERS_FILENAME,
 } from '../../scripts/lib/manuscript.mts';
 import { generateHtml } from '../../scripts/txt-to-pdf.mts';
+import { buildChapters, generateHtml as generateEnglishHtml, parseEnglishLines } from '../../scripts/txt-to-en-pdf.mts';
+import { detectLanguage } from './layout.mts';
+
+// 原稿の行列から組版の言語（'ja' / 'en'）を判定する（メタ行は数えない）
+export const detectLanguageOfLines = (lines) => detectLanguage(lines, isMetaLine);
 
 // 同じディレクトリの本文ファイル（PDF出力と同じ並び。梗概・人物紹介は除く）
 export function listWorkFiles(filePath) {
@@ -20,18 +26,55 @@ export function listWorkFiles(filePath) {
   }
 }
 
+// @page ブロックを取り除く（名前付き・マージンボックスの入れ子も含む）
+export function stripPageRules(css) {
+  let out = '';
+  let i = 0;
+  while (i < css.length) {
+    const at = css.indexOf('@page', i);
+    if (at < 0) {
+      out += css.slice(i);
+      break;
+    }
+    out += css.slice(i, at);
+    const open = css.indexOf('{', at);
+    if (open < 0) break;
+    let depth = 0;
+    let j = open;
+    for (; j < css.length; j++) {
+      if (css[j] === '{') depth++;
+      if (css[j] === '}' && --depth === 0) break;
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
 // generateHtml が返す PDF 用の文書から、webview に差し込むスタイルと本文を取り出す。
 // スタイルは CSS ネストで #flow の内側に閉じ込め、ページ寸法（@page）は webview 側で再現するので捨てる
 export function splitGeneratedHtml(html) {
   const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
   const body = html.match(/<body>([\s\S]*)<\/body>/)?.[1] ?? '';
-  const scoped = style
-    .replace(/@page\s*\{[^}]*\}/, '')
+  const scoped = stripPageRules(style.replace(/\/\*[\s\S]*?\*\//g, ''))
     .replace(/^(\s*)body\s*\{/m, '$1& {');
   return { css: `#flow {\n${scoped}\n}`, body: body.trim() };
 }
 
+// 英語は語数（空白区切り）と文字数（空白を除く）。日本語は文字数と原稿用紙換算
 export function computeStats(fileLines, metrics) {
+  if (metrics.language === 'en') {
+    let words = 0;
+    let chars = 0;
+    for (const lines of fileLines) {
+      for (const block of parseEnglishLines(lines).blocks) {
+        if (block.type !== 'para') continue;
+        words += block.text.split(/\s+/).filter(Boolean).length;
+        chars += block.text.replace(/\s/g, '').length;
+      }
+    }
+    return { language: 'en', words, chars };
+  }
+
   let chars = 0;
   let genkoRows = 0;
   let gridRows = 0;
@@ -42,12 +85,27 @@ export function computeStats(fileLines, metrics) {
     gridRows += countGenkoRows(lines, metrics.chars).rows;
   }
   return {
+    language: 'ja',
     chars,
     // 400字詰め原稿用紙換算
     genkoPages: genkoRows / 20,
     // 現在のレイアウトでの連続換算（改ページを含まない）
     gridPages: gridRows / metrics.lines,
   };
+}
+
+// 英語組版（txt-to-en-pdf.mts）。ファイルは章にまとめられるので、段落は data-file でファイルを指す
+function buildEnglishHtml(fileLines, metrics) {
+  const m = metrics.layout.margin;
+  const chapters = buildChapters(fileLines.map(lines => parseEnglishLines(lines)));
+  return generateEnglishHtml(chapters, {
+    width: `${metrics.paperW}mm`,
+    height: `${metrics.paperH}mm`,
+    fontSize: `${metrics.fontSizePt}pt`,
+    lineHeight: String(metrics.lineHeight),
+    // 見開きの内側の余白は左、外側は右として扱う（プレビューは単ページ）
+    margin: { top: `${m.top}mm`, bottom: `${m.bottom}mm`, inner: `${m.left}mm`, outer: `${m.right}mm` },
+  }, { smartQuotes: true, lineNumbers: true });
 }
 
 /**
@@ -63,22 +121,23 @@ export function buildDocument({ filePath, scope, metrics, linesOf = readLines })
   const labelOf = (f) => (inWork ? labels[workFiles.indexOf(f)] : null);
 
   const fileLines = files.map(f => linesOf(f));
-  const sections = fileLines.map((lines, i) => parseTextLines(lines, {
-    vertical: metrics.vertical,
-    chars: metrics.chars,
-    sectionNumber: labelOf(files[i]),
-    lineNumbers: true,
-  }));
-
-  const html = generateHtml(sections, {
-    vertical: metrics.vertical,
-    chars: metrics.chars,
-    lines: metrics.lines,
-    chapterBreak: true,
-  });
+  const html = metrics.language === 'en'
+    ? buildEnglishHtml(fileLines, metrics)
+    : generateHtml(fileLines.map((lines, i) => parseTextLines(lines, {
+      vertical: metrics.vertical,
+      chars: metrics.chars,
+      sectionNumber: labelOf(files[i]),
+      lineNumbers: true,
+    })), {
+      vertical: metrics.vertical,
+      chars: metrics.chars,
+      lines: metrics.lines,
+      chapterBreak: true,
+    });
 
   return {
     files,
+    language: metrics.language,
     // プレビュー側で段落を編集するときに見せる元テキスト（ファイルごとの行列）
     sources: fileLines,
     ...splitGeneratedHtml(html),
@@ -91,7 +150,7 @@ if (import.meta.vitest) {
   const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
   const { join } = await import('path');
-  const { computeMetrics, DEFAULT_LAYOUT } = await import('./layout.mts');
+  const { BUILTIN_PRESETS, computeMetrics, DEFAULT_LAYOUT } = await import('./layout.mts');
 
   const withWork = (files, fn) => {
     const dir = mkdtempSync(join(tmpdir(), 'novel-preview-'));
@@ -103,6 +162,13 @@ if (import.meta.vitest) {
     }
   };
 
+  describe('stripPageRules', () => {
+    test('名前付き・入れ子の @page を含めて取り除き、他の規則は残す', () => {
+      const css = '@page { size: A4; }\n@page chapter:left { @top-center { content: "x"; } }\n.a { color: red; }\n@page :blank { @top-center { content: none; } }\n';
+      expect(stripPageRules(css).trim()).toBe('.a { color: red; }');
+    });
+  });
+
   describe('splitGeneratedHtml', () => {
     test('@page を捨て、body のスタイルを #flow 自身に付け替える', () => {
       const { css, body } = splitGeneratedHtml(generateHtml([{ html: '<p>本文</p>' }], { vertical: true, chars: 30 }));
@@ -111,6 +177,30 @@ if (import.meta.vitest) {
       expect(css).not.toMatch(/^\s*body\s*\{/m);
       expect(css).toMatch(/& \{\s*font-family/);
       expect(body).toBe('<div class="section">\n<p>本文</p>\n</div>');
+    });
+  });
+
+  describe('英語組版', () => {
+    const metrics = computeMetrics(BUILTIN_PRESETS['English A5']);
+
+    test('txt-to-en-pdf の組版で、段落にファイル番号と行番号が付き、@page は残らない', () => {
+      withWork({ '010.txt': 'POV: Nol\n【One】\nFirst "para".\n【】\n', '020.txt': 'Second para.\n' }, (dir) => {
+        const doc = buildDocument({ filePath: join(dir, '010.txt'), scope: 'work', metrics });
+        expect(doc.language).toBe('en');
+        expect(doc.files.map(f => f.slice(dir.length + 1))).toEqual(['010.txt', '020.txt']);
+        expect(doc.body).toContain('<p class="noindent" data-file="0" data-line="2">First “para”.</p>');
+        expect(doc.body).toContain('<p class="noindent" data-file="1" data-line="0">Second para.</p>');
+        expect(doc.body).toContain('<h2 class="chapter-title" data-file="0" data-line="1">One</h2>');
+        expect(doc.body).not.toContain('title-page');
+        expect(doc.css).not.toContain('@page');
+        expect(doc.css).toMatch(/& \{\s*font-family: "EB Garamond"/);
+        expect(doc.stats).toEqual({ language: 'en', words: 4, chars: 23 });
+      });
+    });
+
+    test('detectLanguageOfLines はメタ行を数えない', () => {
+      expect(detectLanguageOfLines(['POV: Nadia Solis', 'Title: The Sirens', '私は海を見た。'])).toBe('ja');
+      expect(detectLanguageOfLines(['POV: オーティ', 'I saw the sea.'])).toBe('en');
     });
   });
 
@@ -155,7 +245,7 @@ if (import.meta.vitest) {
   describe('computeStats', () => {
     test('原稿用紙換算と現在のレイアウトでの換算を返す', () => {
       const stats = computeStats([['あ'.repeat(45)]], computeMetrics({ ...DEFAULT_LAYOUT, chars: 40, lines: 40 }));
-      expect(stats).toEqual({ chars: 45, genkoPages: 3 / 20, gridPages: 2 / 40 });
+      expect(stats).toEqual({ language: 'ja', chars: 45, genkoPages: 3 / 20, gridPages: 2 / 40 });
     });
   });
 }
