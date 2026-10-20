@@ -19,11 +19,11 @@ code --install-extension /tmp/novel-preview.vsix --force
 
 ## リリース
 
-`vscode/package.json` の `version` を上げてコミットし、`vscode-v<version>` のタグを push する。
-GitHub Actions（`.github/workflows/release-extension.yml`）がテスト・vsix の作成をして、Release に置く。
+`vscode/package.json` の `version` を上げてコミット・push してから、手元で次を実行する。
+テストして vsix を作り、`vscode-v<version>` のタグで GitHub Release を作って vsix を置く（タグが無ければ origin の main に作られる）。
 
 ```sh
-git tag vscode-v0.8.0 && git push origin vscode-v0.8.0
+pnpm --dir vscode run release
 ```
 
 ## 使い方
