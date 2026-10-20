@@ -998,7 +998,7 @@ if (import.meta.vitest) {
         const contents = page.node.Contents();
         const streams =
           contents instanceof PDFArray ? contents.asArray().map((o) => doc.context.lookup(o)) : [contents];
-        const texts = streams.flatMap((st) => {
+        const texts = streams.flatMap((/** @type {import('pdf-lib').PDFRawStream} */ st) => {
           if (!st) return [];
           const raw = st.dict.get(PDFName.of('Filter')) ? inflateSync(st.contents) : st.contents;
           return [

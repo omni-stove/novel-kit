@@ -37,7 +37,7 @@ export function listWorkFiles(filePath) {
 }
 
 /** CSS から @page ブロックを取り除く（名前付き・マージンボックスの入れ子も含む） */
-export function stripPageRules(css) {
+function stripPageRules(css) {
   let out = '';
   let i = 0;
   while (i < css.length) {
@@ -65,7 +65,7 @@ export function stripPageRules(css) {
  * スタイルは CSS ネストで #flow の内側に閉じ込め（body の規則は #flow 自身に付け替える）、
  * @page は捨てる（ページ寸法は webview 側で再現する）
  */
-export function splitGeneratedHtml(html) {
+function splitGeneratedHtml(html) {
   const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
   const body = html.match(/<body>([\s\S]*)<\/body>/)?.[1] ?? '';
   const scoped = stripPageRules(style.replace(/\/\*[\s\S]*?\*\//g, '')).replace(/^(\s*)body\s*\{/m, '$1& {');

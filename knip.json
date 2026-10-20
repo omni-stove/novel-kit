@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": ["biome", "gs", "ditto"],
+  "workspaces": {
+    "vscode": {
+      "entry": ["src/novel-cli.mjs", "src/pdf-renderer.mjs", "media/preview.js"],
+      "ignoreDependencies": ["@vivliostyle/viewer"]
+    }
+  }
+}

@@ -144,7 +144,7 @@ export function layoutsEqual(a, b, opts = {}) {
 }
 
 /** 原稿の文字から組版の言語を判定する。本文（メタ行を除く）のアルファベットが日本語の文字より多ければ英語 */
-export function detectLanguage(lines, isMetaLine = () => false) {
+export function detectLanguage(lines, isMetaLine = (_line) => false) {
   let latin = 0;
   let japanese = 0;
   for (const line of lines) {
@@ -232,7 +232,7 @@ export function enPdfPageSize(rawLayout) {
 
 export function describeLayout(rawLayout, { english = false } = {}) {
   const m = computeMetrics(rawLayout, { english });
-  if (english) return `${m.fontSizePt}pt・行送り${m.lineHeight}（約${m.charsApprox}字×${m.lines}行）`;
+  if ('charsApprox' in m) return `${m.fontSizePt}pt・行送り${m.lineHeight}（約${m.charsApprox}字×${m.lines}行）`;
   return `${m.chars}字×${m.lines}行`;
 }
 

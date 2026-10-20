@@ -275,7 +275,7 @@
         },
         "pageBreak": {
           "type": "boolean",
-          "description": "false でファイルの間で改ページしない"
+          "description": "chapterBreak と同じ。false で章ごとに改ページしない（pdf）"
         },
         "synopsis": {
           "type": "boolean",

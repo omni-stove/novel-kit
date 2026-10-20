@@ -6,4 +6,5 @@
 !dist/pdf-renderer.cjs
 !dist/viewer/**
 !media/**
+media/tsconfig.json
 !schemas/**
