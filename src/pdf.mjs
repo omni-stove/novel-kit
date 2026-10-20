@@ -4,8 +4,8 @@
  * txtファイルをマージして縦書きPDFを生成するスクリプト
  *
  * 使い方:
- *   node scripts/txt-to-pdf.mts -o output.pdf file1.txt file2.txt ...
- *   node scripts/txt-to-pdf.mts -o output.pdf ./directory/
+ *   novel pdf -o output.pdf file1.txt file2.txt ...
+ *   novel pdf -o output.pdf ./directory/
  *
  * オプション:
  *   -o, --output <file>  出力ファイル名（必須）
@@ -15,6 +15,7 @@
  *                        同一章内のファイル境界には区切り字「◇◇◇」を挟む（--part 非指定時のみ有効）
  *   --horizontal         横書きモード
  *   --size WxH           1ページの文字数（例: --size 40x40 → 40字×40行）
+ *   --chars N            1行の字数だけを指定し、行数は行送りの既定（字送りの1.125倍）に任せる（--size があればそちらが優先）
  *   --limit <n>          先頭からn個のファイルのみ処理
  *   --part 060,085,...   部の境界となるファイル名プレフィックス（co-split の --splits と同形式）。
  *                        該当ファイルから新しい部が始まる。各部の頭で改ページし、
@@ -41,13 +42,13 @@ import { PDFDocument, PDFName, rgb } from 'pdf-lib';
 import { readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { basename } from 'path';
 import { inflateSync } from 'zlib';
-import { escapeHtml, parseTextFile, readLines, countChars } from './lib/text-parser.mts';
+import { escapeHtml, parseTextFile, readLines, countChars } from './lib/text-parser.mjs';
 import {
   parseWithSectionNumbering, logSections, requireInputFiles, countGenkoRows, resolvePartIndices, findSidecarFile, startsNewChapter,
   SYNOPSIS_FILENAME, CHARACTERS_FILENAME, FILE_SEPARATOR_MARK,
-} from './lib/manuscript.mts';
-import { googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mts';
-import { parseCliArgs, ARG, fail, requireOutput, buildPdfFromHtml, openFile, runMain } from './lib/cli.mts';
+} from './lib/manuscript.mjs';
+import { googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
+import { parseCliArgs, ARG, fail, requireOutput, buildPdfFromHtml, openFile, runMain } from './lib/cli.mjs';
 
 const EMPTY_LINE_HTML = '<p class="empty">&nbsp;</p>';
 const SEPARATOR_BLOCK_HTML = `${EMPTY_LINE_HTML}\n<p class="separator">${FILE_SEPARATOR_MARK}</p>\n${EMPTY_LINE_HTML}\n`;
@@ -114,6 +115,7 @@ function parseArgs(argv) {
     { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
     { key: 'vertical', flags: ['--horizontal'], value: false },
     ARG.size,
+    { key: 'chars', flags: ['--chars'], takesValue: true, parse: v => parseInt(v, 10) },
     { key: 'limit', flags: ['--limit'], takesValue: true, parse: v => parseInt(v, 10) },
     { key: 'synopsisOnTitle', flags: ['--synopsis-on-title'] },
     { key: 'noSynopsis', flags: ['--no-synopsis'] },
@@ -450,8 +452,8 @@ function removeBlankPages(pdfDoc, titlePageIndex) {
   return pagesToRemove.length;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+export async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
 
   if (args.countOnly) {
     // 原稿用紙換算の既定は 20字×20行（400字詰め）
@@ -465,7 +467,7 @@ async function main() {
 
   if (!args.countOnly) requireOutput(args, 'output.pdf');
 
-  if (args.pages === null && process.argv.some(a => a === '--pages' || a.startsWith('--pages='))) {
+  if (args.pages === null && argv.some(a => a === '--pages' || a.startsWith('--pages='))) {
     fail('--pages の指定が不正です（例: --pages 42 / 42-45 / 42,50,60-62）');
   }
 

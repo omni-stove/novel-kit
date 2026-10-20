@@ -1,6 +1,7 @@
 /**
- * 設定ファイル（novel-layout.json）の探索と読み書き。
- * 日本語のレイアウト（トップレベル）、英語のレイアウト（"english"）、表示範囲・倍率などの表示設定（"view"）を持つ。
+ * 設定ファイル（novel.json）の探索と読み書き。
+ * 日本語のレイアウト（トップレベル）、英語のレイアウト（"english"）、表示範囲・倍率などの表示設定（"view"）と、
+ * 作品情報（"title" / "author" / "input"）・出力の定義（"outputs"。novel build が読む）を持つ。
  * 原稿のあるディレクトリから上へ向かって探し、最初に見つかったもの（＝一番近いもの）を使う。
  * 作品ごと（src/<作品>/story/）にも、上位ディレクトリに置いて複数作品の共通設定にもできる。
  * 英訳（story/en/ など）も同じファイルの "english" を使うので、作品ごとに1つで済む。
@@ -8,9 +9,9 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join, relative, isAbsolute } from 'path';
-import { normalizeLayout } from './layout.mts';
+import { normalizeLayout } from './layout.mjs';
 
-export const LAYOUT_FILENAME = 'novel-layout.json';
+export const CONFIG_FILENAME = 'novel.json';
 
 const isInside = (dir, root) => {
   const rel = relative(root, dir);
@@ -18,10 +19,10 @@ const isInside = (dir, root) => {
 };
 
 // startDir から rootDir まで（rootDir を含む）さかのぼって探す。rootDir の外へは出ない
-export function findLayoutFile(startDir, rootDir = startDir) {
+export function findConfigFile(startDir, rootDir = startDir) {
   let dir = startDir;
   while (isInside(dir, rootDir)) {
-    const candidate = join(dir, LAYOUT_FILENAME);
+    const candidate = join(dir, CONFIG_FILENAME);
     if (existsSync(candidate)) return candidate;
     const parent = dirname(dir);
     if (parent === dir) break;
@@ -50,6 +51,19 @@ export function normalizeView(raw) {
   };
 }
 
+// novel build 用。設定ファイルのディレクトリ（dir）と、作品情報・出力の定義をレイアウトと合わせて返す
+export function readWorkConfig(filePath) {
+  const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+  return {
+    ...readSettingsFile(filePath),
+    dir: dirname(filePath),
+    title: raw.title ?? null,
+    author: raw.author ?? null,
+    input: raw.input ?? ['.'],
+    outputs: raw.outputs ?? {},
+  };
+}
+
 // 壊れたJSONは例外にする（黙って既定に戻すと、次の保存で中身を上書きしてしまうため）
 export function readSettingsFile(filePath) {
   const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
@@ -60,9 +74,12 @@ export function readSettingsFile(filePath) {
   };
 }
 
-// 日本語のレイアウトの項目はトップレベルに、英語のレイアウトは "english" に、表示設定は "view" に書く
+// 日本語のレイアウトの項目はトップレベルに、英語のレイアウトは "english" に、表示設定は "view" に書く。
+// 作品情報や出力の定義など、それ以外の項目はそのまま残す
 export function writeSettingsFile(filePath, { layout, english, view }) {
+  const current = existsSync(filePath) ? JSON.parse(readFileSync(filePath, 'utf-8')) : {};
   const data = {
+    ...current,
     ...normalizeLayout(layout),
     english: normalizeLayout(english, { english: true }),
     view: normalizeView(view),
@@ -74,10 +91,10 @@ if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
   const { mkdtempSync, mkdirSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
-  const { DEFAULT_LAYOUT, DEFAULT_ENGLISH_LAYOUT } = await import('./layout.mts');
+  const { DEFAULT_LAYOUT, DEFAULT_ENGLISH_LAYOUT } = await import('./layout.mjs');
 
   const withTree = (fn) => {
-    const root = mkdtempSync(join(tmpdir(), 'novel-layout-'));
+    const root = mkdtempSync(join(tmpdir(), 'novel-config-'));
     const story = join(root, 'src', 'work', 'story');
     mkdirSync(story, { recursive: true });
     try {
@@ -87,21 +104,21 @@ if (import.meta.vitest) {
     }
   };
 
-  describe('findLayoutFile', () => {
+  describe('findConfigFile', () => {
     test('原稿のディレクトリから上へ探し、一番近いものを返す', () => {
       withTree(({ root, story }) => {
-        expect(findLayoutFile(story, root)).toBeNull();
-        writeSettingsFile(join(root, 'src', LAYOUT_FILENAME), {});
-        expect(findLayoutFile(story, root)).toBe(join(root, 'src', LAYOUT_FILENAME));
-        writeSettingsFile(join(story, LAYOUT_FILENAME), {});
-        expect(findLayoutFile(story, root)).toBe(join(story, LAYOUT_FILENAME));
+        expect(findConfigFile(story, root)).toBeNull();
+        writeSettingsFile(join(root, 'src', CONFIG_FILENAME), {});
+        expect(findConfigFile(story, root)).toBe(join(root, 'src', CONFIG_FILENAME));
+        writeSettingsFile(join(story, CONFIG_FILENAME), {});
+        expect(findConfigFile(story, root)).toBe(join(story, CONFIG_FILENAME));
       });
     });
     test('rootDir より上は見ない', () => {
       withTree(({ root, story }) => {
-        writeSettingsFile(join(root, LAYOUT_FILENAME), {});
-        expect(findLayoutFile(story, join(root, 'src'))).toBeNull();
-        expect(findLayoutFile(story, root)).toBe(join(root, LAYOUT_FILENAME));
+        writeSettingsFile(join(root, CONFIG_FILENAME), {});
+        expect(findConfigFile(story, join(root, 'src'))).toBeNull();
+        expect(findConfigFile(story, root)).toBe(join(root, CONFIG_FILENAME));
       });
     });
   });
@@ -109,7 +126,7 @@ if (import.meta.vitest) {
   describe('readSettingsFile / writeSettingsFile', () => {
     test('省略した項目は既定で埋めて読み、書くときは全項目を書き出す', () => {
       withTree(({ story }) => {
-        const file = join(story, LAYOUT_FILENAME);
+        const file = join(story, CONFIG_FILENAME);
         writeFileSync(file, '{ "chars": 42, "lines": 34 }');
         expect(readSettingsFile(file)).toEqual({
           layout: { ...DEFAULT_LAYOUT, chars: 42, lines: 34 }, english: DEFAULT_ENGLISH_LAYOUT, view: DEFAULT_VIEW,
@@ -126,9 +143,31 @@ if (import.meta.vitest) {
         expect(readSettingsFile(file).english.paper).toBe('A5');
       });
     });
+    test('レイアウトと表示設定以外の項目は書き換えても残す', () => {
+      withTree(({ story }) => {
+        const file = join(story, CONFIG_FILENAME);
+        writeFileSync(file, '{ "title": "作品", "outputs": { "pdf": { "format": "pdf", "out": "out/a.pdf" } }, "chars": 42 }');
+        writeSettingsFile(file, { layout: { chars: 40, lines: 40 }, english: {}, view: {} });
+        const raw = JSON.parse(readFileSync(file, 'utf-8'));
+        expect(raw.title).toBe('作品');
+        expect(raw.outputs).toEqual({ pdf: { format: 'pdf', out: 'out/a.pdf' } });
+        expect(raw.chars).toBe(40);
+        expect(Object.keys(raw).slice(0, 2)).toEqual(['title', 'outputs']);
+      });
+    });
+    test('readWorkConfig は作品情報と出力の定義を読み、input の既定は設定ファイルのディレクトリ', () => {
+      withTree(({ story }) => {
+        const file = join(story, CONFIG_FILENAME);
+        writeFileSync(file, '{ "title": "作品", "outputs": { "pdf": { "format": "pdf", "out": "out/a.pdf" } } }');
+        const config = readWorkConfig(file);
+        expect(config).toMatchObject({ dir: story, title: '作品', author: null, input: ['.'] });
+        expect(config.outputs.pdf.out).toBe('out/a.pdf');
+        expect(config.layout).toEqual(DEFAULT_LAYOUT);
+      });
+    });
     test('壊れたJSONは例外', () => {
       withTree(({ story }) => {
-        const file = join(story, LAYOUT_FILENAME);
+        const file = join(story, CONFIG_FILENAME);
         writeFileSync(file, '{ chars: ');
         expect(() => readSettingsFile(file)).toThrow();
       });

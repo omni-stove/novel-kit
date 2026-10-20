@@ -1,0 +1,34 @@
+{
+  "name": "novel-kit",
+  "version": "0.1.0",
+  "description": "小説原稿（.txt）の組版エンジンと CLI（novel）。VS Code 拡張「小説プレビュー」は vscode/ にある。",
+  "private": true,
+  "license": "ISC",
+  "type": "module",
+  "bin": {
+    "novel": "./bin/novel.mjs"
+  },
+  "exports": {
+    "./*": "./src/*"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@vivliostyle/cli": "^10.6.0",
+    "jszip": "^3.10.1",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
+  }
+}

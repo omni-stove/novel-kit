@@ -1,12 +1,12 @@
 /**
  * ページレイアウト定義（Word の「ページ設定 > 文字数と行数」に相当）と、そこから導く組版寸法。
  * 日本語は用紙・余白・字数・行数を決めると、文字サイズと行送りが決まる。
- * 既定値（A4横・余白 20/20/25/20mm）は scripts/txt-to-pdf.mts の calcVerticalLayout と同じ寸法になる。
+ * 既定値（A4横・余白 20/20/25/20mm）は src/pdf.mjs の calcVerticalLayout と同じ寸法になる。
  * 英語（原稿の文字で判定）は用紙・余白・文字サイズ・行送りを決め、横書き固定で、行数は版面から決まる。
- * 既定値（6×9in）は scripts/txt-to-en-pdf.mts の PAGE_SIZES と同じ。
+ * 既定値（6×9in）は src/en-pdf.mjs の PAGE_SIZES と同じ。
  */
 
-// 短辺 x 長辺（mm）。6x9in / 5x8in は英語ペーパーバックの判型（scripts/txt-to-en-pdf.mts の --6x9 / --5x8）
+// 短辺 x 長辺（mm）。6x9in / 5x8in は英語ペーパーバックの判型（src/en-pdf.mjs の --6x9 / --5x8）
 export const PAPER_SIZES = {
   A4: [210, 297],
   B5: [182, 257],
@@ -19,7 +19,7 @@ export const PAPER_SIZES = {
 
 const MM_PER_PT = 0.3528;
 const MM_PER_IN = 25.4;
-// 行数を指定しないときの行送り（txt-to-pdf の既定と同じ）
+// 行数を指定しないときの行送り（pdf の既定と同じ）
 const AUTO_LINE_HEIGHT = { vertical: 1.125, horizontal: 1.8 };
 // 英文の平均字幅の目安（em）。字数×行数の表示に使う
 const EN_AVERAGE_CHAR_WIDTH = 0.5;
@@ -64,7 +64,7 @@ export const BUILTIN_PRESETS = {
   },
 };
 
-// 英語のプリセット（txt-to-en-pdf.mts の PAGE_SIZES と同じ判型・余白・文字サイズ）
+// 英語のプリセット（en-pdf.mjs の PAGE_SIZES と同じ判型・余白・文字サイズ）
 export const BUILTIN_ENGLISH_PRESETS = {
   '6×9in（US Trade）': DEFAULT_ENGLISH_LAYOUT,
   '5×8in（Trade Paperback）': {
@@ -196,7 +196,7 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
   }
 
   const cellMm = availInline / layout.chars;
-  // txt-to-pdf と同じく 0.1pt 単位に切り捨てる（PDFと字面を揃えるため）
+  // pdf と同じく 0.1pt 単位に切り捨てる（PDFと字面を揃えるため）
   const fontSizePt = Math.floor((cellMm / MM_PER_PT) * 10) / 10;
   const fontSizeMm = fontSizePt * MM_PER_PT;
 
@@ -216,7 +216,7 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
   };
 }
 
-// scripts/txt-to-pdf.mts は A4横・余白固定で組むので、それと同じ版面かどうか
+// src/pdf.mjs は A4横・余白固定で組むので、それと同じ版面かどうか
 export function matchesPdfScriptPage(rawLayout) {
   const { paper, orientation, margin } = normalizeLayout(rawLayout);
   const d = DEFAULT_LAYOUT;
@@ -224,7 +224,7 @@ export function matchesPdfScriptPage(rawLayout) {
     && JSON.stringify(margin) === JSON.stringify(d.margin);
 }
 
-// scripts/txt-to-en-pdf.mts の判型（--5x8 / --6x9 / --a5）に対応する用紙かどうか。向きが縦でなければ null
+// src/en-pdf.mjs の判型（--5x8 / --6x9 / --a5）に対応する用紙かどうか。向きが縦でなければ null
 export function enPdfPageSize(rawLayout) {
   const { paper, orientation } = normalizeLayout(rawLayout, { english: true });
   if (orientation !== 'portrait') return null;
@@ -241,7 +241,7 @@ if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
 
   describe('computeMetrics', () => {
-    test('既定は txt-to-pdf の calcVerticalLayout（30字・行送り1.125）と同じ寸法', () => {
+    test('既定は pdf の calcVerticalLayout（30字・行送り1.125）と同じ寸法', () => {
       const m = computeMetrics(DEFAULT_LAYOUT);
       expect(m.availInline).toBe(165);
       expect(m.availBlock).toBe(257);

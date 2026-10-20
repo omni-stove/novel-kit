@@ -1,8 +1,130 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "小説プレビューの設定（レイアウト定義と表示設定）",
+  "title": "作品の設定（レイアウト・表示設定・作品情報・出力の定義）",
   "type": "object",
   "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "description": "作品名（PDF の扉・柱に使う）"
+    },
+    "author": {
+      "type": "string",
+      "description": "著者名"
+    },
+    "input": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "原稿のファイルかディレクトリ（この設定ファイルのディレクトリから。並び順どおりに連結する。省略時は [\".\"]）"
+    },
+    "outputs": {
+      "type": "object",
+      "description": "novel build で作る出力（名前 → 定義）",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "format",
+          "out"
+        ],
+        "properties": {
+          "format": {
+            "enum": [
+              "pdf",
+              "pdf-en"
+            ],
+            "description": "出力形式（pdf: 日本語の縦書き / 横書き PDF、pdf-en: 英語のペーパーバック風 PDF）"
+          },
+          "out": {
+            "type": "string",
+            "description": "出力ファイル（プロジェクトのルート＝package.json のあるディレクトリから）"
+          },
+          "title": {
+            "type": "string",
+            "description": "この出力だけのタイトル（省略時は作品の title）"
+          },
+          "author": {
+            "type": "string",
+            "description": "この出力だけの著者名（省略時は作品の author）"
+          },
+          "input": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "この出力だけの原稿（省略時は作品の input）"
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "部の境界になるファイル名の先頭の番号（例: [\"070\", \"085\"]）"
+          },
+          "writingMode": {
+            "enum": [
+              "vertical",
+              "horizontal"
+            ],
+            "description": "文字方向（縦書き / 横書き）"
+          },
+          "chars": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 100,
+            "description": "1行の文字数"
+          },
+          "lines": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 100,
+            "description": "1ページの行数（null で行送り自動）"
+          },
+          "coverless": {
+            "type": "boolean",
+            "description": "表紙を作らず、梗概と本文の頭にタイトル・著者名を本文サイズで出す"
+          },
+          "chapterBreak": {
+            "type": "boolean",
+            "description": "false で章（視点の切り替え）ごとに改ページしない"
+          },
+          "pageBreak": {
+            "type": "boolean",
+            "description": "false でファイルの間で改ページしない"
+          },
+          "synopsis": {
+            "type": "boolean",
+            "description": "false で梗概（synopsis.txt）を入れない"
+          },
+          "synopsisOnTitle": {
+            "type": "boolean",
+            "description": "梗概をタイトルページに出す"
+          },
+          "blankAfterHeading": {
+            "type": "boolean",
+            "description": "章見出し（視点行）と本文の間に空行を1行補う"
+          },
+          "review": {
+            "type": "boolean",
+            "description": "下読み用。表紙・梗概・人物紹介・部構成を無視し、先頭から約2万字までを組む"
+          },
+          "recto": {
+            "type": "boolean",
+            "description": "章を必ず右ページから始める"
+          },
+          "smartQuotes": {
+            "type": "boolean",
+            "description": "false でストレート引用符をカーリー引用符にしない"
+          }
+        }
+      }
+    },
     "writingMode": {
       "enum": [
         "vertical",

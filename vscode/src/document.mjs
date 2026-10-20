@@ -1,18 +1,18 @@
 /**
  * 原稿テキストからプレビュー用の HTML/CSS と文字数統計を作る（vscode API に依存しない）。
- * 組版は PDF 出力と同じ scripts/lib のパーサと、日本語は scripts/txt-to-pdf.mts、
- * 英語は scripts/txt-to-en-pdf.mts の generateHtml を使う。
+ * 組版は PDF 出力と同じ src/lib のパーサと、日本語は src/pdf.mjs、
+ * 英語は src/en-pdf.mjs の generateHtml を使う。
  */
 
 import { dirname } from 'path';
-import { isMetaLine, parseTextLines, readLines } from '../../scripts/lib/text-parser.mts';
+import { isMetaLine, parseTextLines, readLines } from '../../src/lib/text-parser.mjs';
 import {
   computeSectionLabels, getTextFilesFromDir, countGenkoRows,
   SYNOPSIS_FILENAME, CHARACTERS_FILENAME,
-} from '../../scripts/lib/manuscript.mts';
-import { generateHtml } from '../../scripts/txt-to-pdf.mts';
-import { buildChapters, generateHtml as generateEnglishHtml, parseEnglishLines } from '../../scripts/txt-to-en-pdf.mts';
-import { detectLanguage } from './layout.mts';
+} from '../../src/lib/manuscript.mjs';
+import { generateHtml } from '../../src/pdf.mjs';
+import { buildChapters, generateHtml as generateEnglishHtml, parseEnglishLines } from '../../src/en-pdf.mjs';
+import { detectLanguage } from '../../src/layout.mjs';
 
 // 原稿の行列から組版の言語（'ja' / 'en'）を判定する（メタ行は数えない）
 export const detectLanguageOfLines = (lines) => detectLanguage(lines, isMetaLine);
@@ -94,7 +94,7 @@ export function computeStats(fileLines, metrics) {
   };
 }
 
-// 英語組版（txt-to-en-pdf.mts）。ファイルは章にまとめられるので、段落は data-file でファイルを指す
+// 英語組版（en-pdf.mjs）。ファイルは章にまとめられるので、段落は data-file でファイルを指す
 function buildEnglishHtml(fileLines, metrics) {
   const m = metrics.layout.margin;
   const chapters = buildChapters(fileLines.map(lines => parseEnglishLines(lines)));
@@ -150,7 +150,7 @@ if (import.meta.vitest) {
   const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
   const { join } = await import('path');
-  const { BUILTIN_ENGLISH_PRESETS, computeMetrics, DEFAULT_LAYOUT } = await import('./layout.mts');
+  const { BUILTIN_ENGLISH_PRESETS, computeMetrics, DEFAULT_LAYOUT } = await import('../../src/layout.mjs');
 
   const withWork = (files, fn) => {
     const dir = mkdtempSync(join(tmpdir(), 'novel-preview-'));
@@ -183,7 +183,7 @@ if (import.meta.vitest) {
   describe('英語組版', () => {
     const metrics = computeMetrics(BUILTIN_ENGLISH_PRESETS.A5, { english: true });
 
-    test('txt-to-en-pdf の組版で、段落にファイル番号と行番号が付き、@page は残らない', () => {
+    test('en-pdf の組版で、段落にファイル番号と行番号が付き、@page は残らない', () => {
       withWork({ '010.txt': 'POV: Nol\n【One】\nFirst "para".\n【】\n', '020.txt': 'Second para.\n' }, (dir) => {
         const doc = buildDocument({ filePath: join(dir, '010.txt'), scope: 'work', metrics });
         expect(doc.language).toBe('en');

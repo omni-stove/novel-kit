@@ -3,7 +3,7 @@
  * 本文とそのスタイルは render メッセージで後から差し込む（media/preview.js）。
  */
 
-import { PAPER_SIZES } from './layout.mts';
+import { PAPER_SIZES } from '../../src/layout.mjs';
 
 const ZOOM_OPTIONS = [
   ['fit', '画面に合わせる'],
@@ -51,7 +51,7 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
     <button id="toggle-edit" aria-pressed="true" title="オン: 段落をクリックしてその場で編集（Cmd/Ctrl+クリックでエディタの該当行へ）&#10;オフ: ダブルクリックでエディタの該当行へ">編集</button>
     <button id="open-text" title="このタブをテキストエディタに切り替える（見ている位置の行で開く）">テキストで開く</button>
     <label>表示<select id="zoom">${options(ZOOM_OPTIONS)}</select></label>
-    <button id="export-pdf" title="日本語: scripts/txt-to-pdf.mts でこの字数×行数のPDFを出力&#10;English: scripts/txt-to-en-pdf.mts でこの判型のPDFを出力">PDF出力</button>
+    <button id="export-pdf" title="日本語: novel pdf でこの字数×行数のPDFを出力&#10;English: novel pdf-en でこの判型のPDFを出力">PDF出力</button>
     <span id="stats"></span>
   </header>
   <section id="setup" hidden>

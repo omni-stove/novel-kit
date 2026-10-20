@@ -1,12 +1,12 @@
 /**
  * 原稿ファイルの集合に対する処理。
  * ディレクトリ走査、部・章の採番、複数ファイルのマージ、あらすじ等の付属ファイル検出など。
- * 1ファイル内のテキスト解釈は text-parser.mts。
+ * 1ファイル内のテキスト解釈は text-parser.mjs。
  */
 
 import { readdirSync, statSync, existsSync } from 'fs';
 import { basename, dirname, join } from 'path';
-import { fail } from './cli.mts';
+import { fail } from './cli.mjs';
 import {
   readLines,
   getFilteredLines,
@@ -18,8 +18,8 @@ import {
   stripInlineMarkup,
   trimBlankEdges,
   countChars,
-} from './text-parser.mts';
-import { countWrappedRows } from './grid.mts';
+} from './text-parser.mjs';
+import { countWrappedRows } from './grid.mjs';
 
 export const SYNOPSIS_FILENAME = 'synopsis.txt';
 export const CHARACTERS_FILENAME = 'characters.txt';
@@ -249,7 +249,7 @@ if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
   const { writeFileSync, unlinkSync, mkdtempSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
-  const { parseTextFile } = await import('./text-parser.mts');
+  const { parseTextFile } = await import('./text-parser.mjs');
 
   const makeTmpFiles = (contents) => {
     const paths = contents.map((_, i) => join(tmpdir(), `ms-${process.pid}-${Date.now()}-${i}.txt`));

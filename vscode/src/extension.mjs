@@ -2,17 +2,17 @@ import * as vscode from 'vscode';
 import { existsSync } from 'fs';
 import { basename, dirname, join, relative } from 'path';
 import { randomBytes } from 'crypto';
-import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../scripts/lib/text-parser.mts';
+import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
 import {
   BUILTIN_ENGLISH_PRESETS, BUILTIN_PRESETS, computeMetrics, describeLayout, enPdfPageSize, layoutsEqual,
   matchesPdfScriptPage, normalizeLayout,
-} from './layout.mts';
-import { buildDocument, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mts';
-import { DEFAULT_VIEW, LAYOUT_FILENAME, findLayoutFile, readSettingsFile, writeSettingsFile } from './layout-file.mts';
-import { renderWebviewHtml } from './webview.mts';
+} from '../../src/layout.mjs';
+import { buildDocument, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
+import { CONFIG_FILENAME, DEFAULT_VIEW, findConfigFile, readSettingsFile, writeSettingsFile } from '../../src/config.mjs';
+import { renderWebviewHtml } from './webview.mjs';
 
-const PDF_SCRIPT = 'scripts/txt-to-pdf.mts';
-const EN_PDF_SCRIPT = 'scripts/txt-to-en-pdf.mts';
+// PDF出力はワークスペースに入っている novel-kit の CLI で行う
+const NOVEL_BIN = 'node_modules/.bin/novel';
 const RENDER_DELAY_MS = 250;
 // 同じ段落への入力がこの間隔以内に続けば、取り消しの1回分にまとめる
 const UNDO_GROUP_MS = 1500;
@@ -47,11 +47,11 @@ function allPresets(english = false) {
   return Object.fromEntries(Object.entries(merged).map(([name, layout]) => [name, normalizeLayout(layout, { english })]));
 }
 
-// レイアウトは原稿から一番近い novel-layout.json に持つ（ワークスペースの外までは探さない）
+// レイアウトは原稿から一番近い novel.json に持つ（ワークスペースの外までは探さない）
 function layoutFileFor(doc) {
   const dir = dirname(doc.uri.fsPath);
   const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath ?? dir;
-  return findLayoutFile(dir, root);
+  return findConfigFile(dir, root);
 }
 
 let warnedLayoutFile = null;
@@ -99,7 +99,7 @@ function metricsFor(doc) {
 // patch: { layout } で原稿の言語のレイアウト（日本語か英語）を差し替え、{ view } で表示設定の一部を上書きする
 function updateSettings(doc, patch) {
   const current = settingsFor(doc);
-  const file = layoutFileFor(doc) ?? join(dirname(doc.uri.fsPath), LAYOUT_FILENAME);
+  const file = layoutFileFor(doc) ?? join(dirname(doc.uri.fsPath), CONFIG_FILENAME);
   if (file === warnedLayoutFile) {
     vscode.window.showErrorMessage(`${vscode.workspace.asRelativePath(file)} が壊れているため、設定を保存できません。ファイルを直すか削除してください。`);
     return;
@@ -520,12 +520,12 @@ async function selectLayout() {
   if (picked) setLayout(doc, presets[picked.label]);
 }
 
-// ---- PDF出力（scripts/txt-to-pdf.mts） ----
+// ---- PDF出力（novel pdf / novel pdf-en） ----
 
 const shellQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 // session があればその表示範囲（このファイル / 作品全体）で、無ければ開いている原稿1ファイルを出力する。
-// 日本語は scripts/txt-to-pdf.mts、英語は scripts/txt-to-en-pdf.mts（判型は用紙から選ぶ）
+// 日本語は novel pdf、英語は novel pdf-en（判型は用紙から選ぶ）
 function exportPdf(session = activeSession()) {
   const doc = session?.doc ?? activeManuscript();
   if (!doc) return;
@@ -533,9 +533,9 @@ function exportPdf(session = activeSession()) {
   const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
   const { layout, english } = resolvedSettingsFor(doc);
   const metrics = computeMetrics(layout, { english });
-  const script = english ? EN_PDF_SCRIPT : PDF_SCRIPT;
-  if (!root || !existsSync(join(root, script))) {
-    vscode.window.showErrorMessage(`${script} が見つからないため、PDFを出力できません。`);
+  const command = english ? 'pdf-en' : 'pdf';
+  if (!root || !existsSync(join(root, NOVEL_BIN))) {
+    vscode.window.showErrorMessage(`${NOVEL_BIN} が見つからないため、PDFを出力できません（ワークスペースに novel-kit を入れてください）。`);
     return;
   }
 
@@ -572,7 +572,7 @@ function exportPdf(session = activeSession()) {
   pdfTerminal.show(true);
   pdfTerminal.sendText([
     'mkdir -p out/preview &&',
-    `AUTO_OPEN=1 node ${script}`,
+    `AUTO_OPEN=1 ${NOVEL_BIN} ${command}`,
     options,
     `-o ${shellQuote(out)}`,
     input,
@@ -630,7 +630,7 @@ export function activate(ctx) {
   statusBar.command = 'novelPreview.selectLayout';
 
   // 設定ファイルを手で書き換えたとき・置き場所を変えたときにも追従する
-  const layoutWatcher = vscode.workspace.createFileSystemWatcher(`**/${LAYOUT_FILENAME}`);
+  const layoutWatcher = vscode.workspace.createFileSystemWatcher(`**/${CONFIG_FILENAME}`);
 
   // エディタで開いていない原稿の追加・削除・外部からの書き換え（Claude Code など）も拾う。
   // 同じディレクトリの原稿は、作品全体の表示にも単独表示の章番号にも効くので、そのディレクトリを見ているプレビューを組み直す

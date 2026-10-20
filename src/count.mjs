@@ -3,19 +3,19 @@
  * 原稿用紙換算スクリプト
  *
  * 使い方:
- *   node scripts/count-pages.mts [--size WxH] <file-or-dir>...
+ *   novel count [--size WxH] <file-or-dir>...
  *
  * オプション:
  *   --size WxH   1枚の字詰め（省略時: 20x20 = 400字詰め原稿用紙）
  */
 
 import { basename } from 'path';
-import { readLines } from './lib/text-parser.mts';
-import { countGenkoRows, requireInputFiles } from './lib/manuscript.mts';
-import { parseCliArgs, ARG, runMain } from './lib/cli.mts';
+import { readLines } from './lib/text-parser.mjs';
+import { countGenkoRows, requireInputFiles } from './lib/manuscript.mjs';
+import { parseCliArgs, ARG, runMain } from './lib/cli.mjs';
 
-function main() {
-  const args = parseCliArgs(process.argv.slice(2), [ARG.size], { size: { cols: 20, rows: 20 } });
+export function main(argv = process.argv.slice(2)) {
+  const args = parseCliArgs(argv, [ARG.size], { size: { cols: 20, rows: 20 } });
   const { cols, rows: rowsPerPage } = args.size;
   const files = requireInputFiles(args.files);
   const counts = files.map(f => countGenkoRows(readLines(f), cols));

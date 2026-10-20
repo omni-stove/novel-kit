@@ -224,7 +224,7 @@ button:disabled {
   break-before: column;
 }
 
-/* 英語組版（txt-to-en-pdf.mts）の章扉・部扉の改ページも同じく段の区切りにする */
+/* 英語組版（en-pdf.mjs）の章扉・部扉の改ページも同じく段の区切りにする */
 #flow .chapter,
 #flow .part-page {
   break-before: column;

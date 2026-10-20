@@ -16,12 +16,12 @@ import {
   stripInlineMarkup,
   tokenizeInlineMarkup,
   countTextChars,
-} from './text-parser.mts';
-import { countWrappedRows, normalizeTcy } from './grid.mts';
-import { toFullWidth, toVerticalBase, toVerticalText } from './docx.mts';
+} from './text-parser.mjs';
+import { countWrappedRows, normalizeTcy } from './grid.mjs';
+import { toFullWidth, toVerticalBase, toVerticalText } from './docx.mjs';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { fail } from './cli.mts';
+import { fail } from './cli.mjs';
 
 const DEFAULT_TEMPLATE_PATH = fileURLToPath(new URL('../templates/tategaki-a4-42x34.docx', import.meta.url));
 

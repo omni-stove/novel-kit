@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
-import { writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { readFileSync, writeFileSync } from 'fs';
+import { createRequire } from 'module';
+import { dirname, join, resolve } from 'path';
 import { pathToFileURL } from 'url';
 
 export function parseCliArgs(argv, defs, defaults = {}) {
@@ -77,8 +78,15 @@ export function runMain(importMetaUrl, main) {
   });
 }
 
+// 呼び出し元のディレクトリに依らず、このパッケージが依存している vivliostyle を使う
+// （VS Code 拡張にも bundle されるので、読み込み時ではなく使うときに探す）
+function vivliostyleBin() {
+  const pkgPath = createRequire(import.meta.url).resolve('@vivliostyle/cli/package.json');
+  return join(dirname(pkgPath), JSON.parse(readFileSync(pkgPath, 'utf-8')).bin.vivliostyle);
+}
+
 export function vivliostyleBuild(htmlPath, outputPath, { quiet = false } = {}) {
-  execSync(`./node_modules/.bin/vivliostyle build "${htmlPath}" -o "${outputPath}"`, { stdio: quiet ? 'pipe' : 'inherit' });
+  execSync(`"${process.execPath}" "${vivliostyleBin()}" build "${htmlPath}" -o "${outputPath}"`, { stdio: quiet ? 'pipe' : 'inherit' });
 }
 
 // 組版の崩れを調べられるよう、PDFの隣にHTMLも書き出す（不要なら呼び出し側で消す）

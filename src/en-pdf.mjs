@@ -4,8 +4,8 @@
  * 英語原稿のtxtファイルを出版物レイアウト（ペーパーバック風・横書き）のPDFに変換するスクリプト
  *
  * 使い方:
- *   node scripts/txt-to-en-pdf.mts -o output.pdf file1.txt file2.txt ...
- *   node scripts/txt-to-en-pdf.mts -o output.pdf ./src/co/story/en/
+ *   novel pdf-en -o output.pdf file1.txt file2.txt ...
+ *   novel pdf-en -o output.pdf ./src/co/story/en/
  *
  * オプション:
  *   -o, --output <file>  出力ファイル名（必須）
@@ -14,7 +14,7 @@
  *   --5x8                5×8in トレードペーパーバック
  *   --6x9                6×9in USトレード（デフォルト）
  *   --a5                 A5サイズ
- *   --part 070,085,...   部の境界となるファイル名プレフィックス（txt-to-pdf.mts の --part と同形式）。
+ *   --part 070,085,...   部の境界となるファイル名プレフィックス（pdf.mjs の --part と同形式）。
  *                        該当ファイルから新しい部（Part One, Part Two, ...）が始まり、部扉ページを挿入する。
  *                        章番号は部ごとにリセットされ、部に章が1つしかない場合は章番号を表示しない。
  *                        未訳などで該当ファイルが存在しない境界はスキップする。
@@ -45,11 +45,11 @@ import { PDFDocument, PDFArray, PDFRawStream, StandardFonts, rgb } from 'pdf-lib
 import {
   readLines, getBodyLines, escapeXml,
   isEpigraphLine, parseEpigraphLine, parseViewpointLine, isSeparator,
-} from './lib/text-parser.mts';
-import { requireInputFiles, resolvePartIndices, startsNewChapter } from './lib/manuscript.mts';
-import { chapterNumberWord } from './lib/english.mts';
-import { googleFontsLinks } from './lib/html.mts';
-import { parseCliArgs, ARG, buildPdfFromHtml, openFile, requireOutput, runMain } from './lib/cli.mts';
+} from './lib/text-parser.mjs';
+import { requireInputFiles, resolvePartIndices, startsNewChapter } from './lib/manuscript.mjs';
+import { chapterNumberWord } from './lib/english.mjs';
+import { googleFontsLinks } from './lib/html.mjs';
+import { parseCliArgs, ARG, buildPdfFromHtml, openFile, requireOutput, runMain } from './lib/cli.mjs';
 
 export const PAGE_SIZES = {
   '5x8': {
@@ -553,8 +553,8 @@ async function stampPageNumbers(pdfPath, size, { hasTitlePage }) {
   return pages.length;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+export async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
 
   requireOutput(args, 'output.pdf');
 

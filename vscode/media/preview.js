@@ -190,7 +190,7 @@
   // クリックした段落を元テキスト（ルビなどの記法つき）に戻してその場で編集し、1行ぶんの変更としてエディタへ送る。
   // 編集中は拡張機能から届く再描画を保留し、編集を終えたときに組み直してもらう
 
-  // scripts/lib/text-parser.mts の INLINE_MARKUP_RE と同じ記法
+  // src/lib/text-parser.mjs の INLINE_MARKUP_RE と同じ記法
   const INLINE_MARKUP_RE = /《《(.+?)》》|\|(.+?)《(.+?)》|<<(.+?)>>|\*([^*]+)\*/g;
 
   let editEnabled = true;
@@ -531,7 +531,7 @@
     $('derived').textContent = english
       ? `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（約${metrics.charsApprox}字×${metrics.lines}行）`
       : `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（${metrics.chars}字×${metrics.lines}行）`;
-    $('layout-file').textContent = layoutFile ? `設定ファイル: ${layoutFile}` : '設定ファイル: なし（変更すると原稿と同じ場所に novel-layout.json を作ります）';
+    $('layout-file').textContent = layoutFile ? `設定ファイル: ${layoutFile}` : '設定ファイル: なし（変更すると原稿と同じ場所に novel.json を作ります）';
     $('delete-preset').disabled = !userPresetNames.includes(presetName);
 
     for (const button of document.querySelectorAll('#scope button')) {

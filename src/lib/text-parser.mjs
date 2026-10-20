@@ -2,7 +2,7 @@
  * 原稿テキスト（1ファイル分）の解釈。
  * 行の種別判定、インライン記法（ルビ・傍点・横倒し・イタリック）、
  * 縦書きHTMLへの変換、エピグラフの整形など、テキストそのものに関する処理を置く。
- * 複数ファイルの集合や採番・ディレクトリ走査は manuscript.mts。
+ * 複数ファイルの集合や採番・ディレクトリ走査は manuscript.mjs。
  */
 
 import { readFileSync } from 'fs';
@@ -310,7 +310,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return r;
   }
 
-  // 字数に合わせて配置したルビ。CSS（lib/html.mts の ruby.fit）がカスタムプロパティを読む。
+  // 字数に合わせて配置したルビ。CSS（lib/html.mjs の ruby.fit）がカスタムプロパティを読む。
   // rt 側の値は rt 自身の em（親文字の半分）で持つ
   function fittedRubyHtml({ base, ruby, prev, prevShared, next, nextShared }) {
     const n = rubyCellCount(base, vertical);
