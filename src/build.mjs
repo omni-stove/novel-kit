@@ -4,25 +4,24 @@
  * 使い方:
  *   novel build <作品のディレクトリ or novel.json> [出力名...] [--out-dir dir] [--pages 42,50-53] [--limit n] [--target 読者] [--ruby-parens]
  *   出力名を省略すると、"outputs" のすべてを作る。
- *   --out-dir はこの実行だけ出力先ディレクトリを変える（novel.json の outDir より優先）。
+ *   出力は --out-dir のディレクトリ（プロジェクトのルートから。絶対パスも可。省略時は out）に出す。
  *   --pages / --limit は pdf、--target は split / merge、--ruby-parens は merge の出力にだけ効く。
  *
- * 設定ファイル（パスは設定ファイルのディレクトリから。"outDir" だけはプロジェクトのルートから）:
+ * 設定ファイル（パスは設定ファイルのディレクトリから）:
  *   {
  *     "title": "作品名", "author": "著者名", "genre": "SF", "target": "想定読者",
  *     "input": ["."],                                  // 原稿のファイルかディレクトリ（並び順どおりに連結）
  *     "parts": ["070", "085"],                         // 部の境界になるファイル名の先頭の番号
  *     "chars": 40, "lines": 40, ...                    // 日本語のレイアウト（プレビューと共通）
  *     "english": { "paper": "6x9in", ... },             // 英語のレイアウト（プレビューと共通）
- *     "outDir": "out",                                 // 出力先ディレクトリ（省略時は out）
  *     "outputs": {
- *       "pdf": { "format": "pdf", "out": "work.pdf", "coverless": true },   // out は outDir から
+ *       "pdf": { "format": "pdf", "out": "work.pdf", "coverless": true },   // out は出力先ディレクトリから
  *       "en":  { "format": "pdf-en", "out": "work-en.pdf", "input": ["en"], "title": "Title" }
  *     }
  *   }
  * プロジェクトのルートは、設定ファイルから上へたどって最初に package.json があるディレクトリ。
  * 作品の項目（title / author / genre / target / input / parts）は出力ごとに上書きでき、null を書けばその出力では使わない。
- * レイアウトの "writingMode" / "chars" / "lines" と "outDir" も出力ごとに上書きできる。
+ * レイアウトの "writingMode" / "chars" / "lines" も出力ごとに上書きできる。
  *
  * format（novel <format> と同じコマンドで作る）と、それぞれの項目:
  *   pdf        縦書き（横書き）の PDF。coverless, chapterBreak（false で章ごとに改ページしない）,
@@ -173,9 +172,11 @@ function passThroughArgs(argv) {
   return parsed;
 }
 
-// 出力先ディレクトリはプロジェクトのルートから（絶対パスも可）。その場の --out-dir、出力の outDir、作品の outDir の順
-export function outputPath(output, config, root, { outDir = null, pages = null } = {}) {
-  const dir = resolve(root, outDir ?? output.outDir ?? config.outDir);
+// 出力先ディレクトリ（--out-dir）はプロジェクトのルートから（絶対パスも可）
+const DEFAULT_OUT_DIR = 'out';
+
+export function outputPath(output, root, { outDir = null, pages = null } = {}) {
+  const dir = resolve(root, outDir ?? DEFAULT_OUT_DIR);
   // --pages で抜き出すときは、全体版を上書きしないよう出力名に -p<指定> を付ける
   const file = output.format === 'pdf' && pages ? output.out.replace(/(\.pdf)?$/, `-p${pages}.pdf`) : output.out;
   return resolve(dir, file);
@@ -186,7 +187,7 @@ export function outputArgv(name, output, config, root, extra = {}, warn = () => 
   const format = FORMATS[output.format];
   if (!format) fail(`出力 "${name}" の format "${output.format}" には対応していません（${Object.keys(FORMATS).join(' / ')}）`);
   if (!output.out) fail(`出力 "${name}" に out がありません`);
-  const out = cwdRelative(outputPath(output, config, root, extra));
+  const out = cwdRelative(outputPath(output, root, extra));
   if (format.argv) return format.argv(output, config, out, extra);
 
   return [
@@ -215,7 +216,7 @@ export async function main(argv = process.argv.slice(2)) {
   for (const name of names.length > 0 ? names : available) {
     const output = config.outputs[name];
     const outArgv = outputArgv(name, output, config, root, extra, (message) => console.warn(`警告: ${message}`));
-    mkdirSync(dirname(outputPath(output, config, root, extra)), { recursive: true });
+    mkdirSync(dirname(outputPath(output, root, extra)), { recursive: true });
     console.log(`\n▶ ${name}: novel ${output.format} ${outArgv.join(' ')}`);
     await (await FORMATS[output.format].load()).main(outArgv);
   }
@@ -236,7 +237,6 @@ if (import.meta.vitest) {
     layout: DEFAULT_LAYOUT,
     english: DEFAULT_ENGLISH_LAYOUT,
     view: {},
-    outDir: 'out',
     outputs: {},
     ...overrides,
   });
@@ -288,13 +288,11 @@ if (import.meta.vitest) {
       expect(argv).toEqual(expect.arrayContaining(['--pages', '3-4', '/p/out/a-p3-4.pdf']));
     });
 
-    test('出力先は outDir から。その場の --out-dir、出力の outDir、作品の outDir の順に優先する', () => {
-      const out = (output, c = config(), extra) => argvOf({ format: 'epub', out: 'a.epub', ...output }, c, extra).at(-2);
-      expect(out({})).toBe('/p/out/a.epub');
-      expect(out({}, config({ outDir: 'dist/books' }))).toBe('/p/dist/books/a.epub');
-      expect(out({ outDir: 'submit' }, config({ outDir: 'dist' }))).toBe('/p/submit/a.epub');
-      expect(out({ outDir: 'submit' }, config(), { outDir: '/tmp/x' })).toBe('/tmp/x/a.epub');
-      expect(out({ out: 'sub/a.epub' })).toBe('/p/out/sub/a.epub');
+    test('出力先は --out-dir のディレクトリから（既定は out）', () => {
+      const out = (extra) => argvOf({ format: 'epub', out: 'a.epub' }, config(), extra).at(-2);
+      expect(out()).toBe('/p/out/a.epub');
+      expect(out({ outDir: 'dist/books' })).toBe('/p/dist/books/a.epub');
+      expect(out({ outDir: '/tmp/x' })).toBe('/tmp/x/a.epub');
     });
 
     test('novel-pdf / epub / rtf / rtf-en の項目をフラグにする（epub は開かない）', () => {

@@ -45,7 +45,6 @@ VS Code 拡張のレイアウト・表示設定と、`novel build` の作品情�
   "author": "園口回",
   "genre": "SF",
   "parts": ["070", "085"],
-  "outDir": "out",
   "outputs": {
     "pdf": { "format": "pdf", "out": "cosmic-organ.pdf", "coverless": true },
     "review": { "format": "pdf", "out": "cosmic-organ-review.pdf", "review": true },
@@ -63,10 +62,7 @@ VS Code 拡張のレイアウト・表示設定と、`novel build` の作品情�
 
 - `input`: 原稿のファイルかディレクトリ（設定ファイルのディレクトリから。並び順どおりに連結）。省略時は `["."]`。split / merge はディレクトリ1つだけ
 - 作品の項目（`title` / `author` / `genre` / `target` / `input` / `parts`）は出力ごとに上書きできる。`null` を書くとその出力では使わない
-- `outDir`: 出力先ディレクトリ。プロジェクトのルート（設定ファイルから上へたどって最初に `package.json` があるディレクトリ）から。絶対パスも可。省略時は `out`
-  - 出力ごとに `outDir` を書けばその出力だけ変わり、`novel build --out-dir <dir>` ならその実行だけ変わる（優先順位は `--out-dir` → 出力の `outDir` → 作品の `outDir`）
-  - VS Code 拡張の「PDF出力」も `<outDir>/preview/` に出す
-- `outputs.<名前>.out`: 出力ファイル名（split はディレクトリ名）。`outDir` から
+- `outputs.<名前>.out`: 出力ファイル名（split はディレクトリ名）。出力先ディレクトリ（`novel build --out-dir`。プロジェクトのルート＝設定ファイルから上へたどって最初に `package.json` があるディレクトリから。省略時は `out`）に出す
 - PDF の字数×行数は、プレビューと同じトップレベルのレイアウト（`chars` / `lines` / `writingMode`）を使う。出力ごとに上書きもできる
 - 英語の PDF の判型は `english` のレイアウトの用紙（6×9in / 5×8in / A5）から選ぶ
 - 出力ごとの項目の一覧は `src/build.mjs` の先頭のコメントと、`vscode/schemas/novel.schema.json` にある（VS Code では補完が効く）
