@@ -1,7 +1,7 @@
 /**
  * 設定ファイル（novel.json）の探索と読み書き。
  * 日本語のレイアウト（トップレベル）、英語のレイアウト（"english"）、表示範囲・倍率などの表示設定（"view"）と、
- * 作品情報（"title" / "author" / "input"）・出力の定義（"outputs"。novel build が読む）を持つ。
+ * 作品情報（"title" / "author" / "genre" / "target" / "input" / "parts"）・出力の定義（"outputs"。novel build が読む）を持つ。
  * 原稿のあるディレクトリから上へ向かって探し、最初に見つかったもの（＝一番近いもの）を使う。
  * 作品ごと（src/<作品>/story/）にも、上位ディレクトリに置いて複数作品の共通設定にもできる。
  * 英訳（story/en/ など）も同じファイルの "english" を使うので、作品ごとに1つで済む。
@@ -59,7 +59,10 @@ export function readWorkConfig(filePath) {
     dir: dirname(filePath),
     title: raw.title ?? null,
     author: raw.author ?? null,
+    genre: raw.genre ?? null,
+    target: raw.target ?? null,
     input: raw.input ?? ['.'],
+    parts: raw.parts ?? null,
     outputs: raw.outputs ?? {},
   };
 }
@@ -160,7 +163,7 @@ if (import.meta.vitest) {
         const file = join(story, CONFIG_FILENAME);
         writeFileSync(file, '{ "title": "作品", "outputs": { "pdf": { "format": "pdf", "out": "out/a.pdf" } } }');
         const config = readWorkConfig(file);
-        expect(config).toMatchObject({ dir: story, title: '作品', author: null, input: ['.'] });
+        expect(config).toMatchObject({ dir: story, title: '作品', author: null, genre: null, input: ['.'], parts: null });
         expect(config.outputs.pdf.out).toBe('out/a.pdf');
         expect(config.layout).toEqual(DEFAULT_LAYOUT);
       });

@@ -3,7 +3,7 @@
 小説原稿（`.txt`）の組版エンジンと、それを使う CLI（`novel`）・VS Code 拡張「小説プレビュー」。
 プレビューと PDF は同じパーサ・同じ組版で作るので、プレビューで見たとおりに PDF が出る。
 
-- `src/` 組版エンジン（`lib/` のパーサ・原稿の集め方・HTML 生成、`pdf.mjs` / `en-pdf.mjs` / `count.mjs` の各コマンド、`layout.mjs` / `config.mjs` のレイアウトと設定ファイル）
+- `src/` 組版エンジン（`lib/` のパーサ・原稿の集め方・HTML 生成、`pdf.mjs` などの各コマンド、`layout.mjs` / `config.mjs` のレイアウトと設定ファイル）
 - `bin/novel.mjs` CLI の入口
 - `vscode/` VS Code 拡張（[vscode/README.md](vscode/README.md)）
 
@@ -20,13 +20,18 @@ pnpm add -D github:omni-stove/novel-kit
 ## CLI
 
 ```sh
-novel build <作品のディレクトリ or novel.json> [出力名...] [--pages 42,50-53] [--limit n]
-novel pdf    [オプション] -o out.pdf <原稿のファイル or ディレクトリ>...
-novel pdf-en [オプション] -o out.pdf <原稿のファイル or ディレクトリ>...
-novel count  [--size 30x40] <原稿のファイル or ディレクトリ>...
+novel build <作品のディレクトリ or novel.json> [出力名...] [--pages 42,50-53] [--limit n] [--target 読者] [--ruby-parens]
+novel pdf       [オプション] -o out.pdf  <原稿のファイル or ディレクトリ>...   # 縦書き（横書き）の PDF
+novel pdf-en    [オプション] -o out.pdf  <原稿>...                            # 英語のペーパーバック風 PDF
+novel novel-pdf [オプション] -o out.pdf  <原稿>...                            # 文庫本見開きの PDF
+novel epub      [オプション] -o out.epub <原稿>...
+novel rtf       [--ja | --shunn] [オプション] -o out.rtf <原稿>...
+novel split     <原稿のディレクトリ> [出力先ディレクトリ] [作品名] [ジャンル] [--splits=070,120] [--target 読者]
+novel merge     <原稿のディレクトリ> [出力ファイル] [作品名] [ジャンル] [--splits=070,120] [--target 読者] [--ruby-parens]
+novel count     [--size 30x40] <原稿>...
 ```
 
-`pdf` / `pdf-en` / `count` のオプションは、それぞれ `src/pdf.mjs` / `src/en-pdf.mjs` / `src/count.mjs` の先頭のコメントにある。
+各コマンドのオプションは、`src/` のそれぞれのファイル（`pdf.mjs` / `en-pdf.mjs` / `novel-pdf.mjs` / `epub.mjs` / `rtf.mjs` / `split.mjs` / `merge.mjs` / `count.mjs`）の先頭のコメントにある。
 生成した PDF は `--open` で開く（環境変数 `AUTO_OPEN=0` なら開かない）。
 
 ## 設定ファイル（novel.json）
@@ -38,17 +43,25 @@ VS Code 拡張のレイアウト・表示設定と、`novel build` の作品情�
 {
   "title": "コズミック・オルガン",
   "author": "園口回",
+  "genre": "SF",
+  "parts": ["070", "085"],
   "outputs": {
-    "pdf": { "format": "pdf", "out": "out/cosmic-organ.pdf", "coverless": true, "parts": ["070", "085"] },
+    "pdf": { "format": "pdf", "out": "out/cosmic-organ.pdf", "coverless": true },
     "review": { "format": "pdf", "out": "out/cosmic-organ-review.pdf", "review": true },
-    "pdf-en": { "format": "pdf-en", "out": "out/cosmic-organ-en.pdf", "input": ["en"], "title": "Cosmic Organ", "author": "Mawaru Sonoguchi" }
+    "pdf-en": { "format": "pdf-en", "out": "out/cosmic-organ-en.pdf", "input": ["en"], "title": "Cosmic Organ", "author": "Mawaru Sonoguchi" },
+    "novel": { "format": "novel-pdf", "out": "out/コズミック・オルガン.pdf", "dark": true },
+    "epub": { "format": "epub", "out": "out/コズミック・オルガン.epub" },
+    "rtf": { "format": "rtf", "out": "out/cosmic-organ.rtf" },
+    "split": { "format": "split", "out": "out/co-chapters" },
+    "all": { "format": "merge", "out": "out/co-all.txt" }
   },
   "chars": 40,
   "lines": 40
 }
 ```
 
-- `input`: 原稿のファイルかディレクトリ（設定ファイルのディレクトリから。並び順どおりに連結）。省略時は `["."]`
+- `input`: 原稿のファイルかディレクトリ（設定ファイルのディレクトリから。並び順どおりに連結）。省略時は `["."]`。split / merge はディレクトリ1つだけ
+- 作品の項目（`title` / `author` / `genre` / `target` / `input` / `parts`）は出力ごとに上書きできる。`null` を書くとその出力では使わない
 - `outputs.<名前>.out`: プロジェクトのルート（設定ファイルから上へたどって最初に `package.json` があるディレクトリ）から
 - PDF の字数×行数は、プレビューと同じトップレベルのレイアウト（`chars` / `lines` / `writingMode`）を使う。出力ごとに上書きもできる
 - 英語の PDF の判型は `english` のレイアウトの用紙（6×9in / 5×8in / A5）から選ぶ

@@ -14,12 +14,27 @@
       "type": "string",
       "description": "著者名"
     },
+    "genre": {
+      "type": "string",
+      "description": "ジャンル（split / merge の出力の先頭に入れる）"
+    },
+    "target": {
+      "type": "string",
+      "description": "想定読者（split / merge の出力の先頭に入れる）"
+    },
     "input": {
       "type": "array",
       "items": {
         "type": "string"
       },
       "description": "原稿のファイルかディレクトリ（この設定ファイルのディレクトリから。並び順どおりに連結する。省略時は [\".\"]）"
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "部の境界になるファイル名の先頭の番号（例: [\"070\", \"085\"]）。pdf / pdf-en / split / merge が使う"
     },
     "outputs": {
       "type": "object",
@@ -34,21 +49,33 @@
           "format": {
             "enum": [
               "pdf",
-              "pdf-en"
+              "pdf-en",
+              "novel-pdf",
+              "epub",
+              "rtf",
+              "rtf-en",
+              "split",
+              "merge"
             ],
-            "description": "出力形式（pdf: 日本語の縦書き / 横書き PDF、pdf-en: 英語のペーパーバック風 PDF）"
+            "description": "出力形式（pdf: 縦書き/横書き PDF、pdf-en: 英語のペーパーバック風 PDF、novel-pdf: 文庫本見開き PDF、epub、rtf: 日本語原稿の RTF、rtf-en: Shunn 形式の RTF、split: 章ごとの txt、merge: 1つにまとめた txt）"
           },
           "out": {
             "type": "string",
-            "description": "出力ファイル（プロジェクトのルート＝package.json のあるディレクトリから）"
+            "description": "出力ファイル（split はディレクトリ）。プロジェクトのルート＝package.json のあるディレクトリから"
           },
           "title": {
-            "type": "string",
-            "description": "この出力だけのタイトル（省略時は作品の title）"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "この出力だけのタイトル（省略時は作品の title、null で入れない）"
           },
           "author": {
-            "type": "string",
-            "description": "この出力だけの著者名（省略時は作品の author）"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "この出力だけの著者名（省略時は作品の author、null で入れない）"
           },
           "input": {
             "type": "array",
@@ -58,11 +85,14 @@
             "description": "この出力だけの原稿（省略時は作品の input）"
           },
           "parts": {
-            "type": "array",
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string"
             },
-            "description": "部の境界になるファイル名の先頭の番号（例: [\"070\", \"085\"]）"
+            "description": "この出力だけの部の境界（省略時は作品の parts、null で部に分けない）"
           },
           "writingMode": {
             "enum": [
@@ -92,7 +122,7 @@
           },
           "chapterBreak": {
             "type": "boolean",
-            "description": "false で章（視点の切り替え）ごとに改ページしない"
+            "description": "false で章ごとに改ページしない（pdf / rtf / rtf-en）"
           },
           "pageBreak": {
             "type": "boolean",
@@ -121,6 +151,43 @@
           "smartQuotes": {
             "type": "boolean",
             "description": "false でストレート引用符をカーリー引用符にしない"
+          },
+          "genre": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "この出力だけのジャンル（split / merge）"
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "この出力だけの想定読者（split / merge）"
+          },
+          "size": {
+            "enum": [
+              "a6",
+              "b6",
+              "a5"
+            ],
+            "description": "novel-pdf の判型（既定は a6）"
+          },
+          "dark": {
+            "type": "boolean",
+            "description": "novel-pdf を黒背景・白文字にする"
+          },
+          "rubyParens": {
+            "type": "boolean",
+            "description": "rtf / merge でルビを 漢字（かんじ） の括弧表記にする"
+          },
+          "contact": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "rtf-en の1ページ目左上に出す連絡先（1要素1行）"
           }
         }
       }

@@ -53,7 +53,7 @@ export const ARG = {
   author: { key: 'author', flags: ['--author'], takesValue: true },
   open: { key: 'open', flags: ['--open'] },
   size: { key: 'size', flags: ['--size'], takesValue: true, parse: parseGridSize },
-  // 部の境界となるファイル名プレフィックス（co-split の --splits と同形式）
+  // 部の境界となるファイル名プレフィックス（novel split の --splits と同形式）
   parts: { key: 'parts', flags: ['--part', '--parts'], takesValue: true, parse: parseList },
 };
 

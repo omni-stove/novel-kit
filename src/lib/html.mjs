@@ -11,7 +11,7 @@ export function googleFontsLinks(family) {
 
 /**
  * 縦書き本文で escapeHtml（text-parser）が生成する span クラスのスタイル。
- * pdf / txt-to-novel-pdf が共有する。
+ * pdf / novel-pdf が共有する。
  */
 export const VERTICAL_GLYPH_CSS = `
     /* 1文字ずつの欧文・数字（.latin / .upright）。text-combine-upright: all だと
