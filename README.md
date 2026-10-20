@@ -20,7 +20,7 @@ pnpm add -D github:omni-stove/novel-kit
 ## CLI
 
 ```sh
-novel build <作品のディレクトリ or novel.json> [出力名...] [--pages 42,50-53] [--limit n] [--target 読者] [--ruby-parens]
+novel build <作品のディレクトリ or novel.json> [出力名...] [--out-dir dir] [--pages 42,50-53] [--limit n] [--target 読者] [--ruby-parens]
 novel pdf       [オプション] -o out.pdf  <原稿のファイル or ディレクトリ>...   # 縦書き（横書き）の PDF
 novel pdf-en    [オプション] -o out.pdf  <原稿>...                            # 英語のペーパーバック風 PDF
 novel novel-pdf [オプション] -o out.pdf  <原稿>...                            # 文庫本見開きの PDF
@@ -45,15 +45,16 @@ VS Code 拡張のレイアウト・表示設定と、`novel build` の作品情�
   "author": "園口回",
   "genre": "SF",
   "parts": ["070", "085"],
+  "outDir": "out",
   "outputs": {
-    "pdf": { "format": "pdf", "out": "out/cosmic-organ.pdf", "coverless": true },
-    "review": { "format": "pdf", "out": "out/cosmic-organ-review.pdf", "review": true },
-    "pdf-en": { "format": "pdf-en", "out": "out/cosmic-organ-en.pdf", "input": ["en"], "title": "Cosmic Organ", "author": "Mawaru Sonoguchi" },
-    "novel": { "format": "novel-pdf", "out": "out/コズミック・オルガン.pdf", "dark": true },
-    "epub": { "format": "epub", "out": "out/コズミック・オルガン.epub" },
-    "rtf": { "format": "rtf", "out": "out/cosmic-organ.rtf" },
-    "split": { "format": "split", "out": "out/co-chapters" },
-    "all": { "format": "merge", "out": "out/co-all.txt" }
+    "pdf": { "format": "pdf", "out": "cosmic-organ.pdf", "coverless": true },
+    "review": { "format": "pdf", "out": "cosmic-organ-review.pdf", "review": true },
+    "pdf-en": { "format": "pdf-en", "out": "cosmic-organ-en.pdf", "input": ["en"], "title": "Cosmic Organ", "author": "Mawaru Sonoguchi" },
+    "novel": { "format": "novel-pdf", "out": "コズミック・オルガン.pdf", "dark": true },
+    "epub": { "format": "epub", "out": "コズミック・オルガン.epub" },
+    "rtf": { "format": "rtf", "out": "cosmic-organ.rtf" },
+    "split": { "format": "split", "out": "co-chapters" },
+    "all": { "format": "merge", "out": "co-all.txt" }
   },
   "chars": 40,
   "lines": 40
@@ -62,7 +63,10 @@ VS Code 拡張のレイアウト・表示設定と、`novel build` の作品情�
 
 - `input`: 原稿のファイルかディレクトリ（設定ファイルのディレクトリから。並び順どおりに連結）。省略時は `["."]`。split / merge はディレクトリ1つだけ
 - 作品の項目（`title` / `author` / `genre` / `target` / `input` / `parts`）は出力ごとに上書きできる。`null` を書くとその出力では使わない
-- `outputs.<名前>.out`: プロジェクトのルート（設定ファイルから上へたどって最初に `package.json` があるディレクトリ）から
+- `outDir`: 出力先ディレクトリ。プロジェクトのルート（設定ファイルから上へたどって最初に `package.json` があるディレクトリ）から。絶対パスも可。省略時は `out`
+  - 出力ごとに `outDir` を書けばその出力だけ変わり、`novel build --out-dir <dir>` ならその実行だけ変わる（優先順位は `--out-dir` → 出力の `outDir` → 作品の `outDir`）
+  - VS Code 拡張の「PDF出力」も `<outDir>/preview/` に出す
+- `outputs.<名前>.out`: 出力ファイル名（split はディレクトリ名）。`outDir` から
 - PDF の字数×行数は、プレビューと同じトップレベルのレイアウト（`chars` / `lines` / `writingMode`）を使う。出力ごとに上書きもできる
 - 英語の PDF の判型は `english` のレイアウトの用紙（6×9in / 5×8in / A5）から選ぶ
 - 出力ごとの項目の一覧は `src/build.mjs` の先頭のコメントと、`vscode/schemas/novel.schema.json` にある（VS Code では補完が効く）

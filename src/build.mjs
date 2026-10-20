@@ -2,25 +2,27 @@
  * novel build: 作品の設定ファイル（novel.json）の "outputs" に書いた出力を作る。
  *
  * 使い方:
- *   novel build <作品のディレクトリ or novel.json> [出力名...] [--pages 42,50-53] [--limit n] [--target 読者] [--ruby-parens]
+ *   novel build <作品のディレクトリ or novel.json> [出力名...] [--out-dir dir] [--pages 42,50-53] [--limit n] [--target 読者] [--ruby-parens]
  *   出力名を省略すると、"outputs" のすべてを作る。
+ *   --out-dir はこの実行だけ出力先ディレクトリを変える（novel.json の outDir より優先）。
  *   --pages / --limit は pdf、--target は split / merge、--ruby-parens は merge の出力にだけ効く。
  *
- * 設定ファイル（パスはすべて設定ファイルのディレクトリから。"out" だけはプロジェクトのルートから）:
+ * 設定ファイル（パスは設定ファイルのディレクトリから。"outDir" だけはプロジェクトのルートから）:
  *   {
  *     "title": "作品名", "author": "著者名", "genre": "SF", "target": "想定読者",
  *     "input": ["."],                                  // 原稿のファイルかディレクトリ（並び順どおりに連結）
  *     "parts": ["070", "085"],                         // 部の境界になるファイル名の先頭の番号
  *     "chars": 40, "lines": 40, ...                    // 日本語のレイアウト（プレビューと共通）
  *     "english": { "paper": "6x9in", ... },             // 英語のレイアウト（プレビューと共通）
+ *     "outDir": "out",                                 // 出力先ディレクトリ（省略時は out）
  *     "outputs": {
- *       "pdf": { "format": "pdf", "out": "out/work.pdf", "coverless": true },
- *       "en":  { "format": "pdf-en", "out": "out/work-en.pdf", "input": ["en"], "title": "Title" }
+ *       "pdf": { "format": "pdf", "out": "work.pdf", "coverless": true },   // out は outDir から
+ *       "en":  { "format": "pdf-en", "out": "work-en.pdf", "input": ["en"], "title": "Title" }
  *     }
  *   }
  * プロジェクトのルートは、設定ファイルから上へたどって最初に package.json があるディレクトリ。
  * 作品の項目（title / author / genre / target / input / parts）は出力ごとに上書きでき、null を書けばその出力では使わない。
- * レイアウトの "writingMode" / "chars" / "lines" も出力ごとに上書きできる。
+ * レイアウトの "writingMode" / "chars" / "lines" と "outDir" も出力ごとに上書きできる。
  *
  * format（novel <format> と同じコマンドで作る）と、それぞれの項目:
  *   pdf        縦書き（横書き）の PDF。coverless, chapterBreak（false で章ごとに改ページしない）,
@@ -36,7 +38,7 @@
  * parts を使うのは pdf / pdf-en / split / merge。
  */
 
-import { existsSync, statSync } from 'fs';
+import { existsSync, mkdirSync, statSync } from 'fs';
 import { dirname, join, relative, resolve } from 'path';
 import { CONFIG_FILENAME, findConfigFile, readWorkConfig } from './config.mjs';
 import { computeMetrics, enPdfPageSize, matchesPdfScriptPage } from './layout.mjs';
@@ -60,8 +62,11 @@ function locateConfig(target) {
   return file;
 }
 
-// 渡すパスは実行しているディレクトリからの相対にする（ログを読みやすくするため）
-const cwdRelative = (path) => relative(process.cwd(), path) || '.';
+// 渡すパスは実行しているディレクトリからの相対にする（ログを読みやすくするため）。外にあるものは絶対パスのまま
+const cwdRelative = (path) => {
+  const rel = relative(process.cwd(), path);
+  return rel.startsWith('..') ? path : rel || '.';
+};
 
 const flag = (cond, name) => (cond ? [name] : []);
 const option = (value, name) => (value == null ? [] : [name, String(value)]);
@@ -156,10 +161,11 @@ const FORMATS = {
 
 // その場かぎりの指定として、設定に書いた出力に足すもの
 function passThroughArgs(argv) {
-  const parsed = { pages: null, limit: null, target: null, rubyParens: false, names: [] };
+  const parsed = { pages: null, limit: null, target: null, rubyParens: false, outDir: null, names: [] };
   for (let i = 0; i < argv.length; i++) {
     const [name, inline] = argv[i].split(/=(.*)/s);
     if (['--pages', '--limit', '--target'].includes(name)) parsed[name.slice(2)] = inline ?? argv[++i];
+    else if (name === '--out-dir') parsed.outDir = inline ?? argv[++i];
     else if (name === '--ruby-parens') parsed.rubyParens = true;
     else if (argv[i].startsWith('-')) fail(`不明なオプション: ${argv[i]}`);
     else parsed.names.push(argv[i]);
@@ -167,16 +173,20 @@ function passThroughArgs(argv) {
   return parsed;
 }
 
+// 出力先ディレクトリはプロジェクトのルートから（絶対パスも可）。その場の --out-dir、出力の outDir、作品の outDir の順
+export function outputPath(output, config, root, { outDir = null, pages = null } = {}) {
+  const dir = resolve(root, outDir ?? output.outDir ?? config.outDir);
+  // --pages で抜き出すときは、全体版を上書きしないよう出力名に -p<指定> を付ける
+  const file = output.format === 'pdf' && pages ? output.out.replace(/(\.pdf)?$/, `-p${pages}.pdf`) : output.out;
+  return resolve(dir, file);
+}
+
 // 1つの出力を、その format のコマンドに渡す引数にする
 export function outputArgv(name, output, config, root, extra = {}, warn = () => {}) {
   const format = FORMATS[output.format];
   if (!format) fail(`出力 "${name}" の format "${output.format}" には対応していません（${Object.keys(FORMATS).join(' / ')}）`);
   if (!output.out) fail(`出力 "${name}" に out がありません`);
-  const { pages = null } = extra;
-
-  // --pages で抜き出すときは、全体版を上書きしないよう出力名に -p<指定> を付ける
-  const pagesSuffix = output.format === 'pdf' && pages;
-  const out = cwdRelative(join(root, pagesSuffix ? output.out.replace(/(\.pdf)?$/, `-p${pages}.pdf`) : output.out));
+  const out = cwdRelative(outputPath(output, config, root, extra));
   if (format.argv) return format.argv(output, config, out, extra);
 
   return [
@@ -205,6 +215,7 @@ export async function main(argv = process.argv.slice(2)) {
   for (const name of names.length > 0 ? names : available) {
     const output = config.outputs[name];
     const outArgv = outputArgv(name, output, config, root, extra, (message) => console.warn(`警告: ${message}`));
+    mkdirSync(dirname(outputPath(output, config, root, extra)), { recursive: true });
     console.log(`\n▶ ${name}: novel ${output.format} ${outArgv.join(' ')}`);
     await (await FORMATS[output.format].load()).main(outArgv);
   }
@@ -225,16 +236,16 @@ if (import.meta.vitest) {
     layout: DEFAULT_LAYOUT,
     english: DEFAULT_ENGLISH_LAYOUT,
     view: {},
+    outDir: 'out',
     outputs: {},
     ...overrides,
   });
-  const absolute = (a) => (a.startsWith('..') ? resolve(a) : a);
-  const argvOf = (output, c = config(), extra) => outputArgv('x', output, c, '/p', extra).map(absolute);
+  const argvOf = (output, c = config(), extra) => outputArgv('x', output, c, '/p', extra);
 
   describe('outputArgv', () => {
     test('既定のレイアウト（30字・行数自動）なら字詰めの指定を付けない', () => {
-      const argv = outputArgv('pdf', { format: 'pdf', out: 'out/a.pdf' }, config(), process.cwd());
-      expect(argv).toEqual(['--title', '作品', '--author', '著者', '-o', 'out/a.pdf', relative(process.cwd(), '/p/src/work/story'), '--open']);
+      const argv = outputArgv('pdf', { format: 'pdf', out: 'a.pdf' }, config(), process.cwd());
+      expect(argv).toEqual(['--title', '作品', '--author', '著者', '-o', 'out/a.pdf', '/p/src/work/story', '--open']);
     });
 
     test('字数×行数はレイアウトから、出力の指定があればそちらを使う', () => {
@@ -273,8 +284,17 @@ if (import.meta.vitest) {
     });
 
     test('--pages を付けると pdf の出力名に -p<指定> を足す', () => {
-      const argv = argvOf({ format: 'pdf', out: 'out/a.pdf' }, config(), { pages: '3-4' });
+      const argv = argvOf({ format: 'pdf', out: 'a.pdf' }, config(), { pages: '3-4' });
       expect(argv).toEqual(expect.arrayContaining(['--pages', '3-4', '/p/out/a-p3-4.pdf']));
+    });
+
+    test('出力先は outDir から。その場の --out-dir、出力の outDir、作品の outDir の順に優先する', () => {
+      const out = (output, c = config(), extra) => argvOf({ format: 'epub', out: 'a.epub', ...output }, c, extra).at(-2);
+      expect(out({})).toBe('/p/out/a.epub');
+      expect(out({}, config({ outDir: 'dist/books' }))).toBe('/p/dist/books/a.epub');
+      expect(out({ outDir: 'submit' }, config({ outDir: 'dist' }))).toBe('/p/submit/a.epub');
+      expect(out({ outDir: 'submit' }, config(), { outDir: '/tmp/x' })).toBe('/tmp/x/a.epub');
+      expect(out({ out: 'sub/a.epub' })).toBe('/p/out/sub/a.epub');
     });
 
     test('novel-pdf / epub / rtf / rtf-en の項目をフラグにする（epub は開かない）', () => {
@@ -288,9 +308,9 @@ if (import.meta.vitest) {
 
     test('split / merge は ディレクトリ・出力先・作品名・ジャンルを順に渡す', () => {
       const c = config({ genre: 'SF', target: '読者', parts: ['070'] });
-      expect(argvOf({ format: 'split', out: 'out/w-chapters' }, c))
+      expect(argvOf({ format: 'split', out: 'w-chapters' }, c))
         .toEqual(['/p/src/work/story', '/p/out/w-chapters', '作品', 'SF', '--splits=070', '--target', '読者']);
-      expect(argvOf({ format: 'merge', out: 'out/w-all.txt', rubyParens: true }, config(), { target: '別の読者' }))
+      expect(argvOf({ format: 'merge', out: 'w-all.txt', rubyParens: true }, config(), { target: '別の読者' }))
         .toEqual(['/p/src/work/story', '/p/out/w-all.txt', '作品', '', '--target', '別の読者', '--ruby-parens']);
       expect(argvOf({ format: 'merge', out: 'a.txt' }, config(), { rubyParens: true })).toContain('--ruby-parens');
       expect(argvOf({ format: 'split', out: 'a' }, config(), { rubyParens: true })).not.toContain('--ruby-parens');
@@ -299,8 +319,8 @@ if (import.meta.vitest) {
 
   describe('passThroughArgs', () => {
     test('出力名とその場の指定を分ける', () => {
-      expect(passThroughArgs(['pdf', '--pages', '3', '--limit=2', '--target', '読者', '--ruby-parens']))
-        .toEqual({ pages: '3', limit: '2', target: '読者', rubyParens: true, names: ['pdf'] });
+      expect(passThroughArgs(['pdf', '--pages', '3', '--limit=2', '--target', '読者', '--ruby-parens', '--out-dir', 'tmp']))
+        .toEqual({ pages: '3', limit: '2', target: '読者', rubyParens: true, outDir: 'tmp', names: ['pdf'] });
     });
   });
 }

@@ -36,6 +36,10 @@
       },
       "description": "部の境界になるファイル名の先頭の番号（例: [\"070\", \"085\"]）。pdf / pdf-en / split / merge が使う"
     },
+    "outDir": {
+      "type": "string",
+      "description": "出力先ディレクトリ（プロジェクトのルート＝package.json のあるディレクトリから。絶対パスも可。省略時は out）。VS Code の「PDF出力」は <outDir>/preview/ に出す"
+    },
     "outputs": {
       "type": "object",
       "description": "novel build で作る出力（名前 → 定義）",
@@ -61,7 +65,7 @@
           },
           "out": {
             "type": "string",
-            "description": "出力ファイル（split はディレクトリ）。プロジェクトのルート＝package.json のあるディレクトリから"
+            "description": "出力ファイル名（split はディレクトリ名）。outDir から"
           },
           "title": {
             "type": [
@@ -188,6 +192,10 @@
               "type": "string"
             },
             "description": "rtf-en の1ページ目左上に出す連絡先（1要素1行）"
+          },
+          "outDir": {
+            "type": "string",
+            "description": "この出力だけの出力先ディレクトリ（省略時は作品の outDir）"
           }
         }
       }

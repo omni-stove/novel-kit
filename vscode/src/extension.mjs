@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { existsSync } from 'fs';
-import { basename, dirname, join, relative } from 'path';
+import { basename, dirname, join, relative, resolve } from 'path';
 import { randomBytes } from 'crypto';
 import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
 import {
@@ -8,7 +8,9 @@ import {
   matchesPdfScriptPage, normalizeLayout,
 } from '../../src/layout.mjs';
 import { buildDocument, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
-import { CONFIG_FILENAME, DEFAULT_VIEW, findConfigFile, readSettingsFile, writeSettingsFile } from '../../src/config.mjs';
+import {
+  CONFIG_FILENAME, DEFAULT_OUT_DIR, DEFAULT_VIEW, findConfigFile, readSettingsFile, readWorkConfig, writeSettingsFile,
+} from '../../src/config.mjs';
 import { renderWebviewHtml } from './webview.mjs';
 
 // PDF出力はワークスペースに入っている novel-kit の CLI で行う
@@ -524,6 +526,18 @@ async function selectLayout() {
 
 const shellQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+// 設定ファイルの出力先（outDir。既定は out）の下の preview/ に出す。ワークスペースからの相対パスで返す
+function previewDirFor(doc, root) {
+  const file = layoutFileFor(doc);
+  let outDir = DEFAULT_OUT_DIR;
+  if (file) {
+    try {
+      outDir = readWorkConfig(file).outDir;
+    } catch { /* 読めない設定ファイルは表示側で警告しているので、ここでは既定を使う */ }
+  }
+  return relative(root, resolve(root, outDir, 'preview')) || '.';
+}
+
 // session があればその表示範囲（このファイル / 作品全体）で、無ければ開いている原稿1ファイルを出力する。
 // 日本語は novel pdf、英語は novel pdf-en（判型は用紙から選ぶ）
 function exportPdf(session = activeSession()) {
@@ -546,6 +560,7 @@ function exportPdf(session = activeSession()) {
   const work = basename(workDir) === 'story' ? basename(dirname(workDir)) : basename(workDir);
   const name = whole ? work : `${work}-${basename(filePath, '.txt')}`;
   const input = shellQuote(relative(root, whole ? dir : filePath));
+  const previewDir = previewDirFor(doc, root);
 
   let out;
   let options;
@@ -554,14 +569,14 @@ function exportPdf(session = activeSession()) {
     if (!pageSize) {
       vscode.window.showWarningMessage('英語のPDF出力は 6×9in / 5×8in / A5（縦）のどれかで組みます。今の用紙はどれでもないため 6×9in で出力します。');
     }
-    out = `out/preview/${name}-en-${pageSize ?? '6x9'}.pdf`;
+    out = `${previewDir}/${name}-en-${pageSize ?? '6x9'}.pdf`;
     options = `--${pageSize ?? '6x9'}`;
   } else {
     if (!matchesPdfScriptPage(layout)) {
       vscode.window.showWarningMessage('PDF出力は A4横・既定の余白で組みます。用紙・余白の設定はプレビューにだけ反映されます。');
     }
     const size = `${metrics.chars}x${metrics.lines}`;
-    out = `out/preview/${name}-${metrics.vertical ? size : 'horizontal'}.pdf`;
+    out = `${previewDir}/${name}-${metrics.vertical ? size : 'horizontal'}.pdf`;
     // 行数自動（既定の30字組）はスクリプトの既定そのものなので --size を付けない
     options = !metrics.vertical ? '--horizontal' : layout.lines == null && layout.chars === 30 ? '' : `--size ${size}`;
   }
@@ -571,7 +586,7 @@ function exportPdf(session = activeSession()) {
   }
   pdfTerminal.show(true);
   pdfTerminal.sendText([
-    'mkdir -p out/preview &&',
+    `mkdir -p ${shellQuote(previewDir)} &&`,
     `AUTO_OPEN=1 ${NOVEL_BIN} ${command}`,
     options,
     `-o ${shellQuote(out)}`,
