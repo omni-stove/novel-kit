@@ -46,16 +46,7 @@
         {
           "type": "array",
           "items": {
-            "enum": [
-              "pdf",
-              "pdf-en",
-              "novel-pdf",
-              "epub",
-              "rtf",
-              "rtf-en",
-              "split",
-              "merge"
-            ]
+            "enum": ["pdf", "pdf-en", "novel-pdf", "epub", "rtf", "rtf-en", "split", "merge"]
           },
           "uniqueItems": true
         },
@@ -75,29 +66,15 @@
       ]
     },
     "writingMode": {
-      "enum": [
-        "vertical",
-        "horizontal"
-      ],
+      "enum": ["vertical", "horizontal"],
       "description": "文字方向（縦書き / 横書き）"
     },
     "paper": {
-      "enum": [
-        "A4",
-        "B5",
-        "A5",
-        "B6",
-        "A6",
-        "6x9in",
-        "5x8in"
-      ],
+      "enum": ["A4", "B5", "A5", "B6", "A6", "6x9in", "5x8in"],
       "description": "用紙サイズ（6x9in / 5x8in は英語ペーパーバックの判型）"
     },
     "orientation": {
-      "enum": [
-        "landscape",
-        "portrait"
-      ],
+      "enum": ["landscape", "portrait"],
       "description": "用紙の向き"
     },
     "margin": {
@@ -125,10 +102,7 @@
       "description": "1行の文字数"
     },
     "lines": {
-      "type": [
-        "integer",
-        "null"
-      ],
+      "type": ["integer", "null"],
       "minimum": 1,
       "maximum": 100,
       "description": "1ページの行数（null で行送り自動）"
@@ -146,17 +120,11 @@
       "description": "英語の原稿（本文のアルファベットが日本語の文字より多いもの）のレイアウト。横書き固定で、文字サイズと行送りを指定する。省略時は 6×9in ペーパーバック",
       "properties": {
         "title": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "英語の出力（pdf-en / rtf-en）のタイトル（省略時は作品の title）"
         },
         "author": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "英語の出力（pdf-en / rtf-en）の著者名（省略時は作品の author）"
         },
         "input": {
@@ -167,22 +135,11 @@
           "description": "英語の出力（pdf-en / rtf-en）の原稿（この設定ファイルのディレクトリから。省略時は [\"en\"]）"
         },
         "paper": {
-          "enum": [
-            "A4",
-            "B5",
-            "A5",
-            "B6",
-            "A6",
-            "6x9in",
-            "5x8in"
-          ],
+          "enum": ["A4", "B5", "A5", "B6", "A6", "6x9in", "5x8in"],
           "description": "用紙サイズ（6x9in / 5x8in は英語ペーパーバックの判型）"
         },
         "orientation": {
-          "enum": [
-            "landscape",
-            "portrait"
-          ],
+          "enum": ["landscape", "portrait"],
           "description": "用紙の向き"
         },
         "margin": {
@@ -230,25 +187,17 @@
       "description": "表示設定",
       "properties": {
         "scope": {
-          "enum": [
-            "work",
-            "file"
-          ],
+          "enum": ["work", "file"],
           "description": "表示範囲（work: 同じディレクトリの本文ファイルを連結 / file: 開いているファイルだけ）"
         },
         "zoom": {
           "description": "表示倍率（fit: 画面に合わせる / 数値: %）",
           "anyOf": [
             {
-              "enum": [
-                "fit"
-              ]
+              "enum": ["fit"]
             },
             {
-              "enum": [
-                "fit-width",
-                "fit-page"
-              ],
+              "enum": ["fit-width", "fit-page"],
               "deprecated": true,
               "description": "旧い値。fit として扱う"
             },
@@ -271,16 +220,7 @@
       "type": "object",
       "properties": {
         "format": {
-          "enum": [
-            "pdf",
-            "pdf-en",
-            "novel-pdf",
-            "epub",
-            "rtf",
-            "rtf-en",
-            "split",
-            "merge"
-          ],
+          "enum": ["pdf", "pdf-en", "novel-pdf", "epub", "rtf", "rtf-en", "split", "merge"],
           "description": "出力形式（省略時は出力名。pdf: 縦書き/横書き PDF、pdf-en: 英語のペーパーバック風 PDF、novel-pdf: 文庫本見開き PDF、epub、rtf: 日本語原稿の RTF、rtf-en: Shunn 形式の RTF、split: 章ごとの txt、merge: 1つにまとめた txt）"
         },
         "out": {
@@ -288,17 +228,11 @@
           "description": "出力ファイル（split はディレクトリ）。novel build --out-dir のディレクトリ（既定は out）から。省略時は id と format（format と違う出力名ならその名前）から決める"
         },
         "title": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "この出力だけのタイトル（省略時は作品の（pdf-en / rtf-en は english の、無ければ作品の） title、null で入れない）"
         },
         "author": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "この出力だけの著者名（省略時は作品の（pdf-en / rtf-en は english の、無ければ作品の） author、null で入れない）"
         },
         "input": {
@@ -309,20 +243,14 @@
           "description": "この出力だけの原稿（省略時は作品の（pdf-en / rtf-en は english の、無ければ作品の） input）"
         },
         "parts": {
-          "type": [
-            "array",
-            "null"
-          ],
+          "type": ["array", "null"],
           "items": {
             "type": "string"
           },
           "description": "この出力だけの部の境界（省略時は作品の parts、null で部に分けない）"
         },
         "writingMode": {
-          "enum": [
-            "vertical",
-            "horizontal"
-          ],
+          "enum": ["vertical", "horizontal"],
           "description": "文字方向（縦書き / 横書き）"
         },
         "chars": {
@@ -332,10 +260,7 @@
           "description": "1行の文字数"
         },
         "lines": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 1,
           "maximum": 100,
           "description": "1ページの行数（null で行送り自動）"
@@ -377,25 +302,15 @@
           "description": "false でストレート引用符をカーリー引用符にしない"
         },
         "genre": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "この出力だけのジャンル（split / merge）"
         },
         "target": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "この出力だけの想定読者（split / merge）"
         },
         "size": {
-          "enum": [
-            "a6",
-            "b6",
-            "a5"
-          ],
+          "enum": ["a6", "b6", "a5"],
           "description": "novel-pdf の判型（既定は a6）"
         },
         "dark": {

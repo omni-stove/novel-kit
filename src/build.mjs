@@ -187,7 +187,11 @@ const FORMATS = {
   epub: { load: () => import('./epub.mjs'), args: epubArgs, open: false, file: ['', '.epub'] },
   rtf: { load: () => import('./rtf.mjs'), args: rtfArgs('--ja'), open: true, file: ['', '.rtf'] },
   'rtf-en': { load: () => import('./rtf.mjs'), args: rtfArgs('--shunn'), open: true, file: ['-en', '.rtf'] },
-  split: { load: () => import('./split.mjs'), argv: (...a) => textArgv(...a, { merge: false }), file: ['-chapters', ''] },
+  split: {
+    load: () => import('./split.mjs'),
+    argv: (...a) => textArgv(...a, { merge: false }),
+    file: ['-chapters', ''],
+  },
   merge: { load: () => import('./merge.mjs'), argv: (...a) => textArgv(...a, { merge: true }), file: ['-all', '.txt'] },
 };
 
