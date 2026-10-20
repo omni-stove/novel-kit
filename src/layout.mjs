@@ -6,7 +6,7 @@
  * 既定値（6×9in）は src/en-pdf.mjs の PAGE_SIZES と同じ。
  */
 
-// 短辺 x 長辺（mm）。6x9in / 5x8in は英語ペーパーバックの判型（src/en-pdf.mjs の --6x9 / --5x8）
+/** 短辺 x 長辺（mm）。6x9in / 5x8in は英語ペーパーバックの判型（src/en-pdf.mjs の --6x9 / --5x8） */
 export const PAPER_SIZES = {
   A4: [210, 297],
   B5: [182, 257],
@@ -19,30 +19,31 @@ export const PAPER_SIZES = {
 
 const MM_PER_PT = 0.3528;
 const MM_PER_IN = 25.4;
-// 行数を指定しないときの行送り（pdf の既定と同じ）
+/** 行数を指定しないときの行送り（src/pdf.mjs の既定と同じ） */
 const AUTO_LINE_HEIGHT = { vertical: 1.125, horizontal: 1.8 };
-// 英文の平均字幅の目安（em）。字数×行数の表示に使う
+/** 英文の平均字幅の目安（em）。字数×行数の表示に使う */
 const EN_AVERAGE_CHAR_WIDTH = 0.5;
 
+// matchesPdfScriptPage がこれと比べるので、用紙・余白は src/pdf.mjs が組む A4横の版面と揃える
 export const DEFAULT_LAYOUT = {
   writingMode: 'vertical',
   paper: 'A4',
   orientation: 'landscape',
   margin: { top: 20, right: 20, bottom: 25, left: 20 },
   chars: 30,
-  // null は行送りを自動（字送りの 1.125 倍）にして、入るだけ行を入れる
+  /** null は行送りを自動（縦書きは字送りの 1.125 倍、横書きは 1.8 倍）にして、版面に入るだけ行を入れる */
   lines: null,
   fontFamily: '',
 };
 
 const inMm = (inch) => Math.round(inch * MM_PER_IN * 100) / 100;
 
-// 英語の組版。見開きの内側の余白を左、外側を右に置く（プレビューは単ページ）
+/** 英語の組版の既定。見開きの内側の余白を left、外側を right に置く（プレビューは単ページのため） */
 export const DEFAULT_ENGLISH_LAYOUT = {
   paper: '6x9in',
   orientation: 'portrait',
   margin: { top: inMm(0.7), right: inMm(0.6), bottom: inMm(0.6), left: inMm(0.8) },
-  // 本文の文字サイズ（pt）と行送り（倍率）
+  /** 本文の文字サイズ（pt）と行送り（倍率） */
   fontSize: 11,
   lineHeight: 1.4,
   fontFamily: '',
@@ -64,7 +65,7 @@ export const BUILTIN_PRESETS = {
   },
 };
 
-// 英語のプリセット（en-pdf.mjs の PAGE_SIZES と同じ判型・余白・文字サイズ）
+/** 英語のプリセット。src/en-pdf.mjs の PAGE_SIZES と同じ判型・余白・文字サイズ（pdf-en はこの判型でしか組めない） */
 export const BUILTIN_ENGLISH_PRESETS = {
   '6×9in（US Trade）': DEFAULT_ENGLISH_LAYOUT,
   '5×8in（Trade Paperback）': {
@@ -91,7 +92,7 @@ const clampMm = (v, fallback) => {
   return Number.isFinite(n) && n >= 0 ? Math.min(n, 100) : fallback;
 };
 
-// 範囲に収めた数値（0.01 刻み）。範囲外・不正値は既定
+/** 範囲に収めた数値（0.01 刻み）。範囲外・不正値は既定 */
 const clampNumber = (v, min, max, fallback) => {
   const n = Math.round(Number(v) * 100) / 100;
   return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
@@ -117,7 +118,8 @@ export function normalizeLayout(raw, { english = false } = {}) {
     const d = DEFAULT_ENGLISH_LAYOUT;
     return {
       paper: r.paper in PAPER_SIZES ? r.paper : d.paper,
-      orientation: r.orientation === 'landscape' ? 'landscape' : r.orientation === 'portrait' ? 'portrait' : d.orientation,
+      orientation:
+        r.orientation === 'landscape' ? 'landscape' : r.orientation === 'portrait' ? 'portrait' : d.orientation,
       margin: normalizeMargin(r.margin, d.margin),
       fontSize: clampNumber(r.fontSize, 5, 40, d.fontSize),
       lineHeight: clampNumber(r.lineHeight, 1, 3, d.lineHeight),
@@ -128,7 +130,8 @@ export function normalizeLayout(raw, { english = false } = {}) {
   return {
     writingMode: r.writingMode === 'horizontal' ? 'horizontal' : 'vertical',
     paper: r.paper in PAPER_SIZES ? r.paper : d.paper,
-    orientation: r.orientation === 'portrait' ? 'portrait' : r.orientation === 'landscape' ? 'landscape' : d.orientation,
+    orientation:
+      r.orientation === 'portrait' ? 'portrait' : r.orientation === 'landscape' ? 'landscape' : d.orientation,
     margin: normalizeMargin(r.margin, d.margin),
     chars: clampInt(r.chars, 5, 100, d.chars),
     lines: r.lines == null || r.lines === '' ? null : clampInt(r.lines, 1, 100, null),
@@ -140,7 +143,7 @@ export function layoutsEqual(a, b, opts = {}) {
   return JSON.stringify(normalizeLayout(a, opts)) === JSON.stringify(normalizeLayout(b, opts));
 }
 
-// 原稿の文字から組版の言語を判定する。本文（メタ行を除く）のアルファベットが日本語の文字より多ければ英語
+/** 原稿の文字から組版の言語を判定する。本文（メタ行を除く）のアルファベットが日本語の文字より多ければ英語 */
 export function detectLanguage(lines, isMetaLine = () => false) {
   let latin = 0;
   let japanese = 0;
@@ -164,7 +167,6 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
   const paperH = layout.orientation === 'landscape' ? short : long;
   const areaW = paperW - layout.margin.left - layout.margin.right;
   const areaH = paperH - layout.margin.top - layout.margin.bottom;
-  // 字を送る方向（縦書きなら天地）と行を送る方向の版面寸法
   const availInline = vertical ? areaH : areaW;
   const availBlock = vertical ? areaW : areaH;
 
@@ -184,7 +186,7 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
     const lineHeight = layout.lineHeight;
     return {
       ...base,
-      // 版面幅を em で表した値（プレビューが版面の幅を chars × 文字サイズで決めるため、整数にしない）
+      // プレビューが版面の幅を chars × 文字サイズで決めるため、整数にしない
       chars: availInline / fontSizeMm,
       charsApprox: Math.max(1, Math.round(availInline / (fontSizeMm * EN_AVERAGE_CHAR_WIDTH))),
       lines: Math.max(1, Math.floor(availBlock / (fontSizeMm * lineHeight))),
@@ -196,13 +198,11 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
   }
 
   const cellMm = availInline / layout.chars;
-  // pdf と同じく 0.1pt 単位に切り捨てる（PDFと字面を揃えるため）
+  // PDF と字面を揃えるため、src/pdf.mjs と同じく 0.1pt 単位に切り捨てる
   const fontSizePt = Math.floor((cellMm / MM_PER_PT) * 10) / 10;
   const fontSizeMm = fontSizePt * MM_PER_PT;
 
-  const lineHeight = layout.lines
-    ? availBlock / layout.lines / cellMm
-    : AUTO_LINE_HEIGHT[layout.writingMode];
+  const lineHeight = layout.lines ? availBlock / layout.lines / cellMm : AUTO_LINE_HEIGHT[layout.writingMode];
   const lines = layout.lines ?? Math.max(1, Math.floor(availBlock / (fontSizeMm * lineHeight)));
 
   return {
@@ -216,15 +216,14 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
   };
 }
 
-// src/pdf.mjs は A4横・余白固定で組むので、それと同じ版面かどうか
+/** src/pdf.mjs は A4横・余白固定で組むので、それと同じ版面かどうか */
 export function matchesPdfScriptPage(rawLayout) {
   const { paper, orientation, margin } = normalizeLayout(rawLayout);
   const d = DEFAULT_LAYOUT;
-  return paper === d.paper && orientation === d.orientation
-    && JSON.stringify(margin) === JSON.stringify(d.margin);
+  return paper === d.paper && orientation === d.orientation && JSON.stringify(margin) === JSON.stringify(d.margin);
 }
 
-// src/en-pdf.mjs の判型（--5x8 / --6x9 / --a5）に対応する用紙かどうか。向きが縦でなければ null
+/** src/en-pdf.mjs の判型（--5x8 / --6x9 / --a5）に対応する用紙かどうか。向きが縦でなければ null */
 export function enPdfPageSize(rawLayout) {
   const { paper, orientation } = normalizeLayout(rawLayout, { english: true });
   if (orientation !== 'portrait') return null;
@@ -255,10 +254,21 @@ if (import.meta.vitest) {
       expect(m.lines).toBe(40);
     });
     test('横書きは字を左右に、行を天地に送る', () => {
-      const m = computeMetrics({ ...DEFAULT_LAYOUT, writingMode: 'horizontal', orientation: 'portrait', chars: 40, lines: 30 });
+      const m = computeMetrics({
+        ...DEFAULT_LAYOUT,
+        writingMode: 'horizontal',
+        orientation: 'portrait',
+        chars: 40,
+        lines: 30,
+      });
       expect(m.paperW).toBe(210);
       expect(m.availInline).toBe(170);
       expect(m.availBlock).toBe(252);
+    });
+    test('行数を指定しなければ版面に入るだけ行を入れる（横書きの行送りは 1.8）', () => {
+      const m = computeMetrics({ ...DEFAULT_LAYOUT, writingMode: 'horizontal' });
+      expect(m.lineHeight).toBe(1.8);
+      expect(m.lines).toBe(Math.floor(m.availBlock / (m.fontSizeMm * 1.8)));
     });
   });
 
@@ -270,13 +280,15 @@ if (import.meta.vitest) {
       expect(m.fontSizePt).toBe(11);
       expect(m.lineHeight).toBe(1.4);
       expect(m.paperW).toBe(152.4);
-      // 版面幅 = 152.4 - 20.32 - 15.24
       expect(m.chars * m.fontSizeMm).toBeCloseTo(116.84, 6);
       expect(m.lines).toBe(Math.floor((228.6 - 17.78 - 15.24) / (11 * 0.3528 * 1.4)));
     });
     test('英語のレイアウトは欠けを 6×9in の既定で埋め、writingMode を持たない', () => {
       expect(normalizeLayout(null, { english: true })).toEqual(DEFAULT_ENGLISH_LAYOUT);
-      const l = normalizeLayout({ paper: 'A5', fontSize: '10.5', lineHeight: 9, writingMode: 'vertical' }, { english: true });
+      const l = normalizeLayout(
+        { paper: 'A5', fontSize: '10.5', lineHeight: 9, writingMode: 'vertical' },
+        { english: true },
+      );
       expect(l).toMatchObject({ paper: 'A5', fontSize: 10.5, lineHeight: 1.4 });
       expect(l).not.toHaveProperty('writingMode');
       expect(computeMetrics({ writingMode: 'vertical' }, { english: true }).vertical).toBe(false);
@@ -284,7 +296,7 @@ if (import.meta.vitest) {
     test('detectLanguage は本文のアルファベットが日本語の文字より多ければ英語', () => {
       expect(detectLanguage(['As a child, I could go anywhere.', '【-21Y】'])).toBe('en');
       expect(detectLanguage(['子どものころ、私はどこへでも行けた。', 'POV: Nadia'])).toBe('ja');
-      expect(detectLanguage(['POV: Nadia Solis', '私'], l => l.startsWith('POV:'))).toBe('ja');
+      expect(detectLanguage(['POV: Nadia Solis', '私'], (l) => l.startsWith('POV:'))).toBe('ja');
       expect(detectLanguage([])).toBe('ja');
     });
     test('enPdfPageSize は英語PDFスクリプトの判型に対応する用紙を返す', () => {
@@ -296,7 +308,25 @@ if (import.meta.vitest) {
     });
     test('describeLayout は英語では文字サイズと行送りを出す', () => {
       expect(describeLayout(DEFAULT_LAYOUT)).toBe('30字×41行');
-      expect(describeLayout(BUILTIN_ENGLISH_PRESETS.A5, { english: true })).toMatch(/^11pt・行送り1\.4（約\d+字×\d+行）$/);
+      expect(describeLayout(BUILTIN_ENGLISH_PRESETS.A5, { english: true })).toMatch(
+        /^11pt・行送り1\.4（約\d+字×\d+行）$/,
+      );
+    });
+    test('英語のプリセットは src/en-pdf.mjs の PAGE_SIZES と同じ判型・余白・文字サイズ・行送り', async () => {
+      const { PAGE_SIZES } = await import('./en-pdf.mjs');
+      const mm = (v) => (v.endsWith('in') ? inMm(Number.parseFloat(v)) : Number.parseFloat(v));
+      for (const preset of Object.values(BUILTIN_ENGLISH_PRESETS)) {
+        const size = PAGE_SIZES[enPdfPageSize(preset)];
+        expect(PAPER_SIZES[preset.paper]).toEqual([mm(size.width), mm(size.height)]);
+        expect(preset.margin).toEqual({
+          top: mm(size.margin.top),
+          right: mm(size.margin.outer),
+          bottom: mm(size.margin.bottom),
+          left: mm(size.margin.inner),
+        });
+        expect(preset.fontSize).toBe(Number.parseFloat(size.fontSize));
+        expect(preset.lineHeight).toBe(Number(size.lineHeight));
+      }
     });
     test('layoutsEqual は英語のレイアウトも比べられる', () => {
       expect(layoutsEqual({ paper: '6x9in' }, DEFAULT_ENGLISH_LAYOUT, { english: true })).toBe(true);
@@ -310,7 +340,13 @@ if (import.meta.vitest) {
       expect(normalizeLayout({ chars: 'x', lines: '', paper: 'Z9', margin: { top: -1 } })).toEqual(DEFAULT_LAYOUT);
     });
     test('指定値は丸めて採用する', () => {
-      const l = normalizeLayout({ chars: '40', lines: 34.4, paper: 'B5', orientation: 'portrait', margin: { top: 10 } });
+      const l = normalizeLayout({
+        chars: '40',
+        lines: 34.4,
+        paper: 'B5',
+        orientation: 'portrait',
+        margin: { top: 10 },
+      });
       expect(l).toMatchObject({ chars: 40, lines: 34, paper: 'B5', orientation: 'portrait' });
       expect(l.margin).toEqual({ top: 10, right: 20, bottom: 25, left: 20 });
     });

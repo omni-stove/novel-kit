@@ -4,20 +4,30 @@
  * 英語は src/en-pdf.mjs の generateHtml を使う。
  */
 
-import { dirname } from 'path';
-import { isMetaLine, parseTextLines, readLines } from '../../src/lib/text-parser.mjs';
-import {
-  computeSectionLabels, getTextFilesFromDir, countGenkoRows,
-  SYNOPSIS_FILENAME, CHARACTERS_FILENAME,
-} from '../../src/lib/manuscript.mjs';
-import { generateHtml } from '../../src/pdf.mjs';
+import { dirname } from 'node:path';
 import { buildChapters, generateHtml as generateEnglishHtml, parseEnglishLines } from '../../src/en-pdf.mjs';
 import { detectLanguage } from '../../src/layout.mjs';
+import {
+  CHARACTERS_FILENAME,
+  computeSectionLabels,
+  countGenkoRows,
+  getTextFilesFromDir,
+  SYNOPSIS_FILENAME,
+  startsNewChapter,
+} from '../../src/lib/manuscript.mjs';
+import {
+  isMetaLine,
+  isViewpointLine,
+  parseTextLines,
+  parseViewpointLine,
+  readLines,
+} from '../../src/lib/text-parser.mjs';
+import { generateHtml } from '../../src/pdf.mjs';
 
-// 原稿の行列から組版の言語（'ja' / 'en'）を判定する（メタ行は数えない）
+/** 原稿の行列から組版の言語（'ja' / 'en'）を判定する（メタ行は数えない） */
 export const detectLanguageOfLines = (lines) => detectLanguage(lines, isMetaLine);
 
-// 同じディレクトリの本文ファイル（PDF出力と同じ並び。梗概・人物紹介は除く）
+/** filePath と同じディレクトリの本文ファイル（PDF出力と同じ並び。梗概・人物紹介は除く）。読めなければ空配列 */
 export function listWorkFiles(filePath) {
   try {
     return getTextFilesFromDir(dirname(filePath), [SYNOPSIS_FILENAME, CHARACTERS_FILENAME]);
@@ -26,7 +36,7 @@ export function listWorkFiles(filePath) {
   }
 }
 
-// @page ブロックを取り除く（名前付き・マージンボックスの入れ子も含む）
+/** CSS から @page ブロックを取り除く（名前付き・マージンボックスの入れ子も含む） */
 export function stripPageRules(css) {
   let out = '';
   let i = 0;
@@ -50,17 +60,23 @@ export function stripPageRules(css) {
   return out;
 }
 
-// generateHtml が返す PDF 用の文書から、webview に差し込むスタイルと本文を取り出す。
-// スタイルは CSS ネストで #flow の内側に閉じ込め、ページ寸法（@page）は webview 側で再現するので捨てる
+/**
+ * generateHtml が返す PDF 用の文書から、webview に差し込むスタイルと本文 { css, body } を取り出す。
+ * スタイルは CSS ネストで #flow の内側に閉じ込め（body の規則は #flow 自身に付け替える）、
+ * @page は捨てる（ページ寸法は webview 側で再現する）
+ */
 export function splitGeneratedHtml(html) {
   const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
   const body = html.match(/<body>([\s\S]*)<\/body>/)?.[1] ?? '';
-  const scoped = stripPageRules(style.replace(/\/\*[\s\S]*?\*\//g, ''))
-    .replace(/^(\s*)body\s*\{/m, '$1& {');
+  const scoped = stripPageRules(style.replace(/\/\*[\s\S]*?\*\//g, '')).replace(/^(\s*)body\s*\{/m, '$1& {');
   return { css: `#flow {\n${scoped}\n}`, body: body.trim() };
 }
 
-// 英語は語数（空白区切り）と文字数（空白を除く）。日本語は文字数と原稿用紙換算
+/**
+ * 文字数統計。英語は { language: 'en', words: 語数（空白区切り）, chars: 文字数（空白を除く） }。
+ * 日本語は { language: 'ja', chars: 文字数, genkoPages: 400字詰め原稿用紙換算,
+ * gridPages: 現在のレイアウトでの連続換算（改ページを含まない） }
+ */
 export function computeStats(fileLines, metrics) {
   if (metrics.language === 'en') {
     let words = 0;
@@ -87,69 +103,114 @@ export function computeStats(fileLines, metrics) {
   return {
     language: 'ja',
     chars,
-    // 400字詰め原稿用紙換算
     genkoPages: genkoRows / 20,
-    // 現在のレイアウトでの連続換算（改ページを含まない）
     gridPages: gridRows / metrics.lines,
   };
 }
 
-// 英語組版（en-pdf.mjs）。ファイルは章にまとめられるので、段落は data-file でファイルを指す
-function buildEnglishHtml(fileLines, metrics) {
+/** 英語組版（en-pdf.mjs）の HTML。ファイルは章にまとめられるので、段落は data-file でファイルを指す */
+function buildEnglishHtml(fileLines, metrics, sceneBreak) {
   const m = metrics.layout.margin;
-  const chapters = buildChapters(fileLines.map(lines => parseEnglishLines(lines)));
-  return generateEnglishHtml(chapters, {
-    width: `${metrics.paperW}mm`,
-    height: `${metrics.paperH}mm`,
-    fontSize: `${metrics.fontSizePt}pt`,
-    lineHeight: String(metrics.lineHeight),
-    // 見開きの内側の余白は左、外側は右として扱う（プレビューは単ページ）
-    margin: { top: `${m.top}mm`, bottom: `${m.bottom}mm`, inner: `${m.left}mm`, outer: `${m.right}mm` },
-  }, { smartQuotes: true, lineNumbers: true });
+  const chapters = buildChapters(fileLines.map((lines) => parseEnglishLines(lines)));
+  return generateEnglishHtml(
+    chapters,
+    {
+      width: `${metrics.paperW}mm`,
+      height: `${metrics.paperH}mm`,
+      fontSize: `${metrics.fontSizePt}pt`,
+      lineHeight: String(metrics.lineHeight),
+      // プレビューは単ページなので、見開きの内側の余白を左、外側を右に当てる
+      margin: { top: `${m.top}mm`, bottom: `${m.bottom}mm`, inner: `${m.left}mm`, outer: `${m.right}mm` },
+    },
+    { smartQuotes: true, lineNumbers: true, sceneBreak },
+  );
 }
 
 /**
  * scope: 'file' は filePath だけ、'work' は同じディレクトリの本文ファイルすべてを連結する。
  * linesOf: ファイルの行列を返す関数（エディタで開いているファイルは未保存の内容を返すために差し替える）
+ * sceneBreak: 場面区切り（* の行）に組む記号（null なら PDF 出力と同じ既定）
+ * 返す値: { files, language, sources: ファイルごとの行列（プレビューで段落を編集するときの元テキスト）, css, body, stats }
  */
-export function buildDocument({ filePath, scope, metrics, linesOf = readLines }) {
+export function buildDocument({ filePath, scope, metrics, linesOf = readLines, sceneBreak = null }) {
   const workFiles = listWorkFiles(filePath);
   const inWork = workFiles.includes(filePath);
   const files = scope === 'work' && inWork ? workFiles : [filePath];
-  // 単独表示でも章番号は作品全体での通し番号にする
+  // 単独表示でも章番号は作品全体での通し番号に揃える
   const labels = inWork ? computeSectionLabels(workFiles) : [];
   const labelOf = (f) => (inWork ? labels[workFiles.indexOf(f)] : null);
 
-  const fileLines = files.map(f => linesOf(f));
-  const html = metrics.language === 'en'
-    ? buildEnglishHtml(fileLines, metrics)
-    : generateHtml(fileLines.map((lines, i) => parseTextLines(lines, {
-      vertical: metrics.vertical,
-      chars: metrics.chars,
-      sectionNumber: labelOf(files[i]),
-      lineNumbers: true,
-    })), {
-      vertical: metrics.vertical,
-      chars: metrics.chars,
-      lines: metrics.lines,
-      chapterBreak: true,
-    });
+  const fileLines = files.map((f) => linesOf(f));
+  const html =
+    metrics.language === 'en'
+      ? buildEnglishHtml(fileLines, metrics, sceneBreak ?? undefined)
+      : generateHtml(
+          fileLines.map((lines, i) =>
+            parseTextLines(lines, {
+              vertical: metrics.vertical,
+              chars: metrics.chars,
+              sectionNumber: labelOf(files[i]),
+              lineNumbers: true,
+              sceneBreak: sceneBreak ?? undefined,
+            }),
+          ),
+          {
+            vertical: metrics.vertical,
+            chars: metrics.chars,
+            lines: metrics.lines,
+            chapterBreak: true,
+            sceneBreak: sceneBreak ?? undefined,
+          },
+        );
 
   return {
     files,
     language: metrics.language,
-    // プレビュー側で段落を編集するときに見せる元テキスト（ファイルごとの行列）
     sources: fileLines,
     ...splitGeneratedHtml(html),
     stats: computeStats(fileLines, metrics),
   };
 }
 
+/**
+ * 作品の目次。filePath と同じディレクトリの本文ファイルを、PDF出力と同じ規則で章にまとめる
+ * （【】の見出しで始まるファイルから新しい章。番号はプレビューと同じ通し番号）。
+ * 返す値: { language, chapters }。章: { label, title, file: 先頭のファイル, count, files: [{ file, count }] }。count は日本語は文字数、英語は語数
+ */
+export function buildOutline(filePath, { linesOf = readLines } = {}) {
+  const workFiles = listWorkFiles(filePath);
+  if (!workFiles.includes(filePath)) return { language: 'ja', chapters: [] };
+  const fileLines = workFiles.map((f) => linesOf(f));
+  const language = detectLanguageOfLines(fileLines.flat());
+  const labels = computeSectionLabels(workFiles);
+  const heads = fileLines.map((lines) => {
+    const first = lines.find((l) => l.trim() !== '' && !isMetaLine(l));
+    return first && isViewpointLine(first) ? parseViewpointLine(first).title : null;
+  });
+  const sections = heads.map((title) => ({ hasViewpointStart: title !== null }));
+  const countOf = (lines) => {
+    const stats = computeStats([lines], { language, chars: 20, lines: 20 });
+    return language === 'en' ? stats.words : stats.chars;
+  };
+
+  const chapters = [];
+  workFiles.forEach((file, i) => {
+    const count = countOf(fileLines[i]);
+    if (startsNewChapter(sections, i)) {
+      chapters.push({ label: labels[i], title: heads[i] || null, file, count: 0, files: [] });
+    }
+    const chapter = chapters.at(-1);
+    chapter.files.push({ file, count });
+    chapter.count += count;
+  });
+  return { language, chapters };
+}
+
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
-  const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
-  const { tmpdir } = await import('os');
-  const { join } = await import('path');
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
   const { BUILTIN_ENGLISH_PRESETS, computeMetrics, DEFAULT_LAYOUT } = await import('../../src/layout.mjs');
 
   const withWork = (files, fn) => {
@@ -164,7 +225,8 @@ if (import.meta.vitest) {
 
   describe('stripPageRules', () => {
     test('名前付き・入れ子の @page を含めて取り除き、他の規則は残す', () => {
-      const css = '@page { size: A4; }\n@page chapter:left { @top-center { content: "x"; } }\n.a { color: red; }\n@page :blank { @top-center { content: none; } }\n';
+      const css =
+        '@page { size: A4; }\n@page chapter:left { @top-center { content: "x"; } }\n.a { color: red; }\n@page :blank { @top-center { content: none; } }\n';
       expect(stripPageRules(css).trim()).toBe('.a { color: red; }');
     });
   });
@@ -184,10 +246,10 @@ if (import.meta.vitest) {
     const metrics = computeMetrics(BUILTIN_ENGLISH_PRESETS.A5, { english: true });
 
     test('en-pdf の組版で、段落にファイル番号と行番号が付き、@page は残らない', () => {
-      withWork({ '010.txt': 'POV: Nol\n【One】\nFirst "para".\n【】\n', '020.txt': 'Second para.\n' }, (dir) => {
+      withWork({ '010.txt': 'Memo: Nol\n【One】\nFirst "para".\n', '020.txt': 'Second para.\n' }, (dir) => {
         const doc = buildDocument({ filePath: join(dir, '010.txt'), scope: 'work', metrics });
         expect(doc.language).toBe('en');
-        expect(doc.files.map(f => f.slice(dir.length + 1))).toEqual(['010.txt', '020.txt']);
+        expect(doc.files.map((f) => f.slice(dir.length + 1))).toEqual(['010.txt', '020.txt']);
         expect(doc.body).toContain('<p class="noindent" data-file="0" data-line="2">First “para”.</p>');
         expect(doc.body).toContain('<p class="noindent" data-file="1" data-line="0">Second para.</p>');
         expect(doc.body).toContain('<h2 class="chapter-title" data-file="0" data-line="1">One</h2>');
@@ -199,8 +261,60 @@ if (import.meta.vitest) {
     });
 
     test('detectLanguageOfLines はメタ行を数えない', () => {
-      expect(detectLanguageOfLines(['POV: Nadia Solis', 'Title: The Sirens', '私は海を見た。'])).toBe('ja');
-      expect(detectLanguageOfLines(['POV: オーティ', 'I saw the sea.'])).toBe('en');
+      expect(detectLanguageOfLines(['Memo: Nadia Solis', 'Epigraph: The Sirens', '私は海を見た。'])).toBe('ja');
+      expect(detectLanguageOfLines(['Memo: オーティ', 'I saw the sea.'])).toBe('en');
+    });
+  });
+
+  describe('場面区切りの記号', () => {
+    test('sceneBreak を渡すと、日本語・英語とも * の行とファイルの継ぎ目をその記号で組む', () => {
+      const ja = computeMetrics({ ...DEFAULT_LAYOUT, chars: 40, lines: 40 });
+      withWork({ '010.txt': '【】\n一\n\n*\n\n二\n', '020.txt': '続き\n' }, (dir) => {
+        const doc = buildDocument({ filePath: join(dir, '010.txt'), scope: 'work', metrics: ja, sceneBreak: '＊＊＊' });
+        expect((doc.body.match(/class="separator">＊＊＊/g) || []).length).toBe(2);
+      });
+      const en = computeMetrics(BUILTIN_ENGLISH_PRESETS.A5, { english: true });
+      withWork({ '010.txt': '【One】\nFirst.\n\n*\n\nSecond.\n' }, (dir) => {
+        const doc = buildDocument({ filePath: join(dir, '010.txt'), scope: 'work', metrics: en, sceneBreak: '~' });
+        expect(doc.body).toMatch(/<p class="ornament"[^>]*>~<\/p>/);
+      });
+    });
+  });
+
+  describe('buildOutline', () => {
+    test('見出しで始まるファイルから章にし、続きのファイルは同じ章に入れる', () => {
+      withWork(
+        {
+          '010.txt': 'Memo: x\n【旅立ち】\n一二三\n',
+          '020.txt': '四五\n',
+          '030.txt': '【】\n六\n',
+          'synopsis.txt': '梗概\n',
+        },
+        (dir) => {
+          const { language, chapters } = buildOutline(join(dir, '020.txt'));
+          expect(language).toBe('ja');
+          expect(
+            chapters.map((ch) => [ch.label, ch.title, ch.count, ch.files.map((f) => f.file.slice(dir.length + 1))]),
+          ).toEqual([
+            ['1', '旅立ち', 5, ['010.txt', '020.txt']],
+            ['2', null, 1, ['030.txt']],
+          ]);
+          expect(chapters.map((ch) => ch.file)).toEqual([join(dir, '010.txt'), join(dir, '030.txt')]);
+        },
+      );
+    });
+    test('英語は語数を数え、linesOf の内容（未保存の編集）を使う', () => {
+      withWork({ '010.txt': '【One】\nFirst para.\n' }, (dir) => {
+        const file = join(dir, '010.txt');
+        const { language, chapters } = buildOutline(file, { linesOf: () => ['【One】', 'Three words here.'] });
+        expect(language).toBe('en');
+        expect(chapters[0].count).toBe(3);
+      });
+    });
+    test('作品の外のファイル（梗概など）は空', () => {
+      withWork({ '010.txt': '【】\n一\n', 'synopsis.txt': '梗概\n' }, (dir) => {
+        expect(buildOutline(join(dir, 'synopsis.txt')).chapters).toEqual([]);
+      });
     });
   });
 
@@ -208,7 +322,7 @@ if (import.meta.vitest) {
     const metrics = computeMetrics({ ...DEFAULT_LAYOUT, chars: 40, lines: 40 });
 
     test('単独表示でも章番号は作品内の通し番号になり、行番号が付く', () => {
-      withWork({ '010.txt': '【】\n一\n', '020.txt': 'POV: A\n【】\n二\n', 'synopsis.txt': '梗概\n' }, (dir) => {
+      withWork({ '010.txt': '【】\n一\n', '020.txt': 'Memo: A\n【】\n二\n', 'synopsis.txt': '梗概\n' }, (dir) => {
         const doc = buildDocument({ filePath: join(dir, '020.txt'), scope: 'file', metrics });
         expect(doc.files).toEqual([join(dir, '020.txt')]);
         expect(doc.body).toContain('【<span class="tcy">2</span>】');
@@ -224,11 +338,12 @@ if (import.meta.vitest) {
           filePath: edited,
           scope: 'work',
           metrics,
-          linesOf: f => (f === edited ? ['【】', '未保存の本文'] : readLines(f)),
+          linesOf: (f) => (f === edited ? ['【】', '未保存の本文'] : readLines(f)),
         });
-        expect(doc.files.map(f => f.slice(dir.length + 1))).toEqual(['010.txt', '020.txt']);
+        expect(doc.files.map((f) => f.slice(dir.length + 1))).toEqual(['010.txt', '020.txt']);
         expect((doc.body.match(/<div class="section/g) || []).length).toBe(2);
         expect(doc.body).toContain('未保存の本文');
+        expect(doc.sources).toEqual([readLines(join(dir, '010.txt')), ['【】', '未保存の本文']]);
         expect(doc.body).not.toContain('梗概');
       });
     });

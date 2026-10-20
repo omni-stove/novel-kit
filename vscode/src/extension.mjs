@@ -1,53 +1,68 @@
+import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import * as vscode from 'vscode';
-import { existsSync } from 'fs';
-import { basename, dirname, join, relative } from 'path';
-import { randomBytes } from 'crypto';
-import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
 import {
-  BUILTIN_ENGLISH_PRESETS, BUILTIN_PRESETS, computeMetrics, describeLayout, enPdfPageSize, layoutsEqual,
-  matchesPdfScriptPage, normalizeLayout,
+  CONFIG_FILENAME,
+  DEFAULT_VIEW,
+  findConfigFile,
+  readSettingsFile,
+  writeSettingsFile,
+} from '../../src/config.mjs';
+import {
+  BUILTIN_ENGLISH_PRESETS,
+  BUILTIN_PRESETS,
+  computeMetrics,
+  describeLayout,
+  enPdfPageSize,
+  layoutsEqual,
+  matchesPdfScriptPage,
+  normalizeLayout,
 } from '../../src/layout.mjs';
-import { buildDocument, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
-import { CONFIG_FILENAME, DEFAULT_VIEW, findConfigFile, readSettingsFile, writeSettingsFile } from '../../src/config.mjs';
+import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
+import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
+import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
 import { renderWebviewHtml } from './webview.mjs';
 
-// PDF出力はワークスペースに入っている novel-kit の CLI で行う
-const NOVEL_BIN = 'node_modules/.bin/novel';
 const RENDER_DELAY_MS = 250;
-// 同じ段落への入力がこの間隔以内に続けば、取り消しの1回分にまとめる
+/** 同じ段落への入力がこの間隔以内に続けば、取り消しの1回分にまとめる */
 const UNDO_GROUP_MS = 1500;
-// package.json の customEditors と同じID。workbench.editorAssociations で .txt の既定にできる
+/** 小説プレビュー（カスタムエディタ）のID。workbench.editorAssociations で .txt の既定にできる */
+// package.json の customEditors と同じIDでなければならない
 const EDITOR_VIEW_TYPE = 'novelPreview.editor';
 
 let context;
 let statusBar;
-let pdfTerminal = null;
-// 開いているプレビュー（.txt のタブとして開いたものと、横に出したもの）
+let pdfOutput = null;
+/** 開いているプレビュー（.txt のタブとして開いたものと、横に出したもの） */
 const sessions = new Set();
-// テキストエディタの横に出す、アクティブなエディタに追従するプレビュー（1つだけ）
+/** テキストエディタの横に出す、アクティブなエディタに追従するプレビュー（1つだけ） */
 let sidePreview = null;
-// 「プレビューに切り替える」で開くタブに渡す、テキストエディタで見ていた位置（{ filePath, line }）
+/** 「プレビューに切り替える」で開くタブに渡す、テキストエディタで見ていた位置（{ filePath, line }） */
 let pendingReveal = null;
 
 // .txt の言語IDは入っている拡張によって変わる（plaintext とは限らない）ので、拡張子だけで判定する
-const isManuscript = (doc) =>
-  !!doc && doc.uri.scheme === 'file' && doc.uri.fsPath.endsWith('.txt');
+const isManuscript = (doc) => !!doc && doc.uri.scheme === 'file' && doc.uri.fsPath.endsWith('.txt');
 
 const config = () => vscode.workspace.getConfiguration('novelPreview');
 
-// 利用者のプリセット。"english": true のものは英語用
+/** 利用者のプリセット（設定 novelPreview.presets）。english が true なら "english": true のものだけ、false ならそれ以外 */
 function userPresets(english = false) {
   const raw = config().get('presets');
   const all = raw && typeof raw === 'object' ? raw : {};
   return Object.fromEntries(Object.entries(all).filter(([, layout]) => !!layout?.english === english));
 }
 
+/** 組み込みと利用者のプリセットを合わせ、正規化したもの（同じ名前は利用者のものが勝つ） */
 function allPresets(english = false) {
   const merged = { ...(english ? BUILTIN_ENGLISH_PRESETS : BUILTIN_PRESETS), ...userPresets(english) };
-  return Object.fromEntries(Object.entries(merged).map(([name, layout]) => [name, normalizeLayout(layout, { english })]));
+  return Object.fromEntries(
+    Object.entries(merged).map(([name, layout]) => [name, normalizeLayout(layout, { english })]),
+  );
 }
 
-// レイアウトは原稿から一番近い novel.json に持つ（ワークスペースの外までは探さない）
+/** 原稿から一番近い設定ファイル（novel.json）のパス。ワークスペースの外までは探さない。無ければ null */
 function layoutFileFor(doc) {
   const dir = dirname(doc.uri.fsPath);
   const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath ?? dir;
@@ -56,7 +71,10 @@ function layoutFileFor(doc) {
 
 let warnedLayoutFile = null;
 
-// 原稿に効いている設定（日本語・英語のレイアウトと表示設定）。設定ファイルが無い・読めないときは既定のプリセットと既定の表示設定
+/**
+ * 原稿に効いている設定 { layout, english, view, sceneBreak }（日本語・英語のレイアウトと表示設定、場面区切り）。
+ * 設定ファイルが無い・読めないときは既定のプリセットと既定の表示設定（読めないときは1度だけ警告を出す）
+ */
 function settingsFor(doc) {
   const file = layoutFileFor(doc);
   if (file) {
@@ -67,7 +85,9 @@ function settingsFor(doc) {
     } catch (err) {
       if (warnedLayoutFile !== file) {
         warnedLayoutFile = file;
-        vscode.window.showWarningMessage(`${vscode.workspace.asRelativePath(file)} を読めないため、既定の設定で表示します: ${err.message}`);
+        vscode.window.showWarningMessage(
+          `${vscode.workspace.asRelativePath(file)} を読めないため、既定の設定で表示します: ${err.message}`,
+        );
       }
     }
   }
@@ -75,17 +95,21 @@ function settingsFor(doc) {
     layout: allPresets()[config().get('defaultPreset')] ?? normalizeLayout(null),
     english: normalizeLayout(null, { english: true }),
     view: { ...DEFAULT_VIEW },
+    sceneBreak: { ja: null, en: null },
   };
 }
 
-// 原稿の文字がアルファベット中心なら英語の組版
+/** 原稿の文字がアルファベット中心なら英語の組版 */
 const isEnglishManuscript = (doc) => detectLanguageOfLines(splitLines(doc.getText())) === 'en';
 
-// 原稿に効く設定。原稿の言語に応じて日本語か英語のレイアウトを layout として返す
+/**
+ * 原稿に効く設定。原稿の言語に応じて日本語か英語のレイアウトを返す。
+ * 返す値: { layout, view, english: 英語の原稿か, sceneBreak: 場面区切りの記号（null なら既定） }
+ */
 function resolvedSettingsFor(doc) {
-  const { layout, english, view } = settingsFor(doc);
+  const { layout, english, view, sceneBreak } = settingsFor(doc);
   const en = isEnglishManuscript(doc);
-  return { layout: en ? english : layout, view, english: en };
+  return { layout: en ? english : layout, view, english: en, sceneBreak: en ? sceneBreak.en : sceneBreak.ja };
 }
 
 const layoutFor = (doc) => resolvedSettingsFor(doc).layout;
@@ -95,13 +119,17 @@ function metricsFor(doc) {
   return computeMetrics(layout, { english });
 }
 
-// 一番近い設定ファイルへ書く。まだ無ければ原稿と同じディレクトリに作る
-// patch: { layout } で原稿の言語のレイアウト（日本語か英語）を差し替え、{ view } で表示設定の一部を上書きする
+/**
+ * 一番近い設定ファイルへ書き、すべてのプレビューを組み直す。まだ無ければ原稿と同じディレクトリに作る（壊れていれば書かずにエラーを出す）。
+ * patch: { layout } で原稿の言語のレイアウト（日本語か英語）を差し替え、{ view } で表示設定の一部を上書きする
+ */
 function updateSettings(doc, patch) {
   const current = settingsFor(doc);
   const file = layoutFileFor(doc) ?? join(dirname(doc.uri.fsPath), CONFIG_FILENAME);
   if (file === warnedLayoutFile) {
-    vscode.window.showErrorMessage(`${vscode.workspace.asRelativePath(file)} が壊れているため、設定を保存できません。ファイルを直すか削除してください。`);
+    vscode.window.showErrorMessage(
+      `${vscode.workspace.asRelativePath(file)} が壊れているため、設定を保存できません。ファイルを直すか削除してください。`,
+    );
     return;
   }
   const english = isEnglishManuscript(doc);
@@ -124,27 +152,31 @@ function refreshLayout() {
   updateStatusBar();
 }
 
+/** ファイルの行列。エディタで開いていれば未保存の内容を返す */
 function linesOf(filePath) {
-  const open = vscode.workspace.textDocuments.find(d => d.uri.scheme === 'file' && d.uri.fsPath === filePath);
+  const open = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === filePath);
   return open ? splitLines(open.getText()) : readLines(filePath);
 }
 
-// いま操作しているプレビュー（タブが前面のもの。無ければ横のプレビュー）
-const activeSession = () => [...sessions].find(s => s.panel.active) ?? sidePreview;
+/** いま操作しているプレビュー（タブが前面のもの。無ければ横のプレビュー） */
+const activeSession = () => [...sessions].find((s) => s.panel.active) ?? sidePreview;
 
-// コマンドやステータスバーが対象にする原稿
+/** コマンドやステータスバーが対象にする原稿（アクティブなテキストエディタの原稿、無ければいま操作しているプレビューの原稿） */
 function activeManuscript() {
   const editorDoc = vscode.window.activeTextEditor?.document;
   if (isManuscript(editorDoc)) return editorDoc;
   return activeSession()?.doc ?? null;
 }
 
-// ---- プレビュー（1枚の webview と、それが表示している原稿） ----
-
 /**
+ * プレビュー1枚（webview）と、それが表示している原稿のセッションを作り、sessions に加えて返す。
  * doc: 表示する原稿。null なら「原稿を開いてください」の案内を出す
  * follow: アクティブなテキストエディタに追従して doc を差し替える（横のプレビュー）
  * initialLine: 最初の描画で表示する doc の行（開いたファイルの先頭か、テキストエディタから切り替えたときの見ていた位置）
+ * session.applying はプレビュー自身の編集を反映している最中か（その変更通知は「外からの変更」に数えない）、
+ * session.externalChange は取り消し・テキストエディタ・外部ツールなど、プレビュー以外が原稿を変えたか、
+ * session.scope は表示範囲（描画のたびに設定ファイルの値で更新する。既定は作品全体）。
+ * 取り消し履歴の要素は { filePath, startLine, before: 行の配列, after: 行の配列, time }
  */
 function createSession(panel, { doc = null, follow = false, initialLine = null } = {}) {
   const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media');
@@ -156,21 +188,17 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     doc,
     follow,
     files: [],
-    // プレビュー自身の編集を反映している最中か（その変更通知は「外からの変更」に数えない）
     applying: false,
-    // 取り消し・テキストエディタ・外部ツールなど、プレビュー以外が原稿を変えた
     externalChange: false,
-    // 表示範囲。描画のたびに設定ファイルの値（既定は作品全体）で更新する
     scope: DEFAULT_VIEW.scope,
     // プレビューでの編集の取り消し・やり直し。カスタムエディタの Cmd+Z は開いたファイルにしか効かず、
     // 作品全体の表示で別のファイルを編集したときに無関係な変更を取り消してしまうので、自前で持つ
-    // 要素: { filePath, startLine, before: 行の配列, after: 行の配列, time }
     undoStack: [],
     redoStack: [],
     // プレビューの外でファイルが変わったら、そのファイルの履歴は行位置が当てにならないので捨てる
     dropHistory(filePath) {
-      session.undoStack = session.undoStack.filter(e => e.filePath !== filePath);
-      session.redoStack = session.redoStack.filter(e => e.filePath !== filePath);
+      session.undoStack = session.undoStack.filter((e) => e.filePath !== filePath);
+      session.redoStack = session.redoStack.filter((e) => e.filePath !== filePath);
     },
     render,
     scheduleRender() {
@@ -182,7 +210,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     },
   };
 
-  // テキストエディタ側のカーソル位置（このプレビューが表示しているファイルにあるときだけ）
+  /** テキストエディタ側のカーソル位置 { fileIndex, line }（このプレビューが表示しているファイルにあるときだけ。無ければ null） */
   function revealTarget() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return null;
@@ -190,7 +218,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     return fileIndex < 0 ? null : { fileIndex, line: editor.selection.active.line };
   }
 
-  // 最初の描画の1回だけ、開いたファイルの表示位置を返す
+  /** 最初の描画の1回だけ、開いたファイルの表示位置を返す（2回目以降は null） */
   function takeInitialReveal() {
     if (initialLine == null) return null;
     const target = { fileIndex: session.files.indexOf(session.doc.uri.fsPath), line: initialLine };
@@ -198,25 +226,29 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     return target.fileIndex < 0 ? null : target;
   }
 
-  // focusEdit: 描画後にプレビュー側で編集を始める位置（{ fileIndex, line, offset }）
+  /** 原稿を組んで webview に送る。focusEdit: 描画後にプレビュー側で編集を始める位置（{ fileIndex, line, offset }） */
   function render({ focusEdit = null } = {}) {
     clearTimeout(renderTimer);
     if (!session.doc) {
-      panel.webview.postMessage({ type: 'message', text: '原稿のテキストファイル（.txt）を開くとプレビューを表示します。' });
+      panel.webview.postMessage({
+        type: 'message',
+        text: '原稿のテキストファイル（.txt）を開くとプレビューを表示します。',
+      });
       return;
     }
 
     const filePath = session.doc.uri.fsPath;
-    const { layout, view, english } = resolvedSettingsFor(session.doc);
+    const { layout, view, english, sceneBreak } = resolvedSettingsFor(session.doc);
     session.scope = view.scope;
     const metrics = computeMetrics(layout, { english });
     try {
-      const built = buildDocument({ filePath, scope: session.scope, metrics, linesOf });
+      const built = buildDocument({ filePath, scope: session.scope, metrics, linesOf, sceneBreak });
       session.files = built.files;
       const presets = allPresets(english);
       const initialReveal = takeInitialReveal();
       const layoutFile = layoutFileFor(session.doc);
-      if (follow) panel.title = `プレビュー: ${built.files.length > 1 ? basename(dirname(filePath)) : basename(filePath)}`;
+      if (follow)
+        panel.title = `プレビュー: ${built.files.length > 1 ? basename(dirname(filePath)) : basename(filePath)}`;
       panel.webview.postMessage({
         type: 'render',
         css: built.css,
@@ -226,18 +258,16 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         language: metrics.language,
         layout: metrics.layout,
         presets,
-        presetName: Object.keys(presets).find(name => layoutsEqual(presets[name], layout, { english })) ?? null,
+        presetName: Object.keys(presets).find((name) => layoutsEqual(presets[name], layout, { english })) ?? null,
         layoutFile: layoutFile ? vscode.workspace.asRelativePath(layoutFile) : null,
         userPresetNames: Object.keys(userPresets(english)),
         scope: session.scope,
         view,
         canShowWork: listWorkFiles(filePath).includes(filePath),
         reveal: initialReveal ?? revealTarget(),
-        // タブを開いた直後は、プレビューにフォーカスがあってもその位置へ動かす
         forceReveal: !!initialReveal,
         sources: built.sources,
         focusEdit,
-        // true なら、プレビューが段落を編集中でも組み直す（編集中の表示が古くなっているため）
         external: session.externalChange,
       });
       session.externalChange = false;
@@ -246,8 +276,10 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     }
   }
 
-  // edit: 1行を text で置き換える（text に改行があれば行が増える）
-  // merge: 行頭での Backspace。前の行の末尾へつなげる
+  /**
+   * プレビューでの編集を原稿に反映し、取り消し履歴に積む。
+   * edit: 1行を text で置き換える（text に改行があれば行が増える）。merge: 行頭での Backspace。前の行の末尾へつなげる
+   */
   async function applyPreviewEdit(msg) {
     const filePath = session.files[msg.fileIndex];
     if (!filePath) return;
@@ -287,14 +319,20 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     }
   }
 
+  /** 取り消し履歴に積む（やり直し履歴は捨てる）。1つの段落の中で打ち続けている間は1回分にまとめる（行数が変わる編集はまとめない） */
   function recordHistory(entry) {
     session.redoStack = [];
     const now = Date.now();
     const last = session.undoStack.at(-1);
-    // 1つの段落の中で打ち続けている間は1回分にまとめる（行数が変わる編集はまとめない）
     const typing = (e) => e.before.length === 1 && e.after.length === 1;
-    if (last && typing(last) && typing(entry) && last.filePath === entry.filePath
-      && last.startLine === entry.startLine && now - last.time < UNDO_GROUP_MS) {
+    if (
+      last &&
+      typing(last) &&
+      typing(entry) &&
+      last.filePath === entry.filePath &&
+      last.startLine === entry.startLine &&
+      now - last.time < UNDO_GROUP_MS
+    ) {
       last.after = entry.after;
       last.time = now;
       return;
@@ -302,7 +340,10 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     session.undoStack.push({ ...entry, time: now });
   }
 
-  // redo: false で取り消し、true でやり直し
+  /**
+   * redo: false で取り消し、true でやり直し。プレビューの外で変わっていれば、そのファイルの履歴を捨てて警告する。
+   * 反映後は変わった段落の末尾で編集を続ける（別のファイルなら、そこまで表示を動かす）
+   */
   async function undoPreviewEdit(redo) {
     const from = redo ? session.redoStack : session.undoStack;
     const to = redo ? session.undoStack : session.redoStack;
@@ -312,32 +353,42 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
 
     const target = await vscode.workspace.openTextDocument(entry.filePath);
     const endLine = entry.startLine + current.length - 1;
-    const intact = endLine < target.lineCount
-      && current.every((text, i) => target.lineAt(entry.startLine + i).text === text);
+    const intact =
+      endLine < target.lineCount && current.every((text, i) => target.lineAt(entry.startLine + i).text === text);
     if (!intact) {
       session.dropHistory(entry.filePath);
-      vscode.window.showWarningMessage(`${basename(entry.filePath)} がプレビューの外で変更されているため、${redo ? 'やり直せません' : '取り消せません'}。`);
+      vscode.window.showWarningMessage(
+        `${basename(entry.filePath)} がプレビューの外で変更されているため、${redo ? 'やり直せません' : '取り消せません'}。`,
+      );
       return;
     }
 
     const edit = new vscode.WorkspaceEdit();
-    edit.replace(target.uri, new vscode.Range(entry.startLine, 0, endLine, target.lineAt(endLine).text.length), restored.join('\n'));
+    edit.replace(
+      target.uri,
+      new vscode.Range(entry.startLine, 0, endLine, target.lineAt(endLine).text.length),
+      restored.join('\n'),
+    );
     if (!(await applyTracked(edit))) return;
     // まとめた入力の途中から打ち直しても、この取り消しとは別の1回にする
     entry.time = 0;
     to.push(entry);
 
-    // 変わった段落の末尾で編集を続ける（別のファイルなら、そこまで表示を動かす）
     const fileIndex = session.files.indexOf(entry.filePath);
     const line = entry.startLine + restored.length - 1;
     render({ focusEdit: fileIndex < 0 ? null : { fileIndex, line, offset: restored.at(-1).length } });
   }
 
+  /** このプレビューが表示しているファイルのうち、未保存のものを保存する */
   async function saveFiles() {
-    const dirty = vscode.workspace.textDocuments.filter(d => d.isDirty && session.files.includes(d.uri.fsPath));
-    await Promise.all(dirty.map(d => d.save()));
+    const dirty = vscode.workspace.textDocuments.filter((d) => d.isDirty && session.files.includes(d.uri.fsPath));
+    await Promise.all(dirty.map((d) => d.save()));
   }
 
+  /**
+   * webview からのメッセージ。view は表示範囲・倍率・編集のオンオフを設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する。
+   * jump は見ている位置のファイル（作品全体の表示なら、開いたファイルとは限らない）をテキストエディタで開く
+   */
   function onMessage(msg) {
     switch (msg.type) {
       case 'ready':
@@ -349,26 +400,30 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         return preset && setLayout(session.doc, preset);
       }
       case 'view':
-        // 表示範囲・倍率・編集のオンオフ。設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する
         return session.doc && updateSettings(session.doc, { view: msg.view });
       case 'jump':
         return openInTextEditor(session.files[msg.fileIndex], msg.line, panel);
       case 'openText':
-        // 見ている位置のファイル（作品全体の表示なら、開いたファイルとは限らない）をテキストエディタで開く
         return replaceWithTextEditor(session, session.files[msg.fileIndex] ?? session.doc?.uri.fsPath, msg.line ?? 0);
       case 'refresh':
         return render({ focusEdit: msg.focusEdit ?? null });
       case 'edit':
       case 'merge':
         // 入力のたびに届くので、適用順が前後しないよう直列にする
-        editQueue = editQueue.then(() => applyPreviewEdit(msg))
-          .catch(err => vscode.window.showErrorMessage(`プレビューでの編集を反映できませんでした: ${err.message}`));
+        editQueue = editQueue
+          .then(() => applyPreviewEdit(msg))
+          .catch((err) => vscode.window.showErrorMessage(`プレビューでの編集を反映できませんでした: ${err.message}`));
         return editQueue;
       case 'undo':
       case 'redo':
         // 直前の入力の反映が終わってから取り消す
-        editQueue = editQueue.then(() => undoPreviewEdit(msg.type === 'redo'))
-          .catch(err => vscode.window.showErrorMessage(`プレビューでの編集を${msg.type === 'redo' ? 'やり直せ' : '取り消せ'}ませんでした: ${err.message}`));
+        editQueue = editQueue
+          .then(() => undoPreviewEdit(msg.type === 'redo'))
+          .catch((err) =>
+            vscode.window.showErrorMessage(
+              `プレビューでの編集を${msg.type === 'redo' ? 'やり直せ' : '取り消せ'}ませんでした: ${err.message}`,
+            ),
+          );
         return editQueue;
       case 'save':
         return saveFiles();
@@ -401,10 +456,12 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   return session;
 }
 
-// .txt を「小説プレビュー」で開いたときのタブ（カスタムエディタ）。文書の保存・取り消しは VS Code が面倒を見る
+/**
+ * .txt を「小説プレビュー」で開いたときのタブ（カスタムエディタ）。文書の保存・取り消しは VS Code が面倒を見る。
+ * 作品全体の表示でも、開いたファイルの位置から見せる（テキストエディタから切り替えたときは、そこで見ていた行）
+ */
 const editorProvider = {
   resolveCustomTextEditor(document, panel) {
-    // 作品全体の表示でも、開いたファイルの位置から見せる（テキストエディタから切り替えたときは、そこで見ていた行）
     const initialLine = pendingReveal?.filePath === document.uri.fsPath ? pendingReveal.line : 0;
     pendingReveal = null;
     createSession(panel, { doc: document, initialLine });
@@ -412,6 +469,7 @@ const editorProvider = {
   },
 };
 
+/** テキストエディタの横にプレビューを出す（すでにあれば、アクティブな原稿に差し替えて前に出す） */
 function openSidePreview() {
   const doc = vscode.window.activeTextEditor?.document;
   if (sidePreview) {
@@ -429,11 +487,13 @@ function openSidePreview() {
   sidePreview = createSession(panel, { doc: isManuscript(doc) ? doc : null, follow: true });
 }
 
-// プレビューからテキストエディタの該当行へ。プレビューのタブは残し、すでに見えているエディタがあればそこへ、無ければ横に開く
+/** プレビューからテキストエディタの該当行へ。プレビューのタブは残し、すでに見えているエディタがあればそこへ、無ければ横に開く */
 async function openInTextEditor(filePath, line, fromPanel) {
   if (!filePath) return;
-  const visible = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === filePath);
-  const anyEditor = vscode.window.visibleTextEditors.find(e => isManuscript(e.document) && e.viewColumn !== fromPanel.viewColumn);
+  const visible = vscode.window.visibleTextEditors.find((e) => e.document.uri.fsPath === filePath);
+  const anyEditor = vscode.window.visibleTextEditors.find(
+    (e) => isManuscript(e.document) && e.viewColumn !== fromPanel.viewColumn,
+  );
   const doc = await vscode.workspace.openTextDocument(filePath);
   const editor = await vscode.window.showTextDocument(doc, {
     viewColumn: visible?.viewColumn ?? anyEditor?.viewColumn ?? vscode.ViewColumn.Beside,
@@ -443,8 +503,10 @@ async function openInTextEditor(filePath, line, fromPanel) {
   editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
 }
 
-// 「テキストで開く」。.txt のタブとして開いたプレビューは、同じ場所でテキストエディタに入れ替える
-// （横に出したプレビューは隣にエディタがある前提なので、そちらの該当行へ飛ぶだけ）
+/**
+ * 「テキストで開く」。.txt のタブとして開いたプレビューは、同じ場所でテキストエディタに入れ替える。
+ * 横に出したプレビューは隣にエディタがある前提なので、入れ替えずにそちらの該当行へ飛ぶ
+ */
 async function replaceWithTextEditor(session, filePath, line) {
   if (!filePath) return;
   if (session.follow) return openInTextEditor(filePath, line, session.panel);
@@ -458,7 +520,7 @@ async function replaceWithTextEditor(session, filePath, line) {
   session.panel.dispose();
 }
 
-// 「プレビューに切り替える」。テキストエディタのタブを、同じ場所で小説プレビューに入れ替える（「テキストで開く」の逆）
+/** 「プレビューに切り替える」。テキストエディタのタブを、同じ場所で小説プレビューに入れ替える（「テキストで開く」の逆） */
 async function replaceWithPreview() {
   const editor = vscode.window.activeTextEditor;
   if (!isManuscript(editor?.document)) return;
@@ -470,25 +532,29 @@ async function replaceWithPreview() {
   pendingReveal = null;
 }
 
-// ---- プリセット ----
-
+/** プリセットの保存先。ワークスペースを開いていればワークスペース設定、無ければユーザー設定 */
 const presetTarget = () =>
   vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
 
-// 英語のレイアウトは "english": true を付けて保存し、英語の原稿のときだけ出す
+/** 原稿の今のレイアウトを名前を付けてプリセットに保存する。英語のレイアウトは "english": true を付けて保存し、英語の原稿のときだけ出す */
 async function savePreset(doc) {
   const { layout, english } = resolvedSettingsFor(doc);
   const name = await vscode.window.showInputBox({
     title: `レイアウトをプリセットとして保存${english ? '（English）' : ''}`,
     prompt: 'プリセット名',
     value: describeLayout(layout, { english }),
-    validateInput: v => (v.trim() ? null : '名前を入力してください'),
+    validateInput: (v) => (v.trim() ? null : '名前を入力してください'),
   });
   if (!name) return;
   const saved = english ? { ...layout, english: true } : layout;
-  await config().update('presets', { ...userPresets(false), ...userPresets(true), [name.trim()]: saved }, presetTarget());
+  await config().update(
+    'presets',
+    { ...userPresets(false), ...userPresets(true), [name.trim()]: saved },
+    presetTarget(),
+  );
 }
 
+/** 利用者のプリセットを名前で消す */
 async function deletePreset(name) {
   const presets = { ...userPresets(false), ...userPresets(true) };
   if (!(name in presets)) return;
@@ -496,6 +562,7 @@ async function deletePreset(name) {
   await config().update('presets', presets, presetTarget());
 }
 
+/** レイアウトをプリセットから選ぶクイックピック。選んだものを原稿の設定ファイルに書く */
 async function selectLayout() {
   const doc = activeManuscript();
   if (!doc) return;
@@ -520,74 +587,245 @@ async function selectLayout() {
   if (picked) setLayout(doc, presets[picked.label]);
 }
 
-// ---- PDF出力（novel pdf / novel pdf-en） ----
-
-const shellQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
-
-// session があればその表示範囲（このファイル / 作品全体）で、無ければ開いている原稿1ファイルを出力する。
-// 日本語は novel pdf、英語は novel pdf-en（判型は用紙から選ぶ）
+/**
+ * PDF出力（novel pdf / novel pdf-en）。session があればその表示範囲（このファイル / 作品全体）で、無ければ開いている原稿1ファイルを出力する。
+ * 日本語は novel pdf、英語は novel pdf-en（判型は用紙から選ぶ）。出力先はワークスペース（無ければ原稿のディレクトリ）の out/preview/ で、終わったら開く。
+ * CLI は拡張に同梱したもの（dist/novel-cli.cjs）を VS Code の Node で動かす
+ */
 function exportPdf(session = activeSession()) {
   const doc = session?.doc ?? activeManuscript();
   if (!doc) return;
   const filePath = doc.uri.fsPath;
-  const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
-  const { layout, english } = resolvedSettingsFor(doc);
+  const dir = dirname(filePath);
+  const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath ?? dir;
+  const { layout, english, sceneBreak } = resolvedSettingsFor(doc);
   const metrics = computeMetrics(layout, { english });
   const command = english ? 'pdf-en' : 'pdf';
-  if (!root || !existsSync(join(root, NOVEL_BIN))) {
-    vscode.window.showErrorMessage(`${NOVEL_BIN} が見つからないため、PDFを出力できません（ワークスペースに novel-kit を入れてください）。`);
-    return;
-  }
 
-  const dir = dirname(filePath);
   const whole = session?.doc === doc && session.scope === 'work' && session.files.length > 1;
   // 英訳は story/en/ に置くので、作品名は en の親から取る
   const workDir = basename(dir) === 'en' ? dirname(dir) : dir;
   const work = basename(workDir) === 'story' ? basename(dirname(workDir)) : basename(workDir);
   const name = whole ? work : `${work}-${basename(filePath, '.txt')}`;
-  const input = shellQuote(relative(root, whole ? dir : filePath));
 
   let out;
   let options;
   if (english) {
     const pageSize = enPdfPageSize(layout);
     if (!pageSize) {
-      vscode.window.showWarningMessage('英語のPDF出力は 6×9in / 5×8in / A5（縦）のどれかで組みます。今の用紙はどれでもないため 6×9in で出力します。');
+      vscode.window.showWarningMessage(
+        '英語のPDF出力は 6×9in / 5×8in / A5（縦）のどれかで組みます。今の用紙はどれでもないため 6×9in で出力します。',
+      );
     }
-    out = `out/preview/${name}-en-${pageSize ?? '6x9'}.pdf`;
-    options = `--${pageSize ?? '6x9'}`;
+    out = `${name}-en-${pageSize ?? '6x9'}.pdf`;
+    options = [`--${pageSize ?? '6x9'}`];
   } else {
     if (!matchesPdfScriptPage(layout)) {
-      vscode.window.showWarningMessage('PDF出力は A4横・既定の余白で組みます。用紙・余白の設定はプレビューにだけ反映されます。');
+      vscode.window.showWarningMessage(
+        'PDF出力は A4横・既定の余白で組みます。用紙・余白の設定はプレビューにだけ反映されます。',
+      );
     }
     const size = `${metrics.chars}x${metrics.lines}`;
-    out = `out/preview/${name}-${metrics.vertical ? size : 'horizontal'}.pdf`;
+    out = `${name}-${metrics.vertical ? size : 'horizontal'}.pdf`;
     // 行数自動（既定の30字組）はスクリプトの既定そのものなので --size を付けない
-    options = !metrics.vertical ? '--horizontal' : layout.lines == null && layout.chars === 30 ? '' : `--size ${size}`;
+    options = !metrics.vertical
+      ? ['--horizontal']
+      : layout.lines == null && layout.chars === 30
+        ? []
+        : ['--size', size];
   }
+  if (sceneBreak) options.push('--scene-break', sceneBreak);
+  const outPath = join(root, 'out', 'preview', out);
+  mkdirSync(dirname(outPath), { recursive: true });
 
-  if (!pdfTerminal || pdfTerminal.exitStatus) {
-    pdfTerminal = vscode.window.createTerminal({ name: '小説PDF出力', cwd: root });
-  }
-  pdfTerminal.show(true);
-  pdfTerminal.sendText([
-    'mkdir -p out/preview &&',
-    `AUTO_OPEN=1 ${NOVEL_BIN} ${command}`,
-    options,
-    `-o ${shellQuote(out)}`,
-    input,
-    '--open',
-  ].filter(Boolean).join(' '));
+  pdfOutput ??= vscode.window.createOutputChannel('小説PDF出力');
+  pdfOutput.clear();
+  const args = [
+    join(context.extensionPath, 'dist', 'novel-cli.cjs'),
+    command,
+    ...options,
+    '-o',
+    outPath,
+    whole ? dir : filePath,
+  ];
+  vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `PDFを出力しています（${out}）` },
+    (progress) =>
+      new Promise((resolve) => {
+        const child = spawn(process.execPath, args, {
+          cwd: root,
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AUTO_OPEN: '0' },
+        });
+        // 初回は Chrome のダウンロードで時間がかかるので、CLI の最後の行を通知に出しておく
+        const log = (chunk) => {
+          const text = chunk.toString();
+          pdfOutput.append(text);
+          const last = text
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .pop();
+          if (last) progress.report({ message: last });
+        };
+        child.stdout.on('data', log);
+        child.stderr.on('data', log);
+        // 起動できなかったときは close が来ないことがあるので、error でも終える（両方来ても1回だけ）
+        let finished = false;
+        const finish = async (ok) => {
+          if (finished) return;
+          finished = true;
+          resolve();
+          if (ok) {
+            vscode.env.openExternal(vscode.Uri.file(outPath));
+            return;
+          }
+          const picked = await vscode.window.showErrorMessage('PDFを出力できませんでした。', 'ログを見る');
+          if (picked) pdfOutput.show(true);
+        };
+        child.on('error', (err) => {
+          pdfOutput.appendLine(err.message);
+          finish(false);
+        });
+        child.on('close', (code) => finish(code === 0));
+      }),
+  );
 }
 
-// ---- ステータスバー ----
+/** 選択範囲に |親《るび》 を振る。選択が無ければカーソルの前後に続く漢字に振る */
+async function insertRuby() {
+  const editor = vscode.window.activeTextEditor;
+  if (!isManuscript(editor?.document)) return;
+  const { document, selection } = editor;
+  let range = selection;
+  if (selection.isEmpty) {
+    const { line, character } = selection.active;
+    const run = kanjiRunAt(document.lineAt(line).text, character);
+    if (run) range = new vscode.Range(line, run.start, line, run.end);
+  }
+  const base = document.getText(range);
+  if (!base || base.includes('\n')) {
+    vscode.window.showInformationMessage(
+      base ? 'ルビは1行の中の語に振ってください。' : 'ルビを振る語を選んでください。',
+    );
+    return;
+  }
+  const ruby = await vscode.window.showInputBox({
+    title: `ルビを振る（${base}）`,
+    prompt: '読み',
+    validateInput: (v) => (v.trim() ? null : '読みを入力してください'),
+  });
+  if (!ruby) return;
+  await editor.edit((b) => b.replace(range, rubyMarkup(base, ruby.trim())));
+}
+
+/** 選択範囲を 《《》》 で囲む。選択が無ければ 《《》》 を入れて、その中にカーソルを置く */
+async function insertEmphasis() {
+  const editor = vscode.window.activeTextEditor;
+  if (!isManuscript(editor?.document)) return;
+  const selections = editor.selections;
+  await editor.edit((b) => {
+    for (const sel of selections) b.replace(sel, emphasisMarkup(editor.document.getText(sel)));
+  });
+  if (selections.every((sel) => sel.isEmpty)) {
+    editor.selections = editor.selections.map((sel) => {
+      const pos = sel.active.translate(0, -2);
+      return new vscode.Selection(pos, pos);
+    });
+  }
+}
+
+const outlineChanged = new vscode.EventEmitter();
+let outlineView;
+/** 目次を出している作品のファイル（原稿から離れても、最後に見ていた作品の目次を残す） */
+let outlineFile = null;
+
+const formatCount = (n, language) =>
+  language === 'en' ? `${n.toLocaleString('en-US')} words` : `${n.toLocaleString('ja-JP')}字`;
+
+/** エクスプローラーの目次。章ごとの項目と、複数ファイルの章はその下にファイルを並べる（数は日本語は文字数、英語は語数） */
+const outlineProvider = {
+  onDidChangeTreeData: outlineChanged.event,
+  getTreeItem: (item) => item,
+  getChildren(parent) {
+    if (parent) return parent.children;
+    if (!outlineFile) return [];
+    const { language, chapters } = buildOutline(outlineFile, { linesOf });
+    const current = activeManuscript()?.uri.fsPath;
+    const fileItem = ({ file, count }) => {
+      const item = new vscode.TreeItem(basename(file));
+      item.description = formatCount(count, language);
+      item.resourceUri = vscode.Uri.file(file);
+      item.iconPath = new vscode.ThemeIcon(file === current ? 'edit' : 'file');
+      item.command = { command: 'novelPreview.openFromOutline', title: '開く', arguments: [file] };
+      return item;
+    };
+    return chapters.map((ch) => {
+      const single = ch.files.length === 1;
+      const label = ch.title ? `${ch.label}${language === 'en' ? '. ' : '　'}${ch.title}` : ch.label;
+      const item = new vscode.TreeItem(
+        label,
+        single ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.description = single
+        ? `${basename(ch.file)}・${formatCount(ch.count, language)}`
+        : formatCount(ch.count, language);
+      item.tooltip = ch.files.map((f) => basename(f.file)).join('\n');
+      item.iconPath = new vscode.ThemeIcon(single && ch.file === current ? 'edit' : 'book');
+      item.command = { command: 'novelPreview.openFromOutline', title: '開く', arguments: [ch.file] };
+      item.children = single ? [] : ch.files.map(fileItem);
+      return item;
+    });
+  },
+};
+
+/** 目次を作り直す。原稿を一度でも開いたら、エクスプローラーに目次を出す */
+function refreshOutline() {
+  const doc = activeManuscript();
+  if (doc) {
+    if (!outlineFile) vscode.commands.executeCommand('setContext', 'novelPreview.hasManuscript', true);
+    outlineFile = doc.uri.fsPath;
+  }
+  if (!outlineView?.visible) return;
+  outlineView.message = outlineFile ? undefined : '原稿（.txt）を開くと、その作品の目次を出します。';
+  outlineView.title = outlineFile ? `目次: ${basename(dirname(outlineFile))}` : '小説の目次';
+  outlineChanged.fire();
+}
+
+/** 作品全体を表示している小説プレビューが見えていれば、その中で該当ファイルの頭へ動かす。無ければファイルを開く */
+async function openFromOutline(file) {
+  const session = [...sessions].find((s) => !s.follow && s.panel.visible && s.files.includes(file));
+  if (session) {
+    session.panel.reveal(undefined, false);
+    session.panel.webview.postMessage({ type: 'reveal', target: { fileIndex: session.files.indexOf(file), line: 0 } });
+    return;
+  }
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(file));
+}
+
+/** step: 1 で次のファイル、-1 で前のファイル（PDF出力と同じ並び）を開く */
+async function openNeighborFile(step) {
+  const doc = activeManuscript();
+  if (!doc) return;
+  const files = listWorkFiles(doc.uri.fsPath);
+  const target = files[files.indexOf(doc.uri.fsPath) + step];
+  if (!target) {
+    vscode.window.showInformationMessage(step > 0 ? '最後のファイルです。' : '最初のファイルです。');
+    return;
+  }
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
+}
 
 const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
 
+/**
+ * ステータスバーに文字数（英語は語数）・換算枚数・レイアウトを出す（目次も作り直す）。
+ * 横のプレビューだけが残っていて、前面が原稿でもプレビューでもないときは出さない
+ */
 function updateStatusBar() {
+  refreshOutline();
   const doc = activeManuscript();
-  // 横のプレビューだけが残っていて、前面が原稿でもプレビューでもないときは出さない
-  const showing = doc && (isManuscript(vscode.window.activeTextEditor?.document) || [...sessions].some(s => s.panel.active));
+  const showing =
+    doc && (isManuscript(vscode.window.activeTextEditor?.document) || [...sessions].some((s) => s.panel.active));
   if (!showing) {
     statusBar.hide();
     return;
@@ -597,12 +835,14 @@ function updateStatusBar() {
   const stats = computeStats([splitLines(doc.getText())], metrics);
 
   const editor = vscode.window.activeTextEditor;
-  const selectedText = editor?.document === doc ? editor.selections.map(sel => doc.getText(sel)).join('\n') : '';
+  const selectedText = editor?.document === doc ? editor.selections.map((sel) => doc.getText(sel)).join('\n') : '';
 
   if (metrics.language === 'en') {
     const selectedWords = selectedText.split(/\s+/).filter(Boolean).length;
     const parts = [
-      selectedWords > 0 ? `選択 ${selectedWords.toLocaleString('en-US')} / ${stats.words.toLocaleString('en-US')} words` : `${stats.words.toLocaleString('en-US')} words`,
+      selectedWords > 0
+        ? `選択 ${selectedWords.toLocaleString('en-US')} / ${stats.words.toLocaleString('en-US')} words`
+        : `${stats.words.toLocaleString('en-US')} words`,
       describeLayout(layout, { english: true }),
     ];
     statusBar.text = `$(book) ${parts.join(' ・ ')}`;
@@ -613,33 +853,36 @@ function updateStatusBar() {
 
   const selected = countTextChars(stripInlineMarkup(selectedText));
   const parts = [
-    selected > 0 ? `選択 ${selected.toLocaleString('ja-JP')}字 / ${stats.chars.toLocaleString('ja-JP')}字` : `${stats.chars.toLocaleString('ja-JP')}字`,
+    selected > 0
+      ? `選択 ${selected.toLocaleString('ja-JP')}字 / ${stats.chars.toLocaleString('ja-JP')}字`
+      : `${stats.chars.toLocaleString('ja-JP')}字`,
     `400字詰め ${formatPages(stats.genkoPages)}枚`,
     `${describeLayout(layout)} ${formatPages(stats.gridPages)}枚`,
   ];
   statusBar.text = `$(book) ${parts.join(' ・ ')}`;
-  statusBar.tooltip = '文字数（ルビ・メタ行を除く）・400字詰め原稿用紙換算・現在のレイアウトでの換算枚数\nクリックでレイアウトを選ぶ';
+  statusBar.tooltip =
+    '文字数（ルビ・メタ行を除く）・400字詰め原稿用紙換算・現在のレイアウトでの換算枚数\nクリックでレイアウトを選ぶ';
   statusBar.show();
 }
-
-// ---- 起動 ----
 
 export function activate(ctx) {
   context = ctx;
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 200);
   statusBar.command = 'novelPreview.selectLayout';
+  outlineView = vscode.window.createTreeView('novelPreview.outline', { treeDataProvider: outlineProvider });
 
   // 設定ファイルを手で書き換えたとき・置き場所を変えたときにも追従する
   const layoutWatcher = vscode.workspace.createFileSystemWatcher(`**/${CONFIG_FILENAME}`);
 
-  // エディタで開いていない原稿の追加・削除・外部からの書き換え（Claude Code など）も拾う。
-  // 同じディレクトリの原稿は、作品全体の表示にも単独表示の章番号にも効くので、そのディレクトリを見ているプレビューを組み直す
+  // エディタで開いていない原稿の追加・削除・外部からの書き換え（Claude Code など）は onDidChangeTextDocument に来ない。
+  // 同じディレクトリの原稿は作品全体の表示にも単独表示の章番号にも効くので、そのディレクトリを見ているプレビューを組み直す
   const manuscriptWatcher = vscode.workspace.createFileSystemWatcher('**/*.txt');
   const onManuscriptFileEvent = (uri) => {
     const dir = dirname(uri.fsPath);
     for (const session of sessions) {
       if (session.doc && dirname(session.doc.uri.fsPath) === dir) session.scheduleRender();
     }
+    if (outlineFile && dirname(outlineFile) === dir) scheduleStatusBar();
   };
 
   let statusTimer;
@@ -651,13 +894,20 @@ export function activate(ctx) {
   ctx.subscriptions.push(
     statusBar,
     vscode.window.registerCustomEditorProvider(EDITOR_VIEW_TYPE, editorProvider, {
-      // enableFindWidget: Cmd+F でプレビュー内を検索できるようにする
       webviewOptions: { retainContextWhenHidden: true, enableFindWidget: true },
     }),
     vscode.commands.registerCommand('novelPreview.open', openSidePreview),
     vscode.commands.registerCommand('novelPreview.reopenAsPreview', replaceWithPreview),
     vscode.commands.registerCommand('novelPreview.selectLayout', selectLayout),
     vscode.commands.registerCommand('novelPreview.exportPdf', () => exportPdf()),
+    vscode.commands.registerCommand('novelPreview.insertRuby', insertRuby),
+    vscode.commands.registerCommand('novelPreview.insertEmphasis', insertEmphasis),
+    vscode.commands.registerCommand('novelPreview.openFromOutline', openFromOutline),
+    vscode.commands.registerCommand('novelPreview.nextFile', () => openNeighborFile(1)),
+    vscode.commands.registerCommand('novelPreview.previousFile', () => openNeighborFile(-1)),
+    outlineChanged,
+    outlineView,
+    outlineView.onDidChangeVisibility(refreshOutline),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       updateStatusBar();
       if (!isManuscript(editor?.document)) return;
@@ -665,7 +915,6 @@ export function activate(ctx) {
       for (const session of sessions) {
         const changed = session.follow && session.doc?.uri.fsPath !== filePath;
         if (session.follow) session.doc = editor.document;
-        // 作品全体を表示中に同じ作品の別ファイルへ移っただけなら、組み直さず位置だけ合わせる
         if (changed && !(session.scope === 'work' && session.files.includes(filePath))) session.render();
         else session.postReveal();
       }
@@ -673,12 +922,12 @@ export function activate(ctx) {
     vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.contentChanges.length === 0) return;
       scheduleStatusBar();
-      const undoRedo = e.reason === vscode.TextDocumentChangeReason.Undo || e.reason === vscode.TextDocumentChangeReason.Redo;
+      const undoRedo =
+        e.reason === vscode.TextDocumentChangeReason.Undo || e.reason === vscode.TextDocumentChangeReason.Redo;
       for (const session of sessions) {
         if (!session.files.includes(e.document.uri.fsPath)) continue;
         if (undoRedo || !session.applying) session.externalChange = true;
         if (!session.applying) session.dropHistory(e.document.uri.fsPath);
-        // 取り消し・やり直しは待たせず、すぐ表示に反映する
         if (undoRedo) session.render();
         else session.scheduleRender();
       }

@@ -8,8 +8,9 @@
  *   novel pdf -o output.pdf ./directory/
  *
  * オプション:
- *   -o, --output <file>  出力ファイル名（必須）
- *   --title <text>       タイトル（1ページ目にタイトルのみ表示）
+ *   -o, --output <file>  出力ファイル名（--count-only 以外では必須）
+ *   --title <text>       タイトル（表紙ページに表示）
+ *   --author <text>      著者名（タイトルとともに表示）
  *   --no-page-break      ファイル間のページブレークを無効化
  *   --no-chapter-break   章（視点切替）ごとの改ページを無効化。章境界は空行1つで連結し、
  *                        同一章内のファイル境界には区切り字「◇◇◇」を挟む（--part 非指定時のみ有効）
@@ -20,7 +21,7 @@
  *   --part 060,085,...   部の境界となるファイル名プレフィックス（novel split の --splits と同形式）。
  *                        該当ファイルから新しい部が始まる。各部の頭で改ページし、
  *                        本文先頭に「N章」を表示。
- *                        部の内側のファイル境界は改ページせず、章アンカーが跨ぐ境界はそのまま連結、
+ *                        部の内側のファイル境界は改ページせず、見出しで始まるファイルの前はそのまま連結、
  *                        同一章内のファイル境界には区切り字「◇◇◇」を挟む。
  *                        1始まりのファイル順インデックス指定もフォールバックで受け付ける。
  *   --synopsis-on-title   梗概をタイトルページに表示（デフォルト: 別ページ）
@@ -28,6 +29,7 @@
  *   --coverless          表紙ページを作らず、梗概と本文の頭にタイトル・著者名を本文サイズで表示
  *   --open               生成後にプレビューを開く
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
+ *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ◇◇◇）
  *   --count-only         原稿用紙換算（文字数・行数・枚数）のみを表示して終了
  *                        --size 未指定時は 20x20（400字詰め原稿用紙）
  *   --review             下読み用モード。表紙・梗概・人物紹介・部構成（--part）をすべて無視し、
@@ -38,23 +40,35 @@
  *                        番号は全体版と完全に一致する。
  */
 
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename } from 'node:path';
+import { inflateSync } from 'node:zlib';
 import { PDFDocument, PDFName, rgb } from 'pdf-lib';
-import { readFileSync, writeFileSync, unlinkSync } from 'fs';
-import { basename } from 'path';
-import { inflateSync } from 'zlib';
-import { escapeHtml, parseTextFile, readLines, countChars } from './lib/text-parser.mjs';
+import { ARG, buildPdfFromHtml, fail, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
+import { AOZORA_CSS, googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
 import {
-  parseWithSectionNumbering, logSections, requireInputFiles, countGenkoRows, resolvePartIndices, findSidecarFile, startsNewChapter,
-  SYNOPSIS_FILENAME, CHARACTERS_FILENAME, FILE_SEPARATOR_MARK,
+  CHARACTERS_FILENAME,
+  countGenkoRows,
+  findSidecarFile,
+  logSections,
+  parseWithSectionNumbering,
+  requireInputFiles,
+  resolvePartIndices,
+  SYNOPSIS_FILENAME,
+  startsNewChapter,
 } from './lib/manuscript.mjs';
-import { googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
-import { parseCliArgs, ARG, fail, requireOutput, buildPdfFromHtml, openFile, runMain } from './lib/cli.mjs';
+import { countChars, escapeHtml, parseTextFile, readLines, SCENE_BREAK_MARK } from './lib/text-parser.mjs';
 
 const EMPTY_LINE_HTML = '<p class="empty">&nbsp;</p>';
-const SEPARATOR_BLOCK_HTML = `${EMPTY_LINE_HTML}\n<p class="separator">${FILE_SEPARATOR_MARK}</p>\n${EMPTY_LINE_HTML}\n`;
+const separatorBlockHtml = (mark, vertical) =>
+  `${EMPTY_LINE_HTML}\n<p class="separator">${escapeHtml(mark, { vertical })}</p>\n${EMPTY_LINE_HTML}\n`;
 
-// 累積が targetChars 以上に達した時点で打ち切る。差分比較を <= にしているのは、
-// 同じ差分なら、より多く含む側を優先するため
+/**
+ * ファイルごとの文字数を先頭から累積し、累積が targetChars に最も近くなるファイル境界
+ * （先頭から何ファイル目までを含めるか）を返す。累積が targetChars 以上に達した時点で打ち切る。
+ * 空なら 0。
+ */
+// 差分比較を < でなく <= にするのは、同じ差分なら多く含む側を優先するため
 export function selectReviewBoundary(charCounts, targetChars) {
   if (charCounts.length === 0) return 0;
   let cum = 0;
@@ -106,27 +120,32 @@ function parsePlainTextFile(filePath, vertical = true) {
   return htmlParts.join('\n');
 }
 
-function parseArgs(argv) {
-  const args = parseCliArgs(argv, [
-    ARG.output,
-    ARG.title,
-    ARG.author,
-    { key: 'pageBreak', flags: ['--no-page-break'], value: false },
-    { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
-    { key: 'vertical', flags: ['--horizontal'], value: false },
-    ARG.size,
-    { key: 'chars', flags: ['--chars'], takesValue: true, parse: v => parseInt(v, 10) },
-    { key: 'limit', flags: ['--limit'], takesValue: true, parse: v => parseInt(v, 10) },
-    { key: 'synopsisOnTitle', flags: ['--synopsis-on-title'] },
-    { key: 'noSynopsis', flags: ['--no-synopsis'] },
-    { key: 'coverless', flags: ['--coverless'] },
-    ARG.open,
-    { key: 'countOnly', flags: ['--count-only'] },
-    ARG.parts,
-    { key: 'review', flags: ['--review'] },
-    { key: 'pages', flags: ['--pages'], takesValue: true, parse: parsePageSpec },
-    { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
-  ], { pageBreak: true, chapterBreak: true, vertical: true, chars: null, lines: null });
+export function parseArgs(argv) {
+  const args = parseCliArgs(
+    argv,
+    [
+      ARG.output,
+      ARG.title,
+      ARG.author,
+      { key: 'pageBreak', flags: ['--no-page-break'], value: false },
+      { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
+      { key: 'vertical', flags: ['--horizontal'], value: false },
+      ARG.size,
+      { key: 'chars', flags: ['--chars'], takesValue: true, parse: (v) => parseInt(v, 10) },
+      { key: 'limit', flags: ['--limit'], takesValue: true, parse: (v) => parseInt(v, 10) },
+      { key: 'synopsisOnTitle', flags: ['--synopsis-on-title'] },
+      { key: 'noSynopsis', flags: ['--no-synopsis'] },
+      { key: 'coverless', flags: ['--coverless'] },
+      ARG.open,
+      { key: 'countOnly', flags: ['--count-only'] },
+      ARG.parts,
+      { key: 'review', flags: ['--review'] },
+      { key: 'pages', flags: ['--pages'], takesValue: true, parse: parsePageSpec },
+      { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
+      ARG.sceneBreak,
+    ],
+    { pageBreak: true, chapterBreak: true, vertical: true, chars: null, lines: null },
+  );
   if (args.size) {
     args.chars = args.size.cols;
     args.lines = args.size.rows;
@@ -134,18 +153,18 @@ function parseArgs(argv) {
   return args;
 }
 
-// A4横（297mm x 210mm）前提の寸法
+// 寸法（mm）は @page の A4横（297mm x 210mm）から余白を引いたもの
 function calcVerticalLayout(options) {
   const chars = options.chars || 30;
   const lines = options.lines || null;
 
-  const availHeight = 165; // mm
+  const availHeight = 165;
   const fontSizeMm = availHeight / chars;
   const fontSizePt = fontSizeMm / 0.3528;
 
   let lineHeight;
   if (lines) {
-    const availWidth = 257; // mm
+    const availWidth = 257;
     const columnPitchMm = availWidth / lines;
     lineHeight = columnPitchMm / fontSizeMm;
   } else {
@@ -155,16 +174,20 @@ function calcVerticalLayout(options) {
   return { fontSizePt: Math.floor(fontSizePt * 10) / 10, lineHeight, chars };
 }
 
-export function generateHtml(sections, options, synopsisHtml = null, synopsisCharCount = 0, charactersHtml = null) {
+export function generateHtml(sections, options, synopsisHtml = null, _synopsisCharCount = 0, charactersHtml = null) {
   const writingMode = options.vertical ? 'vertical-rl' : 'horizontal-tb';
   const layout = options.vertical ? calcVerticalLayout(options) : null;
 
-  const explicitPartIndices = options.parts && options.parts.length > 0
-    ? options.parts.map(p => p - 1).sort((a, b) => a - b).filter(i => i > 0 && i < sections.length)
-    : null;
+  const explicitPartIndices =
+    options.parts && options.parts.length > 0
+      ? options.parts
+          .map((p) => p - 1)
+          .sort((a, b) => a - b)
+          .filter((i) => i > 0 && i < sections.length)
+      : null;
   const partFirstIndexSet = explicitPartIndices ? new Set([0, ...explicitPartIndices]) : null;
-  // 部の内側と --no-chapter-break では章が変わっても改ページせず、空行1つで連結する
   const chapterPageBreak = !partFirstIndexSet && options.chapterBreak !== false;
+  const separatorBlock = separatorBlockHtml(options.sceneBreak ?? SCENE_BREAK_MARK, options.vertical);
 
   const sectionDiv = (className, html) => `<div class="${className}">\n${html}\n</div>`;
 
@@ -175,14 +198,15 @@ export function generateHtml(sections, options, synopsisHtml = null, synopsisCha
 
     if (partFirstIndexSet?.has(i)) return sectionDiv('section page-break part-section', html);
     if (i === 0) return sectionDiv('section', html);
-    if (!startsNewChapter(sections, i)) return sectionDiv('section', `${SEPARATOR_BLOCK_HTML}${html}`);
+    if (!startsNewChapter(sections, i)) return sectionDiv('section', `${separatorBlock}${html}`);
     if (chapterPageBreak) return sectionDiv('section page-break', html);
     return sectionDiv('section', `${EMPTY_LINE_HTML}\n${html}`);
   });
 
-  const coverlessHeading = options.coverless && options.title
-    ? `<p class="coverless-title">${options.title}</p>\n${options.author ? `<p class="coverless-author">${options.author}</p>\n` : ''}`
-    : '';
+  const coverlessHeading =
+    options.coverless && options.title
+      ? `<p class="coverless-title">${options.title}</p>\n${options.author ? `<p class="coverless-author">${options.author}</p>\n` : ''}`
+      : '';
 
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -262,13 +286,13 @@ ${googleFontsLinks('Noto+Serif+JP:wght@400')}
     .epigraph-page .epigraph-quote {
       text-indent: 0;
       text-align: end;
-      /* 引用元の文字数ぶん本文を押し上げ、本文末尾を引用元の先頭に揃える。
-         padding だと行長が縮んで本文が折り返してしまうため、
-         レイアウトに影響しない translate で描画位置だけをずらす。
-         押し上げ量は「本文の先頭が上から一字下げの位置」を上限にクランプする */
-      translate: ${options.vertical
-        ? `0 calc(-1em * max(0, min(var(--epigraph-source-len, 0), ${layout.chars} - var(--epigraph-quote-len, ${layout.chars}) - 1)))`
-        : 'calc(var(--epigraph-source-len, 0) * -1em) 0'};
+      /* padding だと行長が縮んで本文が折り返してしまうため、
+         レイアウトに影響しない translate で描画位置だけをずらす */
+      translate: ${
+        options.vertical
+          ? `0 calc(-1em * max(0, min(var(--epigraph-source-len, 0), ${layout.chars} - var(--epigraph-quote-len, ${layout.chars}) - 1)))`
+          : 'calc(var(--epigraph-source-len, 0) * -1em) 0'
+      };
     }
     .epigraph-page .epigraph-source,
     .epigraph-page .epigraph-line {
@@ -281,7 +305,7 @@ ${googleFontsLinks('Noto+Serif+JP:wght@400')}
       text-orientation: sideways;
       vertical-align: central;
     }
-${VERTICAL_GLYPH_CSS}
+${VERTICAL_GLYPH_CSS}${AOZORA_CSS}
     .title-page {
       display: flex;
       align-items: center;
@@ -440,9 +464,7 @@ function removeBlankPages(pdfDoc, titlePageIndex) {
       if (tjCount === 0) {
         pagesToRemove.push(i);
       }
-    } catch {
-      // 解析エラーはスキップ
-    }
+    } catch {}
   }
 
   for (let i = pagesToRemove.length - 1; i >= 0; i--) {
@@ -456,7 +478,6 @@ export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
 
   if (args.countOnly) {
-    // 原稿用紙換算の既定は 20字×20行（400字詰め）
     if (args.chars == null && args.lines == null) {
       args.chars = 20;
       args.lines = 20;
@@ -467,7 +488,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (!args.countOnly) requireOutput(args, 'output.pdf');
 
-  if (args.pages === null && argv.some(a => a === '--pages' || a.startsWith('--pages='))) {
+  if (args.pages === null && argv.some((a) => a === '--pages' || a.startsWith('--pages='))) {
     fail('--pages の指定が不正です（例: --pages 42 / 42-45 / 42,50,60-62）');
   }
 
@@ -485,22 +506,24 @@ export async function main(argv = process.argv.slice(2)) {
     args.parts = null;
 
     const targetChars = 20000;
-    const charCounts = inputFiles.map(f => countGenkoRows(readLines(f), args.chars || 30).chars);
+    const charCounts = inputFiles.map((f) => countGenkoRows(readLines(f), args.chars || 30).chars);
     const bestEnd = selectReviewBoundary(charCounts, targetChars);
     const slice = inputFiles.slice(0, bestEnd);
     const sliceChars = charCounts.slice(0, bestEnd).reduce((n, c) => n + c, 0);
-    console.log(`下読みモード: ${basename(inputFiles[0])} 〜 ${basename(inputFiles[bestEnd - 1])} (${slice.length}ファイル, ${sliceChars.toLocaleString()}字)`);
+    console.log(
+      `下読みモード: ${basename(inputFiles[0])} 〜 ${basename(inputFiles[bestEnd - 1])} (${slice.length}ファイル, ${sliceChars.toLocaleString()}字)`,
+    );
     inputFiles = slice;
   }
 
   if (args.parts && args.parts.length > 0) {
-    args.parts = resolvePartIndices(args.parts, inputFiles).map(i => i + 1);
-    const allParts = [1, ...args.parts.filter(p => p > 1)];
+    args.parts = resolvePartIndices(args.parts, inputFiles).map((i) => i + 1);
+    const allParts = [1, ...args.parts.filter((p) => p > 1)];
     console.log(`部の境界: ${allParts.map((p, i) => `第${i + 1}部=${basename(inputFiles[p - 1])}`).join(', ')}`);
   }
 
   if (args.countOnly) {
-    const counts = inputFiles.map(f => countGenkoRows(readLines(f), args.chars));
+    const counts = inputFiles.map((f) => countGenkoRows(readLines(f), args.chars));
     const totalLines = counts.reduce((n, c) => n + c.rows, 0);
     const totalChars = counts.reduce((n, c) => n + c.chars, 0);
     const pages = totalLines / args.lines;
@@ -512,14 +535,18 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
 
-  const synopsisPath = args.review || args.noSynopsis ? null : findSidecarFile(inputFiles, args.files, SYNOPSIS_FILENAME);
+  const synopsisPath =
+    args.review || args.noSynopsis ? null : findSidecarFile(inputFiles, args.files, SYNOPSIS_FILENAME);
   let synopsisHtml = null;
   let synopsisCharCount = 0;
   if (synopsisPath) {
-    const synopsisLines = readLines(synopsisPath).filter(l => l.trim() !== '');
+    const synopsisLines = readLines(synopsisPath).filter((l) => l.trim() !== '');
     synopsisCharCount = synopsisLines.reduce((sum, line) => {
       const html = escapeHtml(line, { vertical: args.vertical });
-      const text = html.replace(/<rt>.*?<\/rt>/g, '').replace(/<[^>]+>/g, '').replace(/[\s\u00A0]/g, '');
+      const text = html
+        .replace(/<rt>.*?<\/rt>/g, '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/[\s\u00A0]/g, '');
       return sum + [...text].length;
     }, 0);
     console.log(`梗概: ${basename(synopsisPath)}  （${synopsisCharCount.toLocaleString()}文字）`);
@@ -533,14 +560,16 @@ export async function main(argv = process.argv.slice(2)) {
     charactersHtml = parsePlainTextFile(charactersPath, args.vertical);
   }
 
-  const partFirstIndices = args.parts && args.parts.length > 0
-    ? args.parts.map(p => p - 1).filter(i => i > 0 && i < inputFiles.length)
-    : null;
+  const partFirstIndices =
+    args.parts && args.parts.length > 0
+      ? args.parts.map((p) => p - 1).filter((i) => i > 0 && i < inputFiles.length)
+      : null;
   const sections = parseWithSectionNumbering(inputFiles, parseTextFile, {
     vertical: args.vertical,
     chars: args.chars || 30,
     partFirstIndices,
     blankAfterHeading: args.blankAfterHeading,
+    sceneBreak: args.sceneBreak ?? SCENE_BREAK_MARK,
   });
   logSections(sections, inputFiles);
 
@@ -552,7 +581,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   const pdfDoc = await PDFDocument.load(pdfBuffer);
 
-  const titlePageIndex = (args.title && !args.coverless) ? 0 : -1;
+  const titlePageIndex = args.title && !args.coverless ? 0 : -1;
   const removedCount = removeBlankPages(pdfDoc, titlePageIndex);
   if (removedCount > 0) {
     console.log(`白紙ページを${removedCount}ページ除去しました`);
@@ -560,7 +589,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   const pageCount = pdfDoc.getPageCount();
 
-  // 前付ページ数を確定（前付のみレンダリングして実ページ数を取得）
+  // 前付の頁数は組んでみないと決まらないため、前付だけを別に組んで数える
   let frontMatterPages = 0;
   const hasCover = args.title && !args.coverless;
   const hasFrontMatter = hasCover || (synopsisHtml && !args.synopsisOnTitle) || charactersHtml;
@@ -571,17 +600,19 @@ export async function main(argv = process.argv.slice(2)) {
     const fmDoc = await PDFDocument.load(readFileSync(fmPdfPath));
     removeBlankPages(fmDoc, hasCover ? 0 : -1);
     frontMatterPages = fmDoc.getPageCount();
-    try { unlinkSync(fmHtmlPath); unlinkSync(fmPdfPath); } catch {}
+    try {
+      unlinkSync(fmHtmlPath);
+      unlinkSync(fmPdfPath);
+    } catch {}
     console.log(`前付ページ数: ${frontMatterPages}`);
   }
 
   for (let i = 0; i < pageCount; i++) {
     const page = pdfDoc.getPage(i);
     const { width } = page.getSize();
-    const pageNum = (i + 1) - frontMatterPages;
-    const text = pageNum <= 0
-      ? ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'][i] || `${i + 1}`
-      : `${pageNum}`;
+    const pageNum = i + 1 - frontMatterPages;
+    const text =
+      pageNum <= 0 ? ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'][i] || `${i + 1}` : `${pageNum}`;
     const fontSize = 10;
     const textWidth = fontSize * text.length * 0.5;
     page.drawText(text, {
@@ -592,13 +623,12 @@ export async function main(argv = process.argv.slice(2)) {
     });
   }
 
-  // --pages: ノンブルを振り切った後で、本文ノンブルが指定範囲に入らないページを削除する。
-  // ノンブルは全体版と同じ計算で描画済みなので、抜き出したページの番号は全体版と一致する（差し替え用）。
+  // 先に抜き出すとノンブルが全体版とずれて差し替えに使えないため、ノンブルを振り切ってから削除する
   let extractedBodyNums = null;
   if (args.pages) {
     const keep = [];
     for (let i = 0; i < pageCount; i++) {
-      const bodyNum = (i + 1) - frontMatterPages;
+      const bodyNum = i + 1 - frontMatterPages;
       if (bodyNum >= 1 && pageInRanges(bodyNum, args.pages)) keep.push(i);
     }
     if (keep.length === 0) fail('--pages の指定に該当する本文ページがありません');
@@ -606,7 +636,7 @@ export async function main(argv = process.argv.slice(2)) {
     for (let i = pageCount - 1; i >= 0; i--) {
       if (!keepSet.has(i)) pdfDoc.removePage(i);
     }
-    extractedBodyNums = keep.map(i => (i + 1) - frontMatterPages);
+    extractedBodyNums = keep.map((i) => i + 1 - frontMatterPages);
   }
 
   if (args.vertical) {
@@ -624,10 +654,12 @@ export async function main(argv = process.argv.slice(2)) {
   } else {
     const totalChars = sections.reduce((sum, s) => sum + countChars(s.html), 0);
     console.log(`文字数: ${totalChars.toLocaleString()}字`);
-    const chapterCount = sections.filter(s => s.hasViewpointStart).length;
+    const chapterCount = sections.filter((s) => s.hasViewpointStart).length;
     console.log(`章数: ${chapterCount}章`);
     if (frontMatterPages > 0) {
-      console.log(`枚数: タイトル・梗概 ${frontMatterPages}枚 ＋ 本文 ${pageCount - frontMatterPages}枚 ＝ 計${pageCount}枚`);
+      console.log(
+        `枚数: タイトル・梗概 ${frontMatterPages}枚 ＋ 本文 ${pageCount - frontMatterPages}枚 ＝ 計${pageCount}枚`,
+      );
     } else {
       console.log(`枚数: ${pageCount}枚`);
     }
@@ -641,14 +673,15 @@ export async function main(argv = process.argv.slice(2)) {
 runMain(import.meta.url, main);
 
 if (import.meta.vitest) {
-  const { describe, test, expect } = import.meta.vitest;
+  const { describe, test, expect, vi, afterEach } = import.meta.vitest;
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
 
   const makeSection = (overrides = {}) => ({
     html: '<p>本文</p>',
     hasViewpointStart: false,
-    hasViewpointEnd: false,
     hasEmptyViewpointStart: false,
-    pov: null,
     ...overrides,
   });
 
@@ -663,13 +696,9 @@ if (import.meta.vitest) {
     parts: null,
   };
 
-
   describe('generateHtml', () => {
     test('--part指定時: 部の境界は page-break part-section', () => {
-      const sections = [
-        makeSection({ html: '<p>1部1ファイル目</p>' }),
-        makeSection({ html: '<p>2部1ファイル目</p>' }),
-      ];
+      const sections = [makeSection({ html: '<p>1部1ファイル目</p>' }), makeSection({ html: '<p>2部1ファイル目</p>' })];
       const html = generateHtml(sections, { ...baseOptions, parts: [2] });
 
       const partSectionCount = (html.match(/page-break part-section/g) || []).length;
@@ -678,7 +707,7 @@ if (import.meta.vitest) {
       expect(html).toMatch(/<div class="section page-break part-section">\s*<p>2部1ファイル目<\/p>/);
     });
 
-    test('--part指定時: 同一part内かつアンカーなしのファイル境界には◇◇◇が前後空行付きで挿入される', () => {
+    test('--part指定時: 同一part内かつ見出しで始まらないファイルの境界には◇◇◇が前後空行付きで挿入される', () => {
       const sections = [
         makeSection({ html: '<p>1ファイル目</p>' }),
         makeSection({ html: '<p>2ファイル目</p>' }),
@@ -688,13 +717,17 @@ if (import.meta.vitest) {
 
       const separatorCount = (html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length;
       expect(separatorCount).toBe(2);
-      expect(html).toContain('<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>');
-      expect(html).toContain('<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>3ファイル目</p>');
+      expect(html).toContain(
+        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
+      );
+      expect(html).toContain(
+        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>3ファイル目</p>',
+      );
     });
 
-    test('--part指定時: 章アンカーがファイルを跨ぐ境界には◇◇◇は入らず、空行1つで連結', () => {
+    test('--part指定時: 見出しで始まるファイルの前には◇◇◇は入らず、空行1つで連結', () => {
       const sections = [
-        makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
+        makeSection({ html: '<p>1ファイル目</p>' }),
         makeSection({
           html: '<p class="viewpoint">【視点者】</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
           hasViewpointStart: true,
@@ -729,7 +762,9 @@ if (import.meta.vitest) {
       const html = generateHtml(sections, { ...baseOptions, parts: [1] });
 
       expect(html).toMatch(/<p class="empty">&nbsp;<\/p>\n<p>2ファイル目<\/p>/);
-      expect(html).not.toMatch(/<p class="separator">◇◇◇<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>/);
+      expect(html).not.toMatch(
+        /<p class="separator">◇◇◇<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>/,
+      );
     });
 
     test('--part未指定時: 視点切替で改ページ、それ以外は◇◇◇', () => {
@@ -748,10 +783,10 @@ if (import.meta.vitest) {
       expect(html).toMatch(/<div class="section page-break">\n<p class="viewpoint">【視点】<\/p>/);
     });
 
-    test('--part未指定時: 前ファイルが【】で終わると次ファイル先頭で改ページ', () => {
+    test('--part未指定時: 見出しで始まるファイルの先頭で改ページ', () => {
       const sections = [
-        makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
-        makeSection({ html: '<p>2ファイル目</p>' }),
+        makeSection({ html: '<p>1ファイル目</p>' }),
+        makeSection({ html: '<p>2ファイル目</p>', hasViewpointStart: true }),
       ];
       const html = generateHtml(sections, baseOptions);
 
@@ -760,13 +795,12 @@ if (import.meta.vitest) {
     });
 
     test('--part未指定時: ◇◇◇は前後空行付きで挿入される', () => {
-      const sections = [
-        makeSection({ html: '<p>1ファイル目</p>' }),
-        makeSection({ html: '<p>2ファイル目</p>' }),
-      ];
+      const sections = [makeSection({ html: '<p>1ファイル目</p>' }), makeSection({ html: '<p>2ファイル目</p>' })];
       const html = generateHtml(sections, baseOptions);
 
-      expect(html).toContain('<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>');
+      expect(html).toContain(
+        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
+      );
     });
 
     test('coverless: 最初のセクションの先頭（章頭/partの頭）の前に空行が入らない', () => {
@@ -783,15 +817,14 @@ if (import.meta.vitest) {
         author: '著者',
       });
 
-      expect(html).toMatch(/<p class="coverless-title">タイトル<\/p>\n<p class="coverless-author">著者<\/p>\n<p class="viewpoint">【視点】<\/p>/);
+      expect(html).toMatch(
+        /<p class="coverless-title">タイトル<\/p>\n<p class="coverless-author">著者<\/p>\n<p class="viewpoint">【視点】<\/p>/,
+      );
       expect(html).not.toMatch(/<p class="coverless-author">著者<\/p>\n<p class="empty">/);
     });
 
     test('coverless かつ --part指定時も最初のpart先頭の前に空行が入らない', () => {
-      const sections = [
-        makeSection({ html: '<p>1部本文</p>' }),
-        makeSection({ html: '<p>2部本文</p>' }),
-      ];
+      const sections = [makeSection({ html: '<p>1部本文</p>' }), makeSection({ html: '<p>2部本文</p>' })];
       const html = generateHtml(sections, {
         ...baseOptions,
         coverless: true,
@@ -814,11 +847,8 @@ if (import.meta.vitest) {
       ];
       const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
 
-      // 改ページ用のクラスは一切付かない
       expect(html.includes('<div class="section page-break')).toBe(false);
-      // 同一章内のファイル境界には◇◇◇
       expect((html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length).toBe(1);
-      // 章境界（視点切替）は空行1つで連結
       expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p class="viewpoint">【視点】<\/p>/);
     });
 
@@ -828,10 +858,10 @@ if (import.meta.vitest) {
       expect(html).toMatch(/<div class="section">\n<p>1ファイル目<\/p>/);
     });
 
-    test('--no-chapter-break: 前ファイルが【】で終わる章境界も空行1つで連結', () => {
+    test('--no-chapter-break: 章の境界も空行1つで連結', () => {
       const sections = [
-        makeSection({ html: '<p>1ファイル目</p>', hasViewpointEnd: true }),
-        makeSection({ html: '<p>2ファイル目</p>' }),
+        makeSection({ html: '<p>1ファイル目</p>' }),
+        makeSection({ html: '<p>2ファイル目</p>', hasViewpointStart: true }),
       ];
       const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
 
@@ -851,22 +881,18 @@ if (import.meta.vitest) {
     });
 
     test('targetを最初に超えた境界が最も近ければそこで止まる', () => {
-      // 累積: 5000, 12000, 21000 → target=20000 との差は |5000-20000|=15000, 8000, 1000
       expect(selectReviewBoundary([5000, 7000, 9000], 20000)).toBe(3);
     });
 
     test('targetを超える前の方がtargetに近ければ手前で止まる', () => {
-      // 累積: 19500, 30000 → 差は 500, 10000 → bestEndは1（19500の方が近い）
       expect(selectReviewBoundary([19500, 10500], 20000)).toBe(1);
     });
 
     test('累積がちょうど一致する境界を選ぶ', () => {
-      // 累積: 10000, 20000, 30000 → 差は 10000, 0, 10000 → bestEnd=2
       expect(selectReviewBoundary([10000, 10000, 10000], 20000)).toBe(2);
     });
 
     test('差が同じなら多く含む方（後ろ）を採用', () => {
-      // 累積: 15000, 25000 → 差は 5000, 5000 → <= で更新するので bestEnd=2
       expect(selectReviewBoundary([15000, 10000], 20000)).toBe(2);
     });
 
@@ -885,7 +911,11 @@ if (import.meta.vitest) {
     });
 
     test('parsePageSpec: カンマ区切り＋範囲の混在（空白も許容）', () => {
-      expect(parsePageSpec('42, 50, 60-62')).toEqual([[42, 42], [50, 50], [60, 62]]);
+      expect(parsePageSpec('42, 50, 60-62')).toEqual([
+        [42, 42],
+        [50, 50],
+        [60, 62],
+      ]);
     });
 
     test('parsePageSpec: 逆順の範囲は昇順に正規化', () => {
@@ -900,11 +930,194 @@ if (import.meta.vitest) {
     });
 
     test('pageInRanges: 範囲内外を判定', () => {
-      const ranges = [[42, 42], [50, 50], [60, 62]];
+      const ranges = [
+        [42, 42],
+        [50, 50],
+        [60, 62],
+      ];
       expect(pageInRanges(42, ranges)).toBe(true);
       expect(pageInRanges(61, ranges)).toBe(true);
       expect(pageInRanges(43, ranges)).toBe(false);
       expect(pageInRanges(63, ranges)).toBe(false);
+    });
+  });
+
+  describe('parseArgs', () => {
+    test('既定では改ページ・章ごとの改ページ・縦書きが有効', () => {
+      const args = parseArgs(['a.txt']);
+      expect(args).toMatchObject({ pageBreak: true, chapterBreak: true, vertical: true, chars: null, lines: null });
+      expect(args.files).toEqual(['a.txt']);
+    });
+
+    test('--no-page-break / --no-chapter-break / --horizontal で無効化する', () => {
+      const args = parseArgs(['--no-page-break', '--no-chapter-break', '--horizontal']);
+      expect(args).toMatchObject({ pageBreak: false, chapterBreak: false, vertical: false });
+    });
+
+    test('--size WxH は1行の字数と行数になる', () => {
+      expect(parseArgs(['--size', '40x30'])).toMatchObject({ chars: 40, lines: 30 });
+    });
+
+    test('--chars は字数だけを決め、--size があればそちらが優先', () => {
+      expect(parseArgs(['--chars', '25'])).toMatchObject({ chars: 25, lines: null });
+      expect(parseArgs(['--chars', '25', '--size', '40x30'])).toMatchObject({ chars: 40, lines: 30 });
+    });
+
+    test('値付きの指定を読み取る', () => {
+      const args = parseArgs([
+        '-o',
+        'out.pdf',
+        '--title',
+        '題',
+        '--author',
+        '著者',
+        '--limit',
+        '3',
+        '--part',
+        '060,085',
+        '--pages',
+        '42,50-53',
+        '--scene-break',
+        '＊',
+      ]);
+      expect(args).toMatchObject({
+        output: 'out.pdf',
+        title: '題',
+        author: '著者',
+        limit: 3,
+        parts: ['060', '085'],
+        pages: [
+          [42, 42],
+          [50, 53],
+        ],
+        sceneBreak: '＊',
+      });
+    });
+
+    test('真偽の指定を読み取る', () => {
+      const flags = {
+        '--synopsis-on-title': 'synopsisOnTitle',
+        '--no-synopsis': 'noSynopsis',
+        '--coverless': 'coverless',
+        '--open': 'open',
+        '--count-only': 'countOnly',
+        '--review': 'review',
+        '--blank-after-heading': 'blankAfterHeading',
+      };
+      const none = parseArgs([]);
+      const all = parseArgs(Object.keys(flags));
+      for (const key of Object.values(flags)) {
+        expect(none[key]).toBe(false);
+        expect(all[key]).toBe(true);
+      }
+    });
+
+    test('--pages の不正な指定は null になる', () => {
+      expect(parseArgs(['--pages', 'abc']).pages).toBeNull();
+    });
+  });
+
+  describe('generateHtml: 組版の指定', () => {
+    const one = [makeSection()];
+
+    test('縦書きは vertical-rl、--horizontal は horizontal-tb', () => {
+      expect(generateHtml(one, baseOptions)).toContain('writing-mode: vertical-rl;');
+      expect(generateHtml(one, { ...baseOptions, vertical: false })).toContain('writing-mode: horizontal-tb;');
+    });
+
+    test('字数だけの指定では行送りは字送りの1.125倍', () => {
+      expect(generateHtml(one, { ...baseOptions, chars: 30, lines: null })).toContain('line-height: 1.125;');
+    });
+
+    test('行数も指定すると行送りは行数から決まる', () => {
+      const html = generateHtml(one, { ...baseOptions, chars: 30, lines: 40 });
+      const fontSizeMm = 165 / 30;
+      expect(html).toContain(`line-height: ${257 / 40 / fontSizeMm};`);
+      expect(html).toContain('height: 30em;');
+    });
+
+    test('--scene-break の記号をファイルの継ぎ目に組む', () => {
+      const html = generateHtml([makeSection(), makeSection()], { ...baseOptions, sceneBreak: '＊' });
+      expect(html).toContain('<p class="separator">＊</p>');
+      expect(html.includes('◇◇◇')).toBe(false);
+    });
+  });
+
+  describe('generateHtml: 前付', () => {
+    test('タイトルがあれば表紙を作り、梗概は別ページに組む', () => {
+      const html = generateHtml([], { ...baseOptions, title: '題', author: '著者' }, '<p>あらすじ</p>');
+      expect(html).toContain('<div class="title-page"><h1>題</h1><p class="author">著者</p></div>');
+      expect(html).toContain(
+        '<div class="synopsis-page"><h2 class="synopsis-heading">梗概</h2>\n<p>あらすじ</p></div>',
+      );
+    });
+
+    test('--synopsis-on-title では梗概を表紙に載せる', () => {
+      const html = generateHtml([], { ...baseOptions, title: '題', synopsisOnTitle: true }, '<p>あらすじ</p>');
+      expect(html).toContain(
+        '<div class="title-page with-synopsis"><h1>題</h1><p class="empty">&nbsp;</p>\n<p>あらすじ</p>',
+      );
+      expect(html.includes('class="synopsis-page"')).toBe(false);
+    });
+
+    test('--coverless では表紙を作らず、梗概の頭にタイトル・著者名を置く', () => {
+      const html = generateHtml(
+        [],
+        { ...baseOptions, coverless: true, title: '題', author: '著者' },
+        '<p>あらすじ</p>',
+      );
+      expect(html.includes('class="title-page')).toBe(false);
+      expect(html).toContain(
+        '<div class="synopsis-page"><p class="coverless-title">題</p>\n<p class="coverless-author">著者</p>\n<p class="empty">&nbsp;</p>\n<p>あらすじ</p></div>',
+      );
+    });
+
+    test('人物紹介は登場人物の見出しを付けて別ページに組む', () => {
+      const html = generateHtml([], baseOptions, null, 0, '<p>太郎</p>');
+      expect(html).toContain(
+        '<div class="characters-page"><h2 class="characters-heading">登場人物</h2>\n<p>太郎</p>\n</div>',
+      );
+    });
+  });
+
+  describe('main --count-only', () => {
+    let dir;
+    let logs;
+
+    const setup = (files) => {
+      dir = mkdtempSync(join(tmpdir(), 'novel-pdf-test-'));
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+      logs = [];
+      vi.spyOn(console, 'log').mockImplementation((...a) => logs.push(a.join(' ')));
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      if (dir) rmSync(dir, { recursive: true, force: true });
+      dir = null;
+    });
+
+    test('--size 未指定なら 20字×20行（400字詰め）で数え、PDF は作らない', async () => {
+      setup({ '01.txt': `${'あ'.repeat(30)}\n` });
+      await main(['--count-only', dir]);
+      expect(logs).toContain('\n原稿用紙換算 (20字×20行)');
+      expect(logs).toContain('文字数: 30字');
+      expect(logs).toContain('行数: 2行');
+      expect(logs).toContain('枚数: 0.10枚 (切上 1枚)');
+    });
+
+    test('--size の字詰めで数える', async () => {
+      setup({ '01.txt': `${'あ'.repeat(30)}\n` });
+      await main(['--count-only', '--size', '40x10', dir]);
+      expect(logs).toContain('\n原稿用紙換算 (40字×10行)');
+      expect(logs).toContain('行数: 1行');
+    });
+
+    test('--limit で先頭から n 個のファイルだけを数える', async () => {
+      setup({ '01.txt': 'あ\n', '02.txt': 'いい\n' });
+      await main(['--count-only', '--limit', '1', dir]);
+      expect(logs).toContain('入力ファイル: 1件');
+      expect(logs).toContain('文字数: 1字');
     });
   });
 }

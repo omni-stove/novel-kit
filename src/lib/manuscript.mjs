@@ -4,36 +4,44 @@
  * 1ファイル内のテキスト解釈は text-parser.mjs。
  */
 
-import { readdirSync, statSync, existsSync } from 'fs';
-import { basename, dirname, join } from 'path';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { aozoraBodyText } from './aozora.mjs';
 import { fail } from './cli.mjs';
+import { countWrappedRows } from './grid.mjs';
 import {
-  readLines,
-  getFilteredLines,
+  countChars,
   fileHasViewpointStart,
+  getFilteredLines,
   isEpigraphLine,
   isMetaLine,
   isSeparator,
   isViewpointLine,
+  readLines,
+  SCENE_BREAK_MARK,
   stripInlineMarkup,
   trimBlankEdges,
-  countChars,
 } from './text-parser.mjs';
-import { countWrappedRows } from './grid.mjs';
 
 export const SYNOPSIS_FILENAME = 'synopsis.txt';
 export const CHARACTERS_FILENAME = 'characters.txt';
 
-export const FILE_SEPARATOR_MARK = '◇◇◇';
-export const FILE_SEPARATOR_LINES = ['', FILE_SEPARATOR_MARK, ''];
+/** 章の途中で切れたファイルの継ぎ目に挟む行。場面区切りと同じ記号（既定は SCENE_BREAK_MARK）を空行で挟む。 */
+export const fileSeparatorLines = (sceneBreak = SCENE_BREAK_MARK) => ['', sceneBreak, ''];
 
-// 視点行で始まらなくても、前のファイルが末尾の【】（次章のアンカー）で終わっていれば章の頭になる
+/**
+ * files[i] から新しい章が始まるか。先頭ファイルと、【】の見出しで始まるファイル（hasViewpointStart）が新しい章になる。
+ * 見出しで始まらないファイルは前の章の続き。
+ */
 export function startsNewChapter(files, i) {
-  return i === 0 || files[i].hasViewpointStart || files[i - 1].hasViewpointEnd;
+  return i === 0 || files[i].hasViewpointStart;
 }
 
-// 原稿では Epigraph: 行が【】より前に書かれるが、紙面では章見出しの後ろに置く。
-// 見出しが来ないまま本文が始まるファイルでは本文の前に置く
+/**
+ * 原稿では Epigraph: 行が【】より前に書かれるが、紙面では章見出しの後ろに置くため並べ替える。
+ * 見出しが来ないまま本文が始まるファイルでは本文の前に置く。
+ * blankAfter: 見出しの後ろへ移したエピグラフの直後に、続く行が空行でなければ空行を1つ補う。
+ */
 export function moveEpigraphsAfterHeading(lines, { blankAfter = false } = {}) {
   const out = [];
   let pending = [];
@@ -62,13 +70,13 @@ export function moveEpigraphsAfterHeading(lines, { blankAfter = false } = {}) {
 
 export function getTextFilesFromDir(dirPath, excludeFiles = [SYNOPSIS_FILENAME]) {
   return readdirSync(dirPath)
-    .filter(f => f.endsWith('.txt') && !excludeFiles.includes(f))
+    .filter((f) => f.endsWith('.txt') && !excludeFiles.includes(f))
     .sort((a, b) => {
       const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10);
       const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10);
       return numA - numB;
     })
-    .map(f => join(dirPath, f));
+    .map((f) => join(dirPath, f));
 }
 
 export function collectInputFiles(paths, excludeFiles = undefined) {
@@ -93,13 +101,13 @@ export function requireInputFiles(paths, excludeFiles = undefined) {
 export function resolvePartIndices(tokens, filePaths) {
   const resolved = [];
   for (const tok of tokens) {
-    const idxByPrefix = filePaths.findIndex(f => basename(f).match(/^\d+/)?.[0] === tok);
+    const idxByPrefix = filePaths.findIndex((f) => basename(f).match(/^\d+/)?.[0] === tok);
     if (idxByPrefix >= 0) {
       resolved.push(idxByPrefix);
       continue;
     }
     const asInt = parseInt(tok, 10);
-    if (!isNaN(asInt) && asInt >= 1 && asInt <= filePaths.length) {
+    if (!Number.isNaN(asInt) && asInt >= 1 && asInt <= filePaths.length) {
       resolved.push(asInt - 1);
       continue;
     }
@@ -115,7 +123,9 @@ export function findSidecarFile(inputFiles, inputPaths, filename) {
         const sidecarPath = join(p, filename);
         if (existsSync(sidecarPath)) return sidecarPath;
       }
-    } catch { /* ignore */ }
+    } catch {
+      // 読めないパスは、後段の入力ファイル基準の探索に任せる
+    }
   }
   if (inputFiles.length > 0) {
     const sidecarPath = join(dirname(inputFiles[0]), filename);
@@ -125,14 +135,14 @@ export function findSidecarFile(inputFiles, inputPaths, filename) {
 }
 
 export function loadSynopsisLines(filePath) {
-  return trimBlankEdges(readLines(filePath).filter(l => !isMetaLine(l) && !isViewpointLine(l)));
+  return trimBlankEdges(readLines(filePath).filter((l) => !isMetaLine(l) && !isViewpointLine(l)));
 }
 
 // PDF・EPUB・規定チェックで章番号が食い違わないよう、採番はここだけで行う
 export function computeSectionLabels(filePaths, partFirstIndices = null) {
   const resetSet = partFirstIndices ? new Set(partFirstIndices) : null;
 
-  // 部ごとの章数を事前集計する（採番ラベルは章数が確定してからでないと決められない）
+  // 部の章数が確定しないとラベル（「部」か「部-章」か）を決められないため、先に集計する
   let partSectionCounts = null;
   if (resetSet) {
     partSectionCounts = [];
@@ -155,7 +165,9 @@ export function computeSectionLabels(filePaths, partFirstIndices = null) {
       sectionNumber = 1;
     }
     const sectionLabel = resetSet
-      ? (partSectionCounts[partNumber - 1] === 1 ? String(partNumber) : `${partNumber}-${sectionNumber}`)
+      ? partSectionCounts[partNumber - 1] === 1
+        ? String(partNumber)
+        : `${partNumber}-${sectionNumber}`
       : String(sectionNumber);
     if (fileHasViewpointStart(filePath)) sectionNumber++;
     return sectionLabel;
@@ -165,22 +177,25 @@ export function computeSectionLabels(filePaths, partFirstIndices = null) {
 export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
   const { partFirstIndices = null, ...restOptions } = options;
   const labels = computeSectionLabels(filePaths, partFirstIndices);
-  return filePaths.map((filePath, idx) =>
-    parseFn(filePath, { ...restOptions, sectionNumber: labels[idx] })
-  );
+  return filePaths.map((filePath, idx) => parseFn(filePath, { ...restOptions, sectionNumber: labels[idx] }));
 }
 
-// 原稿用紙換算（cols字詰めで何行・何字か）。印刷時の改ページや挿入行は含めない連続換算で、
-// 出力実態に合わせた枚数は check-manuscript-format が数える
+/**
+ * 原稿用紙換算（cols字詰めで何行・何字か）を { rows, chars } で返す。
+ * メタ行、前後の余白行、場面区切りの行は数えない。視点行【】は章タイトルとして1行と数え、【】内は字数に含めない。
+ * 青空文庫の改ページ・字下げ範囲の注記行は数えず、行内の注記は除いて数える。
+ * 印刷時の改ページや挿入行は含めない連続換算で、出力実態に合わせた枚数は check-manuscript-format が数える。
+ */
 export function countGenkoRows(lines, cols) {
   let rows = 0;
   let chars = 0;
 
-  // 末尾の改行が生む空要素や、メタ行と本文の間・前後の余白行は枚数に含めない
-  for (const rawLine of trimBlankEdges(lines.filter(l => !isMetaLine(l)))) {
+  const bodyLines = trimBlankEdges(lines.filter((l) => !isMetaLine(l)))
+    .map(aozoraBodyText)
+    .filter((l) => l !== null);
+  for (const rawLine of bodyLines) {
     if (isSeparator(rawLine)) continue;
 
-    // 視点行【】は章タイトルとして1行扱い
     if (isViewpointLine(rawLine)) {
       rows++;
       chars += [...stripInlineMarkup(rawLine.replace(/^【.*?】/, ''))].length;
@@ -203,27 +218,37 @@ export function logSections(sections, inputFiles) {
     const chars = countChars(content);
     totalChars += chars;
     sectionChars += chars;
+    const endsChapter = i === inputFiles.length - 1 || startsNewChapter(sections, i + 1);
     const startMarker = sections[i].hasViewpointStart ? '\u{1F4D6}' : '  ';
-    const endMarker = sections[i].hasViewpointEnd ? '\u{1F4D5}' : '  ';
-    const sectionTotal = sections[i].hasViewpointEnd ? `  計${sectionChars.toLocaleString()}字` : '';
-    console.log(`${startMarker}${endMarker} 処理中: ${basename(inputFiles[i])} (${chars.toLocaleString()}字)${sectionTotal}`);
-    if (sections[i].hasViewpointEnd) sectionChars = 0;
+    const endMarker = endsChapter ? '\u{1F4D5}' : '  ';
+    const sectionTotal = endsChapter ? `  計${sectionChars.toLocaleString()}字` : '';
+    console.log(
+      `${startMarker}${endMarker} 処理中: ${basename(inputFiles[i])} (${chars.toLocaleString()}字)${sectionTotal}`,
+    );
+    if (endsChapter) sectionChars = 0;
   }
   return totalChars;
 }
 
-// 応募用テンプレート（docx/docm）へ流し込む1本の行列
-// blankAfterHeading: 視点行（章見出し）の直後に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）
-export function mergeManuscriptLines(filePaths, { keepEpigraphs = false, blankAfterHeading = false } = {}) {
+/**
+ * 複数の原稿ファイルを1本の行配列にマージする。【】の見出しは通し番号【1】【2】…に置き換え、
+ * 見出しで始まらない継続ファイルの前には fileSeparatorLines(sceneBreak) を挟む。エピグラフは見出しの後ろへ移す。
+ * keepEpigraphs: Epigraph: 行を残す（既定は除く）。
+ * blankAfterHeading: 視点行（章見出し）の直後に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）。
+ */
+export function mergeManuscriptLines(
+  filePaths,
+  { keepEpigraphs = false, blankAfterHeading = false, sceneBreak = SCENE_BREAK_MARK } = {},
+) {
   const allLines = [];
   let sectionNumber = 1;
 
   for (let i = 0; i < filePaths.length; i++) {
     const { lines, hasViewpointStart } = getFilteredLines(filePaths[i], { keepEpigraphs });
-    // マージ時に区切り字の前後へ余計なスペースが入るのを防ぐ
+    // 前後の空行を残すと、ファイルの継ぎ目で区切り記号の前後に空行が重なる
     const bodyLines = trimBlankEdges(moveEpigraphsAfterHeading(lines));
 
-    if (i > 0 && !hasViewpointStart) allLines.push(...FILE_SEPARATOR_LINES);
+    if (i > 0 && !hasViewpointStart) allLines.push(...fileSeparatorLines(sceneBreak));
 
     bodyLines.forEach((line, j) => {
       if (!isViewpointLine(line)) {
@@ -247,13 +272,15 @@ export function mergeManuscriptLines(filePaths, { keepEpigraphs = false, blankAf
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
-  const { writeFileSync, unlinkSync, mkdtempSync, rmSync } = await import('fs');
-  const { tmpdir } = await import('os');
+  const { writeFileSync, unlinkSync, mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
   const { parseTextFile } = await import('./text-parser.mjs');
 
   const makeTmpFiles = (contents) => {
     const paths = contents.map((_, i) => join(tmpdir(), `ms-${process.pid}-${Date.now()}-${i}.txt`));
-    paths.forEach((p, i) => writeFileSync(p, contents[i]));
+    paths.forEach((p, i) => {
+      writeFileSync(p, contents[i]);
+    });
     return paths;
   };
   const withTmpFiles = (contents, fn) => {
@@ -261,7 +288,7 @@ if (import.meta.vitest) {
     try {
       return fn(paths);
     } finally {
-      paths.forEach(p => unlinkSync(p));
+      for (const p of paths) unlinkSync(p);
     }
   };
 
@@ -289,7 +316,6 @@ if (import.meta.vitest) {
     });
 
     test('視点行を持たない継続ファイルは章数に数えない', () => {
-      // 2部目は「視点行あり＋継続ファイル」の2ファイル構成だが章は1つ → 【2】
       withTmpFiles(['【】\n本文\n', '【】\n本文\n', '続きの本文\n'], (paths) => {
         const sections = parseWithSectionNumbering(paths, parseTextFile, {
           vertical: false,
@@ -307,7 +333,6 @@ if (import.meta.vitest) {
         expect(sections[1].html).toContain('【2】');
       });
     });
-
   });
 
   describe('computeSectionLabels', () => {
@@ -322,7 +347,7 @@ if (import.meta.vitest) {
     const withDir = (names, fn) => {
       const dir = mkdtempSync(join(tmpdir(), 'ms-dir-'));
       try {
-        names.forEach(name => writeFileSync(join(dir, name), ''));
+        for (const name of names) writeFileSync(join(dir, name), '');
         return fn(dir);
       } finally {
         rmSync(dir, { recursive: true });
@@ -331,18 +356,25 @@ if (import.meta.vitest) {
 
     test('txtだけをファイル名の数値順に並べ、synopsis.txt は除く', () => {
       withDir(['100.txt', '20.txt', '3.txt', 'synopsis.txt', 'memo.md'], (dir) => {
-        expect(getTextFilesFromDir(dir).map(f => basename(f))).toEqual(['3.txt', '20.txt', '100.txt']);
+        expect(getTextFilesFromDir(dir).map((f) => basename(f))).toEqual(['3.txt', '20.txt', '100.txt']);
       });
     });
     test('除外ファイルは呼び出し側で差し替えられる（数字のないファイル名は先頭に来る）', () => {
       withDir(['010.txt', 'characters.txt', 'synopsis.txt'], (dir) => {
-        expect(getTextFilesFromDir(dir, [CHARACTERS_FILENAME]).map(f => basename(f))).toEqual(['synopsis.txt', '010.txt']);
+        expect(getTextFilesFromDir(dir, [CHARACTERS_FILENAME]).map((f) => basename(f))).toEqual([
+          'synopsis.txt',
+          '010.txt',
+        ]);
       });
     });
     test('ディレクトリは中のtxtに展開し、ファイル指定は除外対象でもそのまま通す', () => {
       withDir(['010.txt', '020.txt', 'synopsis.txt'], (dir) => {
         const explicit = join(dir, 'synopsis.txt');
-        expect(collectInputFiles([explicit, dir]).map(f => basename(f))).toEqual(['synopsis.txt', '010.txt', '020.txt']);
+        expect(collectInputFiles([explicit, dir]).map((f) => basename(f))).toEqual([
+          'synopsis.txt',
+          '010.txt',
+          '020.txt',
+        ]);
       });
     });
   });
@@ -388,38 +420,72 @@ if (import.meta.vitest) {
       expect(countGenkoRows([`|漢字《かんじ》${'あ'.repeat(18)}。`], 20)).toEqual({ rows: 1, chars: 21 });
       expect(countGenkoRows(['あ'.repeat(21)], 20)).toEqual({ rows: 2, chars: 21 });
     });
+    test('青空文庫の改ページ・字下げ範囲の注記行は数えず、行内の注記は除いて数える', () => {
+      expect(
+        countGenkoRows(
+          ['本文', '［＃改ページ］', '［＃ここから２字下げ］', '中［＃「中」に傍点］', '［＃ここで字下げ終わり］'],
+          20,
+        ),
+      ).toEqual({ rows: 2, chars: 3 });
+    });
+  });
+
+  describe('fileSeparatorLines', () => {
+    test('場面区切りの記号を空行で挟む', () => {
+      expect(fileSeparatorLines()).toEqual(['', '◇◇◇', '']);
+      expect(fileSeparatorLines('＊')).toEqual(['', '＊', '']);
+    });
   });
 
   describe('startsNewChapter', () => {
-    test('先頭ファイル・視点行で始まるファイル・前のファイルが【】で終わるファイルが章の頭', () => {
-      const files = [
-        { hasViewpointStart: false, hasViewpointEnd: false },
-        { hasViewpointStart: false, hasViewpointEnd: true },
-        { hasViewpointStart: false, hasViewpointEnd: false },
-        { hasViewpointStart: true, hasViewpointEnd: false },
-      ];
-      expect(files.map((_, i) => startsNewChapter(files, i))).toEqual([true, false, true, true]);
+    test('先頭ファイルと、【】の見出しで始まるファイルが章の頭', () => {
+      const files = [{ hasViewpointStart: false }, { hasViewpointStart: false }, { hasViewpointStart: true }];
+      expect(files.map((_, i) => startsNewChapter(files, i))).toEqual([true, false, true]);
     });
   });
 
   describe('moveEpigraphsAfterHeading', () => {
     test('【】より前に書かれたエピグラフを見出しの直後へ移す', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', 'Epigraph: 二', '', '【】', '本文']))
-        .toEqual(['', '【】', 'Epigraph: 一', 'Epigraph: 二', '本文']);
+      expect(moveEpigraphsAfterHeading(['Epigraph: 一', 'Epigraph: 二', '', '【】', '本文'])).toEqual([
+        '',
+        '【】',
+        'Epigraph: 一',
+        'Epigraph: 二',
+        '本文',
+      ]);
     });
     test('見出しが来ないまま本文が始まるなら本文の前に置く', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '', '続き', '【】', '本文']))
-        .toEqual(['', 'Epigraph: 一', '続き', '【】', '本文']);
+      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '', '続き', '【】', '本文'])).toEqual([
+        '',
+        'Epigraph: 一',
+        '続き',
+        '【】',
+        '本文',
+      ]);
     });
     test('blankAfter: 見出しの直後へ移したエピグラフと本文の間に空行を補う（原稿側にあれば補わない）', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '本文'], { blankAfter: true }))
-        .toEqual(['【】', 'Epigraph: 一', '', '本文']);
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '', '本文'], { blankAfter: true }))
-        .toEqual(['【】', 'Epigraph: 一', '', '本文']);
+      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '本文'], { blankAfter: true })).toEqual([
+        '【】',
+        'Epigraph: 一',
+        '',
+        '本文',
+      ]);
+      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '', '本文'], { blankAfter: true })).toEqual([
+        '【】',
+        'Epigraph: 一',
+        '',
+        '本文',
+      ]);
     });
     test('複数の章を含む行列では、それぞれ直後の見出しへ移す', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '本文', 'Epigraph: 二', '【】', '本文']))
-        .toEqual(['【】', 'Epigraph: 一', '本文', '【】', 'Epigraph: 二', '本文']);
+      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '本文', 'Epigraph: 二', '【】', '本文'])).toEqual([
+        '【】',
+        'Epigraph: 一',
+        '本文',
+        '【】',
+        'Epigraph: 二',
+        '本文',
+      ]);
     });
     test('本文のないファイルでもエピグラフは捨てない', () => {
       expect(moveEpigraphsAfterHeading(['Epigraph: 一', ''])).toEqual(['', 'Epigraph: 一']);
@@ -428,21 +494,20 @@ if (import.meta.vitest) {
 
   describe('mergeManuscriptLines', () => {
     test('空の【】を採番し、視点行なしのファイル前に◇◇◇を挟む（視点行の直後に空行は補わない）', () => {
-      withTmpFiles(['【】\n本文一\n\n', '\n続き\n', 'POV: A\n【夜】\n本文二\n【】\n'], (paths) => {
-        expect(mergeManuscriptLines(paths)).toEqual([
-          '【1】', '本文一',
-          '', '◇◇◇', '',
-          '続き',
-          '【夜】', '本文二',
-        ]);
+      withTmpFiles(['【】\n本文一\n\n', '\n続き\n', 'Memo: A\n【夜】\n本文二\n'], (paths) => {
+        expect(mergeManuscriptLines(paths)).toEqual(['【1】', '本文一', '', '◇◇◇', '', '続き', '【夜】', '本文二']);
       });
     });
 
     test('blankAfterHeading: 視点行の直後に空行を1行補い、原稿側にあれば二重にしない', () => {
       withTmpFiles(['【】\n本文一\n', '【】\n\n本文二\n'], (paths) => {
         expect(mergeManuscriptLines(paths, { blankAfterHeading: true })).toEqual([
-          '【1】', '', '本文一',
-          '【2】', '', '本文二',
+          '【1】',
+          '',
+          '本文一',
+          '【2】',
+          '',
+          '本文二',
         ]);
       });
     });
@@ -450,18 +515,23 @@ if (import.meta.vitest) {
     test('keepEpigraphs: エピグラフを章見出しの直後へ移し、見出しがなければ本文の前に置く', () => {
       withTmpFiles(['Epigraph: 引用——出典\n【】\n本文\n', 'Epigraph: 二\n\n続き\n'], (paths) => {
         expect(mergeManuscriptLines(paths, { keepEpigraphs: true })).toEqual([
-          '【1】', 'Epigraph: 引用——出典', '本文',
-          '', '◇◇◇', '',
-          'Epigraph: 二', '続き',
-        ]);
-        expect(mergeManuscriptLines(paths)).toEqual([
-          '【1】', '本文',
-          '', '◇◇◇', '',
+          '【1】',
+          'Epigraph: 引用——出典',
+          '本文',
+          '',
+          '◇◇◇',
+          '',
+          'Epigraph: 二',
           '続き',
         ]);
+        expect(mergeManuscriptLines(paths)).toEqual(['【1】', '本文', '', '◇◇◇', '', '続き']);
         expect(mergeManuscriptLines(paths, { blankAfterHeading: true })).toEqual([
-          '【1】', '', '本文',
-          '', '◇◇◇', '',
+          '【1】',
+          '',
+          '本文',
+          '',
+          '◇◇◇',
+          '',
           '続き',
         ]);
       });

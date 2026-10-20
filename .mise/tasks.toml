@@ -1,0 +1,47 @@
+[install]
+description = "Install the repo's dependencies"
+run = "pnpm install --frozen-lockfile"
+
+[setup]
+description = "Install dependencies and skill-kit, then sync (run by make setup)"
+depends = ["install"]
+run = [
+  "gh api repos/omni-stove/skill-kit/contents/install.sh -q .content | base64 -d | sh",
+  "skill-kit code sync",
+]
+
+[update]
+description = "Pull skill-kit and re-sync this repo"
+run = "skill-kit code update"
+
+[test]
+description = "Run the vitest suite once (engine, CLI and VS Code extension)"
+run = "pnpm run test"
+
+[test-watch]
+description = "Run vitest in watch mode"
+run = "pnpm run test-watch"
+
+[ext-build]
+description = "Bundle the VS Code extension into vscode/dist"
+run = "pnpm --dir vscode run build"
+
+[ext-package]
+description = "Build the VS Code extension and pack it as vscode/dist/novel-preview.vsix"
+run = "pnpm --dir vscode run package"
+
+[ext-install]
+description = "Pack the VS Code extension and install it into the local VS Code"
+run = "pnpm --dir vscode run install-extension"
+
+[ext-publish]
+description = "Build the VS Code extension and publish it to the Marketplace"
+run = "pnpm --dir vscode run publish"
+
+[lint]
+description = "Check lint, formatting and import order with Biome"
+run = "biome check ."
+
+[format]
+description = "Apply Biome's safe fixes and formatting"
+run = "biome check --write ."

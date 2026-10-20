@@ -1,52 +1,52 @@
 /**
  * 原稿テキスト（1ファイル分）の解釈。
- * 行の種別判定、インライン記法（ルビ・傍点・横倒し・イタリック）、
+ * 行の種別判定、インライン記法（ルビ・傍点・横倒し・イタリック。青空文庫の注記は aozora.mjs で読み替える）、
  * 縦書きHTMLへの変換、エピグラフの整形など、テキストそのものに関する処理を置く。
  * 複数ファイルの集合や採番・ディレクトリ走査は manuscript.mjs。
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync } from 'node:fs';
+import { BOLD_CLOSE, BOLD_OPEN, normalizeAozoraInline, parseAozoraLine, TCY_CLOSE, TCY_OPEN } from './aozora.mjs';
 
+/**
+ * 場面区切りの行か。原稿では * だけの行（* / *** / * * *。全角の ＊ も可）で書き、出力ごとの記号に変える
+ * （既定は日本語が SCENE_BREAK_MARK、英語のペーパーバックが * * *、Shunn 形式が #。
+ * 作品ごとに novel.json の sceneBreak / english.sceneBreak で変えられ、CLI には --scene-break で渡す）。
+ */
+export function isSceneBreak(line) {
+  return /^[*＊]([ 　]*[*＊])*$/.test(line.trim());
+}
+
+/** 日本語の出力での場面区切りの既定。章の途中で切れたファイルの継ぎ目にも使う */
+export const SCENE_BREAK_MARK = '◇◇◇';
+
+/**
+ * 区切りの行か。場面区切り（*）のほか、記号だけの行（◇◇◇・■■■・※・>>> など）は
+ * 書いた記号のまま、どの出力でも中央に置く飾りの区切りになる。
+ */
 export function isSeparator(line) {
-  return /^[◇◆□■○●◎※＊*]+$/.test(line);
+  return isSceneBreak(line) || /^[◇◆□■○●◎※>＞]+$/.test(line.trim());
+}
+
+/** 区切りの行を紙面に出す記号にする。sceneBreakMark は出力ごとの場面区切りの記号 */
+export function separatorMark(line, sceneBreakMark = SCENE_BREAK_MARK) {
+  return isSceneBreak(line) ? sceneBreakMark : line.trim();
 }
 
 export function isMemoLine(line) {
   return line.startsWith('Memo:');
 }
 
-// /write が出力先の先頭に書く元ファイル（プロット等）への参照行
-export function isSourceLine(line) {
-  return line.startsWith('Source:');
-}
-
-export function isTitleLine(line) {
-  return line.startsWith('Title:');
-}
-
-export function isGenreLine(line) {
-  return line.startsWith('Genre:');
-}
-
 export function isEpigraphLine(line) {
   return line.startsWith('Epigraph:');
 }
 
-export function isPovLine(line) {
-  return line.startsWith('POV:');
-}
-
-export function parsePovLine(line) {
-  return line.replace(/^POV:\s*/, '').trim();
-}
-
 export function parseEpigraphLine(line) {
-  const text = line.replace(/^Epigraph:\s*/, '');
+  const text = normalizeAozoraInline(line.replace(/^Epigraph:\s*/, ''));
   // 引用本文の中にもダッシュ（——）が使われうるため、最後の——を引用元との区切りとする
   const idx = text.lastIndexOf('——');
   if (idx === -1) return { quote: text.trim(), source: null };
   const source = text.slice(idx + 2).trim();
-  // ——の後が空なら引用元なし（末尾のダッシュは引用本文の一部として残す）
   if (!source) return { quote: text.trim(), source: null };
   return { quote: text.slice(0, idx).trim(), source };
 }
@@ -55,7 +55,7 @@ export function isViewpointLine(line) {
   return /^【.*】/.test(line);
 }
 
-// 【章題】の後ろに本文が続く書き方（英語原稿など）があるため、見出しと残りに分ける
+/** 【章題】の後ろに本文が続く書き方（英語原稿など）があるため、見出し（title）と残り（rest）に分ける */
 export function parseViewpointLine(line) {
   const match = line.match(/^【(.*)】(.*)$/);
   return match ? { title: match[1].trim(), rest: match[2].trim() } : { title: '', rest: '' };
@@ -63,58 +63,39 @@ export function parseViewpointLine(line) {
 
 export function applyViewpointLabel(line, label) {
   const { title } = parseViewpointLine(line);
-  return title
-    ? line.replace(/^【.*】/, `【${label}　${title}】`)
-    : line.replace(/^【】/, `【${label}】`);
+  return title ? line.replace(/^【.*】/, `【${label}　${title}】`) : line.replace(/^【】/, `【${label}】`);
 }
 
+/** 本文として組まない行か（Memo: は出力しないメモ、Epigraph: は章頭に別に組む） */
 export function isMetaLine(line) {
-  return isMemoLine(line) || isSourceLine(line) || isTitleLine(line) || isGenreLine(line) || isEpigraphLine(line) || isPovLine(line);
+  return isMemoLine(line) || isEpigraphLine(line);
 }
 
 function analyzeLines(lines) {
-  const contentLines = lines.filter(l => l.trim() !== '' && !isMetaLine(l));
+  const contentLines = lines.filter((l) => l.trim() !== '' && !isMetaLine(l));
   const hasViewpointStart = contentLines.length > 0 && isViewpointLine(contentLines[0]);
-  const hasViewpointEnd = contentLines.length > 0 && isViewpointLine(contentLines[contentLines.length - 1]);
-
-  // 末尾の視点行は次章のアンカーなので本文から除く。その位置を元のlines基準で特定する
-  let endViewpointLineIndex = -1;
-  if (hasViewpointEnd) {
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim() !== '' && !isMetaLine(lines[i])) {
-        endViewpointLineIndex = i;
-        break;
-      }
-    }
-  }
-
-  const povLine = lines.find(l => isPovLine(l));
 
   return {
     hasViewpointStart,
-    hasViewpointEnd,
     hasEmptyViewpointStart: hasViewpointStart && /^【】/.test(contentLines[0]),
-    endViewpointLineIndex,
     firstContentLine: contentLines.length > 0 ? contentLines[0] : null,
-    epigraphs: lines.filter(l => isEpigraphLine(l)).map(l => parseEpigraphLine(l)),
-    pov: povLine ? parsePovLine(povLine) : null,
+    epigraphs: lines.filter((l) => isEpigraphLine(l)).map((l) => parseEpigraphLine(l)),
   };
 }
 
-// 残す行の元の添字（0始まり）。selectBodyLines と同じ条件で落とす
-function selectBodyLineIndices(lines, endViewpointLineIndex, { keepEpigraphs = false, keepPov = false } = {}) {
+/** 残す行の元の添字（0始まり）。メタ行を落とす（keepEpigraphs なら Epigraph: の行は残す）。selectBodyLines と同じ条件 */
+function selectBodyLineIndices(lines, { keepEpigraphs = false } = {}) {
   const result = [];
   for (let i = 0; i < lines.length; i++) {
-    const kept = (keepEpigraphs && isEpigraphLine(lines[i])) || (keepPov && isPovLine(lines[i]));
-    if (isMetaLine(lines[i]) && !kept) continue;
-    if (i === endViewpointLineIndex) continue;
+    if (isMetaLine(lines[i]) && !(keepEpigraphs && isEpigraphLine(lines[i]))) continue;
     result.push(i);
   }
   return result;
 }
 
-function selectBodyLines(lines, endViewpointLineIndex, opts = {}) {
-  return selectBodyLineIndices(lines, endViewpointLineIndex, opts).map(i => lines[i]);
+/** 本文の行を返す。青空文庫の注記は行の中だけ読み替える（改ページ・字下げなど行の単位の注記は、組む側が parseAozoraLine で読む） */
+function selectBodyLines(lines, opts = {}) {
+  return selectBodyLineIndices(lines, opts).map((i) => normalizeAozoraInline(lines[i]));
 }
 
 export function trimBlankEdges(lines) {
@@ -124,7 +105,7 @@ export function trimBlankEdges(lines) {
 }
 
 export function splitLines(content) {
-  return content.split('\n').map(l => l.replace(/\r$/, ''));
+  return content.split('\n').map((l) => l.replace(/\r$/, ''));
 }
 
 export function readLines(filePath) {
@@ -136,7 +117,10 @@ export function countTextChars(text) {
   return [...text.replace(/\s/g, '')].length;
 }
 
-const INLINE_MARKUP_RE = /《《(.+?)》》|\|(.+?)《(.+?)》|<<(.+?)>>|\*([^*]+)\*/g;
+const INLINE_MARKUP_RE = new RegExp(
+  `《《(.+?)》》|\\|(.+?)《(.+?)》|<<(.+?)>>|\\*([^*]+)\\*|${BOLD_OPEN}(.+?)${BOLD_CLOSE}|${TCY_OPEN}(.+?)${TCY_CLOSE}`,
+  'g',
+);
 
 // sideways の中身にはルビ記法が入りうるので、text は未解釈のまま返す
 export function tokenizeInlineMarkup(text) {
@@ -147,42 +131,50 @@ export function tokenizeInlineMarkup(text) {
     if (m[1] !== undefined) tokens.push({ type: 'emphasis', text: m[1] });
     else if (m[2] !== undefined) tokens.push({ type: 'ruby', base: m[2], ruby: m[3] });
     else if (m[4] !== undefined) tokens.push({ type: 'sideways', text: m[4] });
-    else tokens.push({ type: 'italic', text: m[5] });
+    else if (m[5] !== undefined) tokens.push({ type: 'italic', text: m[5] });
+    else if (m[6] !== undefined) tokens.push({ type: 'bold', text: m[6] });
+    else tokens.push({ type: 'tcy', text: m[7] });
     last = m.index + m[0].length;
   }
   if (last < text.length) tokens.push({ type: 'text', text: text.slice(last) });
   return tokens;
 }
 
+/**
+ * インライン記法を外して本文の文字だけにする。青空文庫の注記も読み替えてから外す（行の単位の注記も文字としては数えない）。
+ * rubyParens なら ルビを「親文字（ルビ）」の形で残す。
+ */
 export function stripInlineMarkup(text, { rubyParens = false } = {}) {
-  return tokenizeInlineMarkup(text).map(t => {
-    if (t.type === 'ruby') return rubyParens ? `${t.base}（${t.ruby}）` : t.base;
-    if (t.type === 'sideways') return stripInlineMarkup(t.text, { rubyParens });
-    return t.text;
-  }).join('');
+  return tokenizeInlineMarkup(normalizeAozoraInline(text).replace(/［＃[^］]*］/g, ''))
+    .map((t) => {
+      if (t.type === 'ruby') return rubyParens ? `${t.base}（${t.ruby}）` : t.base;
+      if (t.type === 'sideways') return stripInlineMarkup(t.text, { rubyParens });
+      return t.text;
+    })
+    .join('');
 }
 
 export function escapeXml(text) {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-
-// ルビ1字は親文字の半分の大きさ。以下の長さの単位は親文字の em
+/** ルビ1字は親文字の半分の大きさ。以下の長さの単位は親文字の em */
 const RUBY_SCALE = 0.5;
-// ルビが隣の文字へはみ出してよい量の上限（ルビ1字分）
+/** ルビが隣の文字へはみ出してよい量の上限（ルビ1字分） */
 const RUBY_MAX_OVERHANG = 0.5;
 const KANA_OR_SPACE_RE = /[ぁ-ゖァ-ヺー　 ]/;
-// 1字ずつ <ruby> に分割しても processInnerText の結果が変わらない文字だけからなるか
+/**
+ * 1字ずつ <ruby> に分割しても processInnerText の結果が変わらない文字だけからなるか。
+ * 2桁数字の縦中横のように複数字をまとめて組む文字があると、分けたとき組みが変わるため。
+ */
 const RUBY_SPLIT_SAFE_VERTICAL_RE = /^[぀-ヿ㐀-鿿豈-﫿々〆A-Za-z 　]+$/;
 const RUBY_SPLIT_SAFE_HORIZONTAL_RE = /^[぀-ヿ㐀-鿿豈-﫿々〆　]+$/;
 const RUBY_ASCII_ROMAN_RE = /\b(XII|XI|VIII|VII|VI|IX|IV|III|II)\b/;
 
-// ルビがはみ出してよい隣接文字か。かな・空白に加え、ルビ側の半分が空いている約物
-// （前なら句読点・閉じ括弧、後ろなら開き括弧）を許す
+/**
+ * ルビが隣接文字 ch へはみ出してよい量（0 か RUBY_MAX_OVERHANG）。かな・空白に加え、ルビ側の半分が空いている約物
+ * （side が 'before' なら句読点・閉じ括弧、'after' なら開き括弧）を許す。
+ */
 function rubyOverhangCap(ch, side) {
   if (!ch) return 0;
   if (KANA_OR_SPACE_RE.test(ch)) return RUBY_MAX_OVERHANG;
@@ -190,8 +182,10 @@ function rubyOverhangCap(ch, side) {
   return punct.includes(ch) ? RUBY_MAX_OVERHANG : 0;
 }
 
-// 組み上がりの字数（1字＝1em のセル数）。縦書きでは2桁数字と !? の対が縦中横で1セルになり、
-// 横書きでは半角が半分の幅になる
+/**
+ * 組み上がりの字数（1字＝1em のセル数）。縦書きでは2桁数字と !? の対が縦中横で1セルになり、
+ * 横書きでは半角が半分の幅になる。
+ */
 function rubyCellCount(text, vertical) {
   if (!vertical) return [...text].reduce((sum, c) => sum + (/[\x20-\x7E]/.test(c) ? 0.5 : 1), 0);
   return [...text.replace(/(?<![\d.,])\d{2}(?![\d.,])/g, '0').replace(/[!?！？]{2}/g, '！')].length;
@@ -207,7 +201,7 @@ export function layoutRuby(n, m, capBefore = 0, capAfter = 0) {
   const baseLen = n;
   const rubyLen = m * RUBY_SCALE;
   if (rubyLen <= baseLen) {
-    // 字間はルビ1字分（＝字数が同じときの空き）まで。それ以上は間延びするので全体を中央に寄せる
+    // 字間をそれ以上広げると間延びするため、ルビ1字分で止めて残りは中央に寄せる
     const gap = Math.min((baseLen - rubyLen) / m, RUBY_SCALE);
     return { gap, rtStart: (baseLen - rubyLen - gap * (m - 1)) / 2, widen: 0 };
   }
@@ -224,38 +218,42 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   const rubyPlaceholders = [];
   const emphasisPlaceholders = [];
 
-  // プレースホルダーにはUnicode Private Use Area文字を使用
-  // （ASCII文字・数字を含まないため、後続の縦中横・ラテン文字処理で破壊されない）
-  const phRuby = (i) => `\uE000${String.fromCharCode(0xE010 + i)}\uE000`;
-  const phEmphasis = (i) => `\uE001${String.fromCharCode(0xE010 + i)}\uE001`;
+  // プレースホルダーを私用領域の文字にするのは、ASCII文字・数字を含むと後続の縦中横・ラテン文字処理で壊れるため
+  const phRuby = (i) => `\uE000${String.fromCharCode(0xe010 + i)}\uE000`;
+  const phEmphasis = (i) => `\uE001${String.fromCharCode(0xe010 + i)}\uE001`;
   const sidewaysPlaceholders = [];
-  const phSideways = (i) => `\uE003${String.fromCharCode(0xE010 + i)}\uE003`;
+  const phSideways = (i) => `\uE003${String.fromCharCode(0xe010 + i)}\uE003`;
 
-  // ラテン文字・縦中横を先にプレースホルダー化してからダッシュ等のspanタグを生成し、
-  // 最後にプレースホルダーをHTMLに展開する（spanタグ内の英字を二重処理しないため）
+  // 生成した span タグ内の英字をラテン文字処理で二重に処理しないよう、プレースホルダーにして最後に展開する
   const spanPlaceholders = [];
   const phSpan = (html) => {
     const idx = spanPlaceholders.length;
     spanPlaceholders.push(html);
-    return `\uE002${String.fromCharCode(0xE010 + idx)}\uE002`;
+    return `\uE002${String.fromCharCode(0xe010 + idx)}\uE002`;
   };
 
   function processInnerText(t) {
     let r = escapeXml(t);
-    // 半角スペースを全角スペース(U+3000)に変換し、半角・全角どちらも一文字分の幅で保持する。
-    // U+3000 はHTMLの連続空白コラプス対象外なので、複数スペースや行頭・行末でも潰れない
-    // （CSSの text-spacing-trim: space-all により全角スペースは行頭でもトリムされない）。
+    // 半角スペースのままだと HTML の空白コラプスで連続・行頭・行末のスペースが潰れるため、U+3000 にする
     r = r.replace(/ /g, '　');
     if (vertical) {
-      // ASCIIローマ数字（II〜XII）はUnicodeの単一コードポイントに正規化してuprightで立てる。
-      // text-combine-upright: all はChromium/Vivliostyleで字幅差のある組（IV等）が右に寄るため使わない。
+      // text-combine-upright: all は Chromium/Vivliostyle で字幅差のある組（IV 等）が右に寄るため使わず、単一コードポイントのローマ数字にする
       const asciiRomanMap = {
-        'II': '\u2161', 'III': '\u2162', 'IV': '\u2163', 'VI': '\u2165',
-        'VII': '\u2166', 'VIII': '\u2167', 'IX': '\u2168', 'XI': '\u216A', 'XII': '\u216B',
+        II: '\u2161',
+        III: '\u2162',
+        IV: '\u2163',
+        VI: '\u2165',
+        VII: '\u2166',
+        VIII: '\u2167',
+        IX: '\u2168',
+        XI: '\u216A',
+        XII: '\u216B',
       };
-      r = r.replace(new RegExp(RUBY_ASCII_ROMAN_RE, 'g'), (match) => phSpan(`<span class="upright">${asciiRomanMap[match]}</span>`));
+      r = r.replace(new RegExp(RUBY_ASCII_ROMAN_RE, 'g'), (match) =>
+        phSpan(`<span class="upright">${asciiRomanMap[match]}</span>`),
+      );
       r = r.replace(/[\u2160-\u216B\u2170-\u217B]+/g, (match) => {
-        return [...match].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
+        return [...match].map((c) => phSpan(`<span class="upright">${c}</span>`)).join('');
       });
       r = r.replace(/\+[-\u2212]/g, '\u00B1');
       r = r.replace(/-/g, '\uFF0D');
@@ -271,38 +269,30 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
       r = r.replace(/\.?\d[\d,.]*\d|\d/g, (match) => {
         const converted = match.replace(/\./g, '．').replace(/,/g, '，');
         if (/^\d{1,2}$/.test(match)) return phSpan(`<span class="tcy">${match}</span>`);
-        // 3桁以上の数字も1文字ずつ独立した正方セルへ（CSS .upright 側の text-orientation: upright で中央寄せ）
-        return [...converted].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
+        return [...converted].map((c) => phSpan(`<span class="upright">${c}</span>`)).join('');
       });
-      // 拡張ラテン文字（À–ɏ, Ḁ–1EFF）も含めて upright 化。
-      // U+00D7（×）と U+00F7（÷）は数学記号なので除外。
+      // U+00D7（×）と U+00F7（÷）は数学記号なので除外
       const latinChar = 'a-zA-Z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u024F\\u1E00-\\u1EFF';
       const latinRe = new RegExp(`[${latinChar}]+(?:\\s[${latinChar}]+)*`, 'g');
-      // 1文字ずつ独立した正方セルに収めることで、y/g/p/j のディセンダがベースラインで
-      // 下にずれないようにする（CSS .latin 側で text-orientation: upright を適用）。
+      // 単語ごとにまとめると y/g/p/j のディセンダがベースラインで下にずれるため、1文字ずつ正方セルに収める
       r = r.replace(latinRe, (match) => {
-        return [...match].map(c => /\s/.test(c) ? c : phSpan(`<span class="latin">${c}</span>`)).join('');
+        return [...match].map((c) => (/\s/.test(c) ? c : phSpan(`<span class="latin">${c}</span>`))).join('');
       });
       r = r.replace(/[\u0370-\u03FF]+/g, (match) => {
-        return [...match].map(c => phSpan(`<span class="upright">${c}</span>`)).join('');
+        return [...match].map((c) => phSpan(`<span class="upright">${c}</span>`)).join('');
       });
-      // 単独のASCIIピリオド（略語 O.M. / U.S.A. 等の区切り）。mixed のままだと
-      // グリフがセルの左下へ寄り列の中央からずれるため、hyphen と同様に 1em の
-      // 正方セル中央へ実描画する。数字内の小数点は既に全角「．」へ変換済みで対象外。
+      // mixed のままだとピリオドのグリフがセルの左下へ寄り列の中央からずれるため、1em の正方セル中央に描く
       r = r.replace(/\./g, () => phSpan('<span class="dot">.</span>'));
-      // ダッシュ等のspanタグを生成（この時点でラテン文字はもうプレースホルダーなので安全）
-      // ＝（全角イコール＝外国人名の二重ハイフン）もダッシュ扱いで横倒しし、縦書きでは
-      // 中央寄せの縦二重線にする。未指定だと mixed のまま横倒しの二本線が左へズレる。
+      // ＝（外国人名の二重ハイフン）は mixed のままだと横倒しの二本線が左へずれるため、ダッシュとして組む
       if (separateSymbolClasses) {
         r = r.replace(/([—―\uFF0D\uFF1D]+)/g, '<span class="dash">$1</span>');
         r = r.replace(/([…‥]+)/g, '<span class="ellipsis">$1</span>');
         r = r.replace(/([～〜]+)/g, '<span class="wave-dash">$1</span>');
       } else {
-        // 単独の全角ハイフンマイナス（章番号「1-1」の区切り等）は sideways 回転だと
-        // グリフが列の中央より左へずれるため、tcy方式（1emボックス＋rotate）で中央寄せする。
-        // 連続ダッシュ（——）や全角イコール（＝）は縦長の線として dash のまま縦倒しにする。
+        // 単独の全角ハイフンは sideways 回転だとグリフが列の中央より左へずれるため、hyphen（1em ボックス＋rotate）で組む
         r = r.replace(/([—―－＝]+)/g, (m) =>
-          m === '－' ? `<span class="hyphen">${m}</span>` : `<span class="dash">${m}</span>`);
+          m === '－' ? `<span class="hyphen">${m}</span>` : `<span class="dash">${m}</span>`,
+        );
         r = r.replace(/([…‥]+)/g, '<span class="dash">$1</span>');
         r = r.replace(/([～〜]+)/g, '<span class="dash">$1</span>');
       }
@@ -310,8 +300,10 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return r;
   }
 
-  // 字数に合わせて配置したルビ。CSS（lib/html.mjs の ruby.fit）がカスタムプロパティを読む。
-  // rt 側の値は rt 自身の em（親文字の半分）で持つ
+  /**
+   * 字数に合わせて配置したルビの HTML。配置は CSS（lib/html.mjs の ruby.fit）がカスタムプロパティで読む。
+   * rt 側の値は rt 自身の em（親文字の半分）で読まれるため、RUBY_SCALE で割って渡す。
+   */
   function fittedRubyHtml({ base, ruby, prev, prevShared, next, nextShared }) {
     const n = rubyCellCount(base, vertical);
     const m = rubyCellCount(ruby, vertical);
@@ -320,24 +312,26 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     const { gap, rtStart, widen } = layoutRuby(n, m, capBefore, capAfter);
     const rtVars = (start) => `--rt-off:${cssNum(start / RUBY_SCALE)};--rt-ls:${cssNum(gap / RUBY_SCALE)}`;
 
-    // ルビが親文字に収まるなら親文字1字ごとの <ruby> に分け、途中で行が折り返せるようにする。
-    // 各ルビ文字は均等配置したときの中心が乗る親文字に付くので、見た目は分けない場合と変わらない
+    // 1つの <ruby> のままだと途中で行を折り返せないため、ルビが収まるなら親文字1字ごとに分ける
     const splitSafe = vertical
       ? (t) => RUBY_SPLIT_SAFE_VERTICAL_RE.test(t) && !RUBY_ASCII_ROMAN_RE.test(t)
       : (t) => RUBY_SPLIT_SAFE_HORIZONTAL_RE.test(t);
     if (widen === 0 && rtStart >= 0 && n >= 2 && splitSafe(base) && splitSafe(ruby)) {
       const charStart = (k) => rtStart + k * (RUBY_SCALE + gap);
       const cells = [...base].map(() => []);
-      [...ruby].forEach((c, k) => cells[Math.min(n - 1, Math.floor(charStart(k) + RUBY_SCALE / 2))].push({ c, k }));
-      return [...base].map((b, i) => {
-        if (cells[i].length === 0) return processInnerText(b);
-        const start = charStart(cells[i][0].k) - i;
-        const rt = processInnerText(cells[i].map(({ c }) => c).join(''));
-        return `<ruby class="fit" style="${rtVars(start)}">${processInnerText(b)}<rt>${rt}</rt></ruby>`;
-      }).join('');
+      [...ruby].forEach((c, k) => {
+        cells[Math.min(n - 1, Math.floor(charStart(k) + RUBY_SCALE / 2))].push({ c, k });
+      });
+      return [...base]
+        .map((b, i) => {
+          if (cells[i].length === 0) return processInnerText(b);
+          const start = charStart(cells[i][0].k) - i;
+          const rt = processInnerText(cells[i].map(({ c }) => c).join(''));
+          return `<ruby class="fit" style="${rtVars(start)}">${processInnerText(b)}<rt>${rt}</rt></ruby>`;
+        })
+        .join('');
     }
 
-    // ルビが長い場合は親文字の前後を空け、1字ずつに分けられる親文字なら字間（span.ruby-gap）も均等に広げる
     const vars = [rtVars(rtStart)];
     let baseHtml = processInnerText(base);
     if (widen > 0 && n >= 2 && splitSafe(base)) {
@@ -349,7 +343,11 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return `<ruby class="fit" style="${vars.join(';')}">${baseHtml}<rt>${processInnerText(ruby)}</rt></ruby>`;
   }
 
-  let result = text.replace(/<<(.+?)>>/g, (_, content) => {
+  let result = text.replace(new RegExp(`${TCY_OPEN}(.+?)${TCY_CLOSE}`, 'g'), (_, content) =>
+    vertical ? phSpan(`<span class="tcy">${escapeXml(content)}</span>`) : content,
+  );
+
+  result = result.replace(/<<(.+?)>>/g, (_, content) => {
     const idx = sidewaysPlaceholders.length;
     sidewaysPlaceholders.push(content);
     return phSideways(idx);
@@ -363,14 +361,15 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
 
   result = result.replace(/\|(.+?)《(.+?)》/g, (match, base, ruby, offset, whole) => {
     const idx = rubyPlaceholders.length;
-    // 前後の1字（はみ出し可否の判定用）。傍点などのプレースホルダーは不可扱いになる
     const before = [...whole.slice(0, offset)];
     const after = [...whole.slice(offset + match.length)];
-    // 隣の1字を挟んで別のルビがある場合は、その1字を半分ずつ分け合う
     rubyPlaceholders.push({
-      base, ruby,
-      prev: before.at(-1), prevShared: before.at(-2) === '》',
-      next: after[0], nextShared: after[1] === '|',
+      base,
+      ruby,
+      prev: before.at(-1),
+      prevShared: before.at(-2) === '》',
+      next: after[0],
+      nextShared: after[1] === '|',
     });
     return phRuby(idx);
   });
@@ -378,35 +377,35 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   result = processInnerText(result);
 
   result = result.replace(/\uE000([\uE010-\uEFFF])\uE000/g, (_, ch) => {
-    const placeholder = rubyPlaceholders[ch.charCodeAt(0) - 0xE010];
+    const placeholder = rubyPlaceholders[ch.charCodeAt(0) - 0xe010];
     const { base, ruby } = placeholder;
     if (!rubyLayout) return `<ruby>${processInnerText(base)}<rt>${processInnerText(ruby)}</rt></ruby>`;
     return fittedRubyHtml(placeholder);
   });
 
   result = result.replace(/\uE001([\uE010-\uEFFF])\uE001/g, (_, ch) => {
-    const content = emphasisPlaceholders[ch.charCodeAt(0) - 0xE010];
+    const content = emphasisPlaceholders[ch.charCodeAt(0) - 0xe010];
     return `<span class="emphasis">${processInnerText(content)}</span>`;
   });
 
   result = result.replace(/\uE003([\uE010-\uEFFF])\uE003/g, (_, ch) => {
-    let content = sidewaysPlaceholders[ch.charCodeAt(0) - 0xE010];
-    // 先にHTMLエスケープ（《》| はHTMLエンティティではないので残る）
+    let content = sidewaysPlaceholders[ch.charCodeAt(0) - 0xe010];
     content = escapeXml(content);
     content = content.replace(/\|(.+?)《(.+?)》/g, (_, base, ruby) => `<ruby>${base}<rt>${ruby}</rt></ruby>`);
     return `<span class="sideways-latin">${content}</span>`;
   });
 
   result = result.replace(/\uE002([\uE010-\uEFFF])\uE002/g, (_, ch) => {
-    return spanPlaceholders[ch.charCodeAt(0) - 0xE010];
+    return spanPlaceholders[ch.charCodeAt(0) - 0xe010];
   });
 
-  return result;
+  return result.replaceAll(BOLD_OPEN, '<strong class="bold">').replaceAll(BOLD_CLOSE, '</strong>');
 }
 
-// エピグラフ行の表示幅（em換算）。縦書きでは半角英字も.latin（縦中横）で
-// 全角1文字幅になるため、縦中横になる1〜2桁の数字列を1文字幅、
-// それ以外は1文字=1文字幅として数える
+/**
+ * エピグラフ行の表示幅（em換算）。縦書きでは半角英字も1字ずつ全角幅のセルに、1〜2桁の数字は縦中横で1字幅に組まれるため、
+ * 1〜2桁の数字列を1字、それ以外は1文字を1字として数える。
+ */
 function epigraphSourceLength(text) {
   let len = 0;
   const rest = stripInlineMarkup(text).replace(/\d{1,2}/g, () => {
@@ -417,7 +416,7 @@ function epigraphSourceLength(text) {
   return len;
 }
 
-// 本文＋引用元が一字下げを保ったまま1行（1列）に収まるか
+/** 本文＋引用元が一字下げを保ったまま1行（1列 chars 字）に収まるか。引用元か chars が無ければ false */
 export function epigraphFitsOneLine(quote, source, chars) {
   if (!source || !chars) return false;
   return epigraphSourceLength(quote) + epigraphSourceLength(`——${source}`) <= chars - 1;
@@ -429,48 +428,84 @@ export function epigraphDisplayLines(quote, source, chars = null) {
 }
 
 function epigraphsToHtml(epigraphs, escapeOpts, chars = null) {
-  return epigraphs.map(({ quote, source }) => {
-    if (epigraphFitsOneLine(quote, source, chars)) {
-      return `<p class="epigraph-line">${escapeHtml(`${quote}——${source}`, escapeOpts)}</p>`;
-    }
-    // 引用元・本文の長さをCSS変数で渡し、本文の行末を引用元の先頭位置まで押し上げる
-    // （本文の先頭が一字下げ位置より上に突き抜けないよう、CSS側で本文長からクランプする）
-    const quoteStyle = source
-      ? ` style="--epigraph-quote-len: ${epigraphSourceLength(quote)}; --epigraph-source-len: ${epigraphSourceLength(`——${source}`)}"`
-      : '';
-    const parts = [`<p class="epigraph-quote"${quoteStyle}>${escapeHtml(quote, escapeOpts)}</p>`];
-    if (source) parts.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
-    return parts.join('\n');
-  }).join('\n');
+  return epigraphs
+    .map(({ quote, source }) => {
+      if (epigraphFitsOneLine(quote, source, chars)) {
+        return `<p class="epigraph-line">${escapeHtml(`${quote}——${source}`, escapeOpts)}</p>`;
+      }
+      // 本文の行末を引用元の先頭に揃える位置と、一字下げより上に突き抜けないためのクランプは CSS 側で計算するため、長さを渡す
+      const quoteStyle = source
+        ? ` style="--epigraph-quote-len: ${epigraphSourceLength(quote)}; --epigraph-source-len: ${epigraphSourceLength(`——${source}`)}"`
+        : '';
+      const parts = [`<p class="epigraph-quote"${quoteStyle}>${escapeHtml(quote, escapeOpts)}</p>`];
+      if (source) parts.push(`<p class="epigraph-source">${escapeHtml(`——${source}`, escapeOpts)}</p>`);
+      return parts.join('\n');
+    })
+    .join('\n');
 }
 
-// blankAfterHeading: 視点行（章見出し）と本文の間に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）
+/** 青空文庫の字下げ（行頭と範囲の合計）・地付き・地から上げを段落の style 属性にする */
+function aozoraStyle({ indent, alignEnd, raise }, blockIndent) {
+  const styles = [];
+  if (blockIndent + indent > 0) styles.push(`margin-inline-start: ${blockIndent + indent}em`);
+  if (alignEnd) styles.push('text-align: end');
+  if (raise > 0) styles.push(`margin-inline-end: ${raise}em`);
+  return styles.length > 0 ? ` style="${styles.join('; ')}"` : '';
+}
+
+const aozoraHeadingClass = (heading) => `aozora-heading aozora-heading-${heading}`;
+
+/** 原稿ファイルを読んで parseTextLines で縦書き（横書き）HTML にする。opts は parseTextLines と同じ */
 export function parseTextFile(filePath, opts = {}) {
   return parseTextLines(readLines(filePath), opts);
 }
 
-// ファイルを介さず行列から変換する（未保存のエディタ内容をプレビューする VS Code 拡張用）
-// lineNumbers: 段落・視点行・空行に元テキストの行番号（0始まり）を data-line で付ける
-export function parseTextLines(lines, { vertical = true, separateSymbolClasses = false, sectionNumber = null, chars = null, blankAfterHeading = false, lineNumbers = false } = {}) {
+/**
+ * 行列から HTML に変換する（ファイルを介さないのは、未保存のエディタ内容をプレビューする VS Code 拡張用）。
+ * 返り値は { html, hasViewpointStart, hasEmptyViewpointStart }。
+ *   blankAfterHeading: 視点行（章見出し）と本文の間に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）
+ *   lineNumbers: 段落・視点行・空行に元テキストの行番号（0始まり）を data-line で付ける
+ *   sceneBreak: 場面区切り（* の行）を組む記号
+ */
+export function parseTextLines(
+  lines,
+  {
+    vertical = true,
+    separateSymbolClasses = false,
+    sectionNumber = null,
+    chars = null,
+    blankAfterHeading = false,
+    lineNumbers = false,
+    sceneBreak = SCENE_BREAK_MARK,
+  } = {},
+) {
   const htmlParts = [];
 
-  const { hasViewpointStart, hasViewpointEnd, hasEmptyViewpointStart, endViewpointLineIndex, epigraphs, pov } = analyzeLines(lines);
-  const processLines = selectBodyLines(lines, endViewpointLineIndex);
-  // selectBodyLines が落とす行（メタ行・末尾の視点行）を同じ条件で除き、processLines の添字から元の行番号を引けるようにする
-  const sourceLineNumbers = lineNumbers
-    ? lines.map((_, i) => i).filter(i => !isMetaLine(lines[i]) && i !== endViewpointLineIndex)
-    : null;
-  const lineAttr = (i) => sourceLineNumbers ? ` data-line="${sourceLineNumbers[i]}"` : '';
+  const { hasViewpointStart, hasEmptyViewpointStart, epigraphs } = analyzeLines(lines);
+  const processLines = selectBodyLines(lines);
+  const sourceLineNumbers = lineNumbers ? selectBodyLineIndices(lines) : null;
+  const lineAttr = (i) => (sourceLineNumbers ? ` data-line="${sourceLineNumbers[i]}"` : '');
 
   let lastWasViewpoint = false;
 
   const escapeOpts = { vertical, separateSymbolClasses, rubyLayout: true };
 
-  // エピグラフをプレーンな段落として挿入（PDF公募用：装飾なし）
   let pendingEpigraphs = epigraphs.length > 0 ? [...epigraphs] : null;
+  let blockIndent = 0;
 
   for (let i = 0; i < processLines.length; i++) {
-    const line = processLines[i];
+    const aozora = parseAozoraLine(processLines[i]);
+    if (aozora.kind === 'pageBreak') {
+      htmlParts.push('<div class="page-break-marker"></div>');
+      lastWasViewpoint = false;
+      continue;
+    }
+    if (aozora.kind !== 'text') {
+      blockIndent = aozora.indent ?? 0;
+      continue;
+    }
+    const line = aozora.text;
+    const style = aozoraStyle(aozora, blockIndent);
 
     if (isSeparator(line)) {
       const prevLine = i > 0 ? processLines[i - 1] : null;
@@ -482,13 +517,15 @@ export function parseTextLines(lines, { vertical = true, separateSymbolClasses =
         if (htmlParts.length > 0 && /^<p class="empty"[^>]*>&nbsp;<\/p>$/.test(htmlParts[htmlParts.length - 1])) {
           htmlParts.pop();
         }
-        htmlParts.push(`<div class="separator-block"><p class="separator">${escapeHtml(line, escapeOpts)}</p></div>`);
+        htmlParts.push(
+          `<div class="separator-block"><p class="separator">${escapeHtml(separatorMark(line, sceneBreak), escapeOpts)}</p></div>`,
+        );
         i++;
         lastWasViewpoint = false;
         continue;
       }
 
-      htmlParts.push(`<p class="separator">${escapeHtml(line, escapeOpts)}</p>`);
+      htmlParts.push(`<p class="separator">${escapeHtml(separatorMark(line, sceneBreak), escapeOpts)}</p>`);
       lastWasViewpoint = false;
       continue;
     }
@@ -501,15 +538,14 @@ export function parseTextLines(lines, { vertical = true, separateSymbolClasses =
 
     if (isViewpointLine(line)) {
       const viewpointLine = sectionNumber !== null ? applyViewpointLabel(line, sectionNumber) : line;
-      const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
       if (pendingEpigraphs) {
-        htmlParts.push(`<div class="epigraph-page">\n<p class="viewpoint"${lineAttr(i)}>${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>\n${epigraphsToHtml(pendingEpigraphs, escapeOpts, chars)}\n</div>`);
+        htmlParts.push(
+          `<div class="epigraph-page">\n<p class="viewpoint"${lineAttr(i)}>${escapeHtml(viewpointLine, escapeOpts)}</p>\n${epigraphsToHtml(pendingEpigraphs, escapeOpts, chars)}\n</div>`,
+        );
         pendingEpigraphs = null;
-        // エピグラフの直後には空行を1つ挟んでから本文を始める
-        // （視点行と同じ扱いにすることで、原稿側に空行があっても二重にならない）
         lastWasViewpoint = true;
       } else {
-        htmlParts.push(`<p class="viewpoint"${lineAttr(i)}>${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
+        htmlParts.push(`<p class="viewpoint"${lineAttr(i)}>${escapeHtml(viewpointLine, escapeOpts)}</p>`);
         lastWasViewpoint = blankAfterHeading;
       }
       continue;
@@ -526,27 +562,33 @@ export function parseTextLines(lines, { vertical = true, separateSymbolClasses =
       pendingEpigraphs = null;
     }
 
-    // ページ跨ぎ制御: 推定3行以下はbreak-inside:avoid、4行以上はorphans/widows緩和
+    if (aozora.heading) {
+      htmlParts.push(
+        `<p class="${aozoraHeadingClass(aozora.heading)}"${lineAttr(i)}${style}>${escapeHtml(line, escapeOpts)}</p>`,
+      );
+      continue;
+    }
+
     const charsPerLine = chars || 30;
     const estimatedLines = Math.ceil([...line].length / charsPerLine);
     if (estimatedLines <= 3) {
       const cls = line.startsWith('「') ? 'dialogue-short' : 'paragraph-short';
-      htmlParts.push(`<p class="${cls}"${lineAttr(i)}>${escapeHtml(line, escapeOpts)}</p>`);
+      htmlParts.push(`<p class="${cls}"${lineAttr(i)}${style}>${escapeHtml(line, escapeOpts)}</p>`);
     } else {
       const cls = line.startsWith('「') ? 'dialogue-long' : 'paragraph-long';
-      htmlParts.push(`<p class="${cls}"${lineAttr(i)}>${escapeHtml(line, escapeOpts)}</p>`);
+      htmlParts.push(`<p class="${cls}"${lineAttr(i)}${style}>${escapeHtml(line, escapeOpts)}</p>`);
     }
   }
 
-  return { html: htmlParts.join('\n'), hasViewpointStart, hasViewpointEnd, hasEmptyViewpointStart, pov };
+  return { html: htmlParts.join('\n'), hasViewpointStart, hasEmptyViewpointStart };
 }
 
-export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
+export function parseTextFileForEpub(filePath, { sectionNumber = null, sceneBreak = SCENE_BREAK_MARK } = {}) {
   const lines = readLines(filePath);
   const xhtmlParts = [];
   const escapeOpts = { vertical: true, separateSymbolClasses: true };
 
-  const { hasViewpointStart, hasViewpointEnd, hasEmptyViewpointStart, endViewpointLineIndex, firstContentLine, epigraphs, pov } = analyzeLines(lines);
+  const { hasViewpointStart, hasEmptyViewpointStart, firstContentLine, epigraphs } = analyzeLines(lines);
 
   let chapterTitle = null;
   if (hasViewpointStart) {
@@ -554,18 +596,28 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
     chapterTitle = parseViewpointLine(firstLine).title || null;
   }
 
-  // 先頭・末尾の空行をトリム（セクション結合時の余分なスペースを防ぐ）
-  const processLines = trimBlankEdges(selectBodyLines(lines, endViewpointLineIndex));
+  // セクションを結合したときに余分な空きが出ないよう、先頭・末尾の空行を落とす
+  const processLines = trimBlankEdges(selectBodyLines(lines));
 
-  let pendingEpigraph = epigraphs.length > 0
-    ? `<div class="epigraph">\n${epigraphsToHtml(epigraphs, escapeOpts)}\n</div>`
-    : null;
+  let pendingEpigraph =
+    epigraphs.length > 0 ? `<div class="epigraph">\n${epigraphsToHtml(epigraphs, escapeOpts)}\n</div>` : null;
+  let blockIndent = 0;
 
   for (let i = 0; i < processLines.length; i++) {
-    const line = processLines[i];
+    const aozora = parseAozoraLine(processLines[i]);
+    if (aozora.kind === 'pageBreak') {
+      xhtmlParts.push('<div class="page-break-marker"></div>');
+      continue;
+    }
+    if (aozora.kind !== 'text') {
+      blockIndent = aozora.indent ?? 0;
+      continue;
+    }
+    const line = aozora.text;
+    const style = aozoraStyle(aozora, blockIndent);
 
     if (line.trim() === '') {
-      // 区切り記号や視点行に隣接する空行はスキップ（separator/viewpointのmarginで間隔を確保）
+      // 区切り・視点行の前後の間隔は CSS の margin で取るため、隣の空行を出すと二重になる
       const prevLine = i > 0 ? processLines[i - 1] : null;
       const nextLine = i < processLines.length - 1 ? processLines[i + 1] : null;
       const adjacentToSpecial =
@@ -578,14 +630,13 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
     }
 
     if (isSeparator(line)) {
-      xhtmlParts.push(`<p class="separator">${escapeHtml(line, escapeOpts)}</p>`);
+      xhtmlParts.push(`<p class="separator">${escapeHtml(separatorMark(line, sceneBreak), escapeOpts)}</p>`);
       continue;
     }
 
     if (isViewpointLine(line)) {
       const viewpointLine = sectionNumber !== null ? applyViewpointLabel(line, sectionNumber) : line;
-      const povInline = pov ? `<span class="pov">　${escapeHtml(pov, escapeOpts)}</span>` : '';
-      xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}${povInline}</p>`);
+      xhtmlParts.push(`<p class="viewpoint">${escapeHtml(viewpointLine, escapeOpts)}</p>`);
       if (pendingEpigraph) {
         xhtmlParts.push(pendingEpigraph);
         pendingEpigraph = null;
@@ -598,16 +649,18 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null } = {}) {
       pendingEpigraph = null;
     }
 
-    xhtmlParts.push(`<p>${escapeHtml(line, escapeOpts)}</p>`);
+    xhtmlParts.push(
+      aozora.heading
+        ? `<p class="${aozoraHeadingClass(aozora.heading)}"${style}>${escapeHtml(line, escapeOpts)}</p>`
+        : `<p${style}>${escapeHtml(line, escapeOpts)}</p>`,
+    );
   }
 
   return {
     xhtml: xhtmlParts.join('\n'),
     chapterTitle,
     hasViewpointStart,
-    hasViewpointEnd,
     hasEmptyViewpointStart,
-    pov,
   };
 }
 
@@ -615,16 +668,19 @@ export function getBodyLinesFromContent(content, opts = {}) {
   return getBodyLines(splitLines(content), opts);
 }
 
-// indices: 返した各行の元の行番号（0始まり。プレビューで段落から元テキストの行を引くため）
-export function getBodyLines(lines, { keepEpigraphs = false, keepPov = false } = {}) {
-  const { hasViewpointStart, hasViewpointEnd, endViewpointLineIndex, pov } = analyzeLines(lines);
-  const indices = selectBodyLineIndices(lines, endViewpointLineIndex, { keepEpigraphs, keepPov });
+/**
+ * 本文として組む行（メタ行を除く）を返す。返り値は { lines, indices, hasViewpointStart }。
+ *   indices: 返した各行の元の行番号（0始まり。プレビューで段落から元テキストの行を引くため）
+ *   keepEpigraphs: Epigraph: の行も残す
+ *   aozora: false なら青空文庫の注記を読み替えずに原稿のまま返す（txt に書き出す split / merge）
+ */
+export function getBodyLines(lines, { keepEpigraphs = false, aozora = true } = {}) {
+  const { hasViewpointStart } = analyzeLines(lines);
+  const indices = selectBodyLineIndices(lines, { keepEpigraphs });
   return {
-    lines: indices.map(i => lines[i]),
+    lines: indices.map((i) => (aozora ? normalizeAozoraInline(lines[i]) : lines[i])),
     indices,
     hasViewpointStart,
-    hasViewpointEnd,
-    pov,
   };
 }
 
@@ -632,7 +688,7 @@ export function getFilteredLines(filePath, opts = {}) {
   return getBodyLines(readLines(filePath), opts);
 }
 
-// parseTextFile の hasViewpointStart と同じ条件で、パースせずに事前判定する
+/** parseTextFile の hasViewpointStart と同じ条件（空行・メタ行を飛ばした最初の行が視点行か）で、パースせずに事前判定する */
 export function fileHasViewpointStart(filePath) {
   for (const line of readLines(filePath)) {
     if (line.trim() === '' || isMetaLine(line)) continue;
@@ -653,17 +709,16 @@ export function countChars(html) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    // 改行・タブ・&nbsp;（空行プレースホルダ）のみ除外。
-    // 字下げの全角スペース等は原稿のマスとして数える（規定チェックと同じ基準）
+    // 規定チェックと同じ基準にするため、字下げの全角スペースもマスとして数える
     .replace(/[\r\n\t\u00A0]/g, '');
   return [...text].length;
 }
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
-  const { writeFileSync, unlinkSync } = await import('fs');
-  const { join } = await import('path');
-  const { tmpdir } = await import('os');
+  const { writeFileSync, unlinkSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
 
   describe('splitLines / countTextChars', () => {
     test('CRLF の CR を落とす', () => {
@@ -712,6 +767,66 @@ if (import.meta.vitest) {
     });
   });
 
+  describe('青空文庫の注記', () => {
+    test('ルビ・傍点・縦中横・太字を組む', () => {
+      const { html } = parseTextLines(
+        [
+          '　東京《とうきょう》で覚悟［＃「覚悟」に傍点］を決め、第123［＃「123」は縦中横］話、［＃太字］ここ［＃太字終わり］',
+        ],
+        { lineNumbers: true },
+      );
+      expect(html).toContain('<rt>');
+      expect(html).toContain('とうきょう');
+      expect(html).toContain('<span class="emphasis">覚悟</span>');
+      expect(html).toContain('<span class="tcy">123</span>');
+      expect(html).toContain('<strong class="bold">ここ</strong>');
+      expect(html).not.toContain('［＃');
+    });
+    test('改ページ・字下げ・地付き・見出しを組み、行番号は元の行を指す', () => {
+      const { html } = parseTextLines(
+        [
+          '一',
+          '［＃改ページ］',
+          '［＃ここから２字下げ］',
+          '二',
+          '［＃１字下げ］三',
+          '［＃ここで字下げ終わり］',
+          '［＃地付き］四',
+          '五［＃「五」は中見出し］',
+        ],
+        { lineNumbers: true },
+      );
+      expect(html).toContain('<div class="page-break-marker"></div>');
+      expect(html).toContain('<p class="paragraph-short" data-line="3" style="margin-inline-start: 2em">二</p>');
+      expect(html).toContain('<p class="paragraph-short" data-line="4" style="margin-inline-start: 3em">三</p>');
+      expect(html).toContain('<p class="paragraph-short" data-line="6" style="text-align: end">四</p>');
+      expect(html).toContain('<p class="aozora-heading aozora-heading-medium" data-line="7">五</p>');
+      expect(html).not.toContain('［＃');
+    });
+    test('字数の数え方では注記を数えない', () => {
+      expect(stripInlineMarkup('東京《とうきょう》［＃「東京」に傍点］')).toBe('東京');
+    });
+  });
+
+  describe('separatorMark', () => {
+    test('場面区切りは出力ごとの記号に、ほかの記号は書いたまま', () => {
+      expect(separatorMark('* * *')).toBe('◇◇◇');
+      expect(separatorMark('*', '#')).toBe('#');
+      expect(separatorMark('■■■')).toBe('■■■');
+      expect(separatorMark(' >>> ', '#')).toBe('>>>');
+    });
+    test('sceneBreak で場面区切りの記号を変えられる', () => {
+      const { html } = parseTextLines(['一', '*', '二'], { sceneBreak: '＊　＊　＊' });
+      expect(html).toContain('<p class="separator">＊　＊　＊</p>');
+    });
+    test('日本語の組版では * の行が ◇◇◇ になり、イタリックにはならない', () => {
+      const { html } = parseTextLines(['本文一', '', '* * *', '', '本文二', '■■■', '本文三']);
+      expect(html).toContain('<div class="separator-block"><p class="separator">◇◇◇</p></div>');
+      expect(html).toContain('<p class="separator">■■■</p>');
+      expect(html).not.toContain('<i');
+    });
+  });
+
   describe('isSeparator', () => {
     test('\u25C7\u306E\u307F\u3067\u69CB\u6210\u3055\u308C\u308B\u884C\u306Ftrue', () => {
       expect(isSeparator('\u25C7')).toBe(true);
@@ -725,6 +840,15 @@ if (import.meta.vitest) {
       expect(isSeparator('\u203B\u203B')).toBe(true);
       expect(isSeparator('\uFF0A')).toBe(true);
       expect(isSeparator('***')).toBe(true);
+      expect(isSeparator('>>>')).toBe(true);
+    });
+    test('* の行は空白を挟んでも場面区切り', () => {
+      for (const line of ['*', '***', '* * *', '＊　＊　＊', '  * * *  ']) {
+        expect(isSceneBreak(line)).toBe(true);
+        expect(isSeparator(line)).toBe(true);
+      }
+      expect(isSceneBreak('◇◇◇')).toBe(false);
+      expect(isSceneBreak('*強調*')).toBe(false);
     });
     test('\u6587\u5B57\u304C\u6DF7\u3056\u308B\u3068false', () => {
       expect(isSeparator('\u25C7\u3042')).toBe(false);
@@ -734,41 +858,34 @@ if (import.meta.vitest) {
     });
   });
 
-  describe('isMemoLine / isEpigraphLine / isPovLine', () => {
-    test('\u30D7\u30EC\u30D5\u30A3\u30C3\u30AF\u30B9\u4E00\u81F4\u3067true', () => {
-      expect(isMemoLine('Memo: \u306A\u306B\u304B')).toBe(true);
-      expect(isSourceLine('Source: src/x/plot/000.md')).toBe(true);
-      expect(isTitleLine('Title: \u984C\u540D')).toBe(true);
-      expect(isGenreLine('Genre: SF')).toBe(true);
-      expect(isEpigraphLine('Epigraph: \u5F15\u7528')).toBe(true);
-      expect(isPovLine('POV: \u4E3B\u4EBA\u516C')).toBe(true);
+  describe('isMemoLine / isEpigraphLine', () => {
+    test('プレフィックス一致でtrue', () => {
+      expect(isMemoLine('Memo: なにか')).toBe(true);
+      expect(isEpigraphLine('Epigraph: 引用')).toBe(true);
     });
-    test('\u30D7\u30EC\u30D5\u30A3\u30C3\u30AF\u30B9\u304C\u306A\u3051\u308C\u3070false', () => {
-      expect(isMemoLine('memo: \u5C0F\u6587\u5B57')).toBe(false);
-      expect(isSourceLine('source: \u5C0F\u6587\u5B57')).toBe(false);
-      expect(isEpigraphLine(' Epigraph: \u5148\u982D\u7A7A\u767D')).toBe(false);
-      expect(isPovLine('\u672C\u6587')).toBe(false);
+    test('プレフィックスがなければfalse', () => {
+      expect(isMemoLine('memo: 小文字')).toBe(false);
+      expect(isEpigraphLine(' Epigraph: 先頭空白')).toBe(false);
     });
   });
 
   describe('getBodyLinesFromContent', () => {
-    test('Memo/Source/Title/Genre\u884C\u306F\u672C\u6587\u304B\u3089\u9664\u304F', () => {
-      const { lines } = getBodyLinesFromContent('Memo: plot.md\nSource: plot/000.md\nTitle: T\nGenre: SF\n\n\u672C\u6587\u3002\n');
-      expect(lines).toEqual(['', '\u672C\u6587\u3002', '']);
+    test('Memo 行は本文から除き、ほかの「〜:」で始まる行は本文として残す', () => {
+      const { lines } = getBodyLinesFromContent('Memo: plot.md\nPOV: 太郎\n\n本文。\n');
+      expect(lines).toEqual(['POV: 太郎', '', '本文。', '']);
     });
-  });
-
-  describe('parsePovLine', () => {
-    test('POV: \u306E\u5F8C\u306E\u540D\u524D\u3092\u8FD4\u3059', () => {
-      expect(parsePovLine('POV: \u4E3B\u4EBA\u516C')).toBe('\u4E3B\u4EBA\u516C');
-      expect(parsePovLine('POV:\u4E3B\u4EBA\u516C')).toBe('\u4E3B\u4EBA\u516C');
-      expect(parsePovLine('POV:   \u592A\u90CE  ')).toBe('\u592A\u90CE');
+    test('末尾の【】も本文に残す（見出しとして組む）', () => {
+      expect(getBodyLinesFromContent('【】\n本文。\n【】').lines).toEqual(['【】', '本文。', '【】']);
     });
   });
 
   describe('parseEpigraphLine', () => {
     test('\u5F15\u7528\u672C\u6587\u3068\u5F15\u7528\u5143\u3092 \u2014\u2014\u3067\u5206\u5272', () => {
-      expect(parseEpigraphLine('Epigraph: \u6211\u601D\u3046\u3001\u3086\u3048\u306B\u6211\u3042\u308A\u2014\u2014\u30C7\u30AB\u30EB\u30C8')).toEqual({
+      expect(
+        parseEpigraphLine(
+          'Epigraph: \u6211\u601D\u3046\u3001\u3086\u3048\u306B\u6211\u3042\u308A\u2014\u2014\u30C7\u30AB\u30EB\u30C8',
+        ),
+      ).toEqual({
         quote: '\u6211\u601D\u3046\u3001\u3086\u3048\u306B\u6211\u3042\u308A',
         source: '\u30C7\u30AB\u30EB\u30C8',
       });
@@ -780,7 +897,11 @@ if (import.meta.vitest) {
       });
     });
     test('\u2014\u2014\u304C\u8907\u6570\u3042\u308C\u3070\u6700\u5F8C\u306E\u2014\u2014\u3067\u5206\u5272\u3059\u308B\uFF08\u5F15\u7528\u672C\u6587\u4E2D\u306E\u30C0\u30C3\u30B7\u30E5\u3092\u4FDD\u3064\uFF09', () => {
-      expect(parseEpigraphLine('Epigraph: \u300C\u3060\u3068\u3057\u305F\u3089\u2014\u2014\u300D\u2014\u2014\u30C9\u30B9\u30C8\u30A8\u30D5\u30B9\u30AD\u30FC')).toEqual({
+      expect(
+        parseEpigraphLine(
+          'Epigraph: \u300C\u3060\u3068\u3057\u305F\u3089\u2014\u2014\u300D\u2014\u2014\u30C9\u30B9\u30C8\u30A8\u30D5\u30B9\u30AD\u30FC',
+        ),
+      ).toEqual({
         quote: '\u300C\u3060\u3068\u3057\u305F\u3089\u2014\u2014\u300D',
         source: '\u30C9\u30B9\u30C8\u30A8\u30D5\u30B9\u30AD\u30FC',
       });
@@ -820,7 +941,9 @@ if (import.meta.vitest) {
     });
     test('\u3010title\u3011\u306F\u30E9\u30D9\u30EB\u3068title\u304C\u5168\u89D2space\u533A\u5207\u308A', () => {
       expect(applyViewpointLabel('\u3010\u592A\u90CE\u3011', '1-2')).toBe('\u30101-2\u3000\u592A\u90CE\u3011');
-      expect(applyViewpointLabel('\u3010\u592A\u90CE\u3011 \u30BB\u30EA\u30D5', '3')).toBe('\u30103\u3000\u592A\u90CE\u3011 \u30BB\u30EA\u30D5');
+      expect(applyViewpointLabel('\u3010\u592A\u90CE\u3011 \u30BB\u30EA\u30D5', '3')).toBe(
+        '\u30103\u3000\u592A\u90CE\u3011 \u30BB\u30EA\u30D5',
+      );
     });
   });
 
@@ -850,27 +973,40 @@ if (import.meta.vitest) {
     test('\u7E26\u66F8\u304D\u30E2\u30FC\u30C9\u3067\u306F\u6570\u5B57\u3092\u7E26\u4E2D\u6A2A/upright\u306B\u3001\u30CF\u30A4\u30D5\u30F3\u3092\u5168\u89D2\u5316', () => {
       expect(escapeHtml('5', { vertical: true })).toBe('<span class="tcy">5</span>');
       expect(escapeHtml('99', { vertical: true })).toBe('<span class="tcy">99</span>');
-      expect(escapeHtml('100', { vertical: true })).toBe('<span class="upright">1</span><span class="upright">0</span><span class="upright">0</span>');
-      expect(escapeHtml('1,234', { vertical: true })).toBe('<span class="upright">1</span><span class="upright">\uFF0C</span><span class="upright">2</span><span class="upright">3</span><span class="upright">4</span>');
-      expect(escapeHtml('a-b', { vertical: true })).toBe('<span class="latin">a</span><span class="hyphen">\uFF0D</span><span class="latin">b</span>');
+      expect(escapeHtml('100', { vertical: true })).toBe(
+        '<span class="upright">1</span><span class="upright">0</span><span class="upright">0</span>',
+      );
+      expect(escapeHtml('1,234', { vertical: true })).toBe(
+        '<span class="upright">1</span><span class="upright">\uFF0C</span><span class="upright">2</span><span class="upright">3</span><span class="upright">4</span>',
+      );
+      expect(escapeHtml('a-b', { vertical: true })).toBe(
+        '<span class="latin">a</span><span class="hyphen">\uFF0D</span><span class="latin">b</span>',
+      );
       expect(escapeHtml('ab', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>');
     });
     test('単独の全角ハイフンは hyphen クラス、連続ダッシュ・全角イコールは dash クラス', () => {
-      // 章番号「1-1」の区切り等。sideways だと左へずれるため tcy 方式で中央寄せする
-      expect(escapeHtml('1-1', { vertical: true })).toBe('<span class="tcy">1</span><span class="hyphen">\uFF0D</span><span class="tcy">1</span>');
-      // 連続ダッシュ（——）は縦長の線なので dash のまま
+      expect(escapeHtml('1-1', { vertical: true })).toBe(
+        '<span class="tcy">1</span><span class="hyphen">\uFF0D</span><span class="tcy">1</span>',
+      );
       expect(escapeHtml('\u2014\u2014', { vertical: true })).toBe('<span class="dash">\u2014\u2014</span>');
-      // ハイフン2つ並びも dash（単独ではない）
-      expect(escapeHtml('1--2', { vertical: true })).toBe('<span class="tcy">1</span><span class="dash">\uFF0D\uFF0D</span><span class="tcy">2</span>');
-      // EPUB（separateSymbolClasses=true）では従来どおり dash のまま
-      expect(escapeHtml('1-1', { vertical: true, separateSymbolClasses: true })).toBe('<span class="tcy">1</span><span class="dash">\uFF0D</span><span class="tcy">1</span>');
+      expect(escapeHtml('1--2', { vertical: true })).toBe(
+        '<span class="tcy">1</span><span class="dash">\uFF0D\uFF0D</span><span class="tcy">2</span>',
+      );
+      expect(escapeHtml('1-1', { vertical: true, separateSymbolClasses: true })).toBe(
+        '<span class="tcy">1</span><span class="dash">\uFF0D</span><span class="tcy">1</span>',
+      );
     });
     test('\u7E26\u66F8\u304D\u3067\u30A2\u30AF\u30BB\u30F3\u30C8\u4ED8\u304D\u30E9\u30C6\u30F3\u6587\u5B57\u3082 latin \u30AF\u30E9\u30B9\u3067\u7ACB\u3066\u308B', () => {
-      // 1文字ずつ独立した span に分けて、各文字を text-orientation: upright で正方セルに収める
       expect(escapeHtml('ab', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>');
-      expect(escapeHtml('C\u00F4te', { vertical: true })).toBe('<span class="latin">C</span><span class="latin">\u00F4</span><span class="latin">t</span><span class="latin">e</span>');
-      expect(escapeHtml('\u00DCber', { vertical: true })).toBe('<span class="latin">\u00DC</span><span class="latin">b</span><span class="latin">e</span><span class="latin">r</span>');
-      expect(escapeHtml('\u0110\u00E0', { vertical: true })).toBe('<span class="latin">\u0110</span><span class="latin">\u00E0</span>');
+      expect(escapeHtml('C\u00F4te', { vertical: true })).toBe(
+        '<span class="latin">C</span><span class="latin">\u00F4</span><span class="latin">t</span><span class="latin">e</span>',
+      );
+      expect(escapeHtml('\u00DCber', { vertical: true })).toBe(
+        '<span class="latin">\u00DC</span><span class="latin">b</span><span class="latin">e</span><span class="latin">r</span>',
+      );
+      expect(escapeHtml('\u0110\u00E0', { vertical: true })).toBe(
+        '<span class="latin">\u0110</span><span class="latin">\u00E0</span>',
+      );
     });
     test('\u7E26\u66F8\u304D\u3067 !? \u3092\u5168\u89D2\u306B\u3001!? \u306E\u9023\u7D9A\u306F\u7E26\u4E2D\u6A2A\u306B\u307E\u3068\u3081\u308B', () => {
       expect(escapeHtml('\u3042!', { vertical: true })).toBe('\u3042\uFF01');
@@ -879,27 +1015,34 @@ if (import.meta.vitest) {
       expect(escapeHtml('\uFF01\uFF01', { vertical: true })).toBe('<span class="tcy">!!</span>');
     });
     test('\u30EB\u30D3 |\u89AA\u300A\u3075\u308A\u300B \u3092 <ruby> \u306B\u5909\u63DB', () => {
-      expect(escapeHtml('|\u6F22\u5B57\u300A\u304B\u3093\u3058\u300B', { vertical: false })).toBe('<ruby>\u6F22\u5B57<rt>\u304B\u3093\u3058</rt></ruby>');
+      expect(escapeHtml('|\u6F22\u5B57\u300A\u304B\u3093\u3058\u300B', { vertical: false })).toBe(
+        '<ruby>\u6F22\u5B57<rt>\u304B\u3093\u3058</rt></ruby>',
+      );
     });
     test('rubyLayout: 字数が同じなら親文字1字ごとに分け、ルビ1字ずつを真横に置く', () => {
       expect(escapeHtml('|籠手《こて》', { rubyLayout: true })).toBe(
-        '<ruby class="fit" style="--rt-off:0.5;--rt-ls:1">籠<rt>こ</rt></ruby>'
-        + '<ruby class="fit" style="--rt-off:0.5;--rt-ls:1">手<rt>て</rt></ruby>');
+        '<ruby class="fit" style="--rt-off:0.5;--rt-ls:1">籠<rt>こ</rt></ruby>' +
+          '<ruby class="fit" style="--rt-off:0.5;--rt-ls:1">手<rt>て</rt></ruby>',
+      );
     });
     test('rubyLayout: 短いルビは親文字の長さに均等配置し、中心が乗る親文字に付ける', () => {
       expect(escapeHtml('|琥珀《こはく》', { rubyLayout: true })).toBe(
-        '<ruby class="fit" style="--rt-off:0.167;--rt-ls:0.333">琥<rt>こ</rt></ruby>'
-        + '<ruby class="fit" style="--rt-off:-0.5;--rt-ls:0.333">珀<rt>はく</rt></ruby>');
+        '<ruby class="fit" style="--rt-off:0.167;--rt-ls:0.333">琥<rt>こ</rt></ruby>' +
+          '<ruby class="fit" style="--rt-off:-0.5;--rt-ls:0.333">珀<rt>はく</rt></ruby>',
+      );
     });
     test('rubyLayout: 長いルビは前後のかなへはみ出させ、余りは親文字の前後を空ける', () => {
       expect(escapeHtml('彼は|蹲《うずくま》る', { rubyLayout: true })).toBe(
-        '彼は<ruby class="fit" style="--rt-off:-1;--rt-ls:0">蹲<rt>うずくま</rt></ruby>る');
+        '彼は<ruby class="fit" style="--rt-off:-1;--rt-ls:0">蹲<rt>うずくま</rt></ruby>る',
+      );
       expect(escapeHtml('漢|志《こころざし》漢', { rubyLayout: true })).toBe(
-        '漢<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.75">志<rt>こころざし</rt></ruby>漢');
+        '漢<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.75">志<rt>こころざし</rt></ruby>漢',
+      );
     });
     test('rubyLayout: 漢字に挟まれた長いルビは親文字の字間を均等に広げる', () => {
       expect(escapeHtml('「|東恋《あずまれん》」', { rubyLayout: true })).toBe(
-        '「<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.125;--rb-gap:0.25">東<span class="ruby-gap"></span>恋<rt>あずまれん</rt></ruby>」');
+        '「<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.125;--rb-gap:0.25">東<span class="ruby-gap"></span>恋<rt>あずまれん</rt></ruby>」',
+      );
     });
     test('layoutRuby: 字間はルビ1字分までで、それ以上は中央に寄せる', () => {
       expect(layoutRuby(2, 2)).toEqual({ gap: 0.5, rtStart: 0.25, widen: 0 });
@@ -912,15 +1055,23 @@ if (import.meta.vitest) {
       expect(layoutRuby(1, 5, 0.5, 0)).toEqual({ gap: 0, rtStart: -0.5, widen: 1 });
     });
     test('\u508D\u70B9 \u300A\u300Atext\u300B\u300B \u3092 span.emphasis \u306B\u5909\u63DB', () => {
-      expect(escapeHtml('\u300A\u300A\u5F37\u8ABF\u300B\u300B', { vertical: false })).toBe('<span class="emphasis">\u5F37\u8ABF</span>');
+      expect(escapeHtml('\u300A\u300A\u5F37\u8ABF\u300B\u300B', { vertical: false })).toBe(
+        '<span class="emphasis">\u5F37\u8ABF</span>',
+      );
     });
     test('\u6A2A\u5012\u3057 <<text>> \u3092 span.sideways-latin \u306B\u5909\u63DB', () => {
       expect(escapeHtml('<<ABC>>', { vertical: false })).toBe('<span class="sideways-latin">ABC</span>');
     });
     test('separateSymbolClasses=true \u3067\u30C0\u30C3\u30B7\u30E5/\u4E09\u70B9/\u6CE2\u30C0\u30C3\u30B7\u30E5\u304C\u5225\u30AF\u30E9\u30B9\u306B', () => {
-      expect(escapeHtml('\u2014', { vertical: true, separateSymbolClasses: true })).toBe('<span class="dash">\u2014</span>');
-      expect(escapeHtml('\u2026', { vertical: true, separateSymbolClasses: true })).toBe('<span class="ellipsis">\u2026</span>');
-      expect(escapeHtml('\uFF5E', { vertical: true, separateSymbolClasses: true })).toBe('<span class="wave-dash">\uFF5E</span>');
+      expect(escapeHtml('\u2014', { vertical: true, separateSymbolClasses: true })).toBe(
+        '<span class="dash">\u2014</span>',
+      );
+      expect(escapeHtml('\u2026', { vertical: true, separateSymbolClasses: true })).toBe(
+        '<span class="ellipsis">\u2026</span>',
+      );
+      expect(escapeHtml('\uFF5E', { vertical: true, separateSymbolClasses: true })).toBe(
+        '<span class="wave-dash">\uFF5E</span>',
+      );
     });
     test('\u65E2\u5B9A (separateSymbolClasses=false) \u3067\u306F\u5168\u90E8 dash \u30AF\u30E9\u30B9', () => {
       expect(escapeHtml('\u2026', { vertical: true })).toBe('<span class="dash">\u2026</span>');
@@ -929,13 +1080,13 @@ if (import.meta.vitest) {
     test('\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u306F\u5168\u89D2\u30B9\u30DA\u30FC\u30B9(U+3000)\u306B\u5909\u63DB\u3055\u308C\u3001\u4E00\u6587\u5B57\u5206\u306E\u5E45\u3092\u4FDD\u3064', () => {
       expect(escapeHtml('\u3042 \u3044', { vertical: true })).toBe('\u3042\u3000\u3044');
       expect(escapeHtml('\u3042 \u3044', { vertical: false })).toBe('\u3042\u3000\u3044');
-      // 連続する半角スペースもそれぞれ一文字分に（コラプスしない）
       expect(escapeHtml('\u3042  \u3044', { vertical: true })).toBe('\u3042\u3000\u3000\u3044');
-      // 既存の全角スペースはそのまま
       expect(escapeHtml('\u3042\u3000\u3044', { vertical: true })).toBe('\u3042\u3000\u3044');
     });
     test('\u30E9\u30C6\u30F3\u8A9E\u9593\u306E\u534A\u89D2\u30B9\u30DA\u30FC\u30B9\u3082\u5168\u89D2\u5316\u3055\u308C\u5358\u8A9E\u9023\u7D50\u306F\u7DAD\u6301\u3055\u308C\u308B', () => {
-      expect(escapeHtml('ab cd', { vertical: true })).toBe('<span class="latin">a</span><span class="latin">b</span>\u3000<span class="latin">c</span><span class="latin">d</span>');
+      expect(escapeHtml('ab cd', { vertical: true })).toBe(
+        '<span class="latin">a</span><span class="latin">b</span>\u3000<span class="latin">c</span><span class="latin">d</span>',
+      );
     });
   });
 
@@ -944,11 +1095,13 @@ if (import.meta.vitest) {
       const tmp = join(tmpdir(), `vp-noblank-${Date.now()}.txt`);
       try {
         writeFileSync(tmp, '【】\n本文1行目\n');
-        expect(parseTextFile(tmp, { vertical: false }).html)
-          .toMatch(/<p class="viewpoint">【】<\/p>\n<p[^>]*>本文1行目<\/p>/);
+        expect(parseTextFile(tmp, { vertical: false }).html).toMatch(
+          /<p class="viewpoint">【】<\/p>\n<p[^>]*>本文1行目<\/p>/,
+        );
         writeFileSync(tmp, '【】\n\n本文1行目\n');
-        expect(parseTextFile(tmp, { vertical: false }).html)
-          .toMatch(/<p class="viewpoint">【】<\/p>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
+        expect(parseTextFile(tmp, { vertical: false }).html).toMatch(
+          /<p class="viewpoint">【】<\/p>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/,
+        );
       } finally {
         unlinkSync(tmp);
       }
@@ -959,8 +1112,9 @@ if (import.meta.vitest) {
       try {
         for (const src of ['【】\n本文1行目\n', '【】\n\n本文1行目\n']) {
           writeFileSync(tmp, src);
-          expect(parseTextFile(tmp, { vertical: false, blankAfterHeading: true }).html)
-            .toMatch(/<p class="viewpoint">【】<\/p>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
+          expect(parseTextFile(tmp, { vertical: false, blankAfterHeading: true }).html).toMatch(
+            /<p class="viewpoint">【】<\/p>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/,
+          );
         }
       } finally {
         unlinkSync(tmp);
@@ -969,13 +1123,13 @@ if (import.meta.vitest) {
   });
 
   describe('parseTextLines lineNumbers', () => {
-    test('メタ行と末尾の視点行を飛ばした元テキストの行番号を data-line に付ける', () => {
-      const { html } = parseTextLines(['POV: A', '【】', '', '本文一', 'Memo: x', '「台詞」', '【】'], { lineNumbers: true });
+    test('メタ行を飛ばした元テキストの行番号を data-line に付ける', () => {
+      const { html } = parseTextLines(['Memo: a', '【】', '', '本文一', 'Memo: x', '「台詞」'], { lineNumbers: true });
       expect(html).toContain('<p class="viewpoint" data-line="1">');
       expect(html).toContain('<p class="paragraph-short" data-line="3">本文一</p>');
       expect(html).toContain('<p class="dialogue-short" data-line="5">');
       expect(html).toContain('<p class="empty" data-line="2">&nbsp;</p>');
-      expect(html).not.toContain('data-line="6"');
+      expect(html).not.toContain('data-line="4"');
     });
     test('行番号つきの空行も、区切り行の前後では区切りブロックに吸収される', () => {
       const { html } = parseTextLines(['一', '', '◇◇◇', '', '二'], { lineNumbers: true });
@@ -994,7 +1148,6 @@ if (import.meta.vitest) {
       try {
         const { html } = parseTextFile(tmp, { vertical: false });
         expect(html).toContain('epigraph-page');
-        // エピグラフページdivと本文の間に空行<p class="empty">を1つだけ挟む
         expect(html).toMatch(/<\/div>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
       } finally {
         unlinkSync(tmp);
@@ -1042,7 +1195,113 @@ if (import.meta.vitest) {
       writeFileSync(tmp, 'Epigraph: 引用——出典\n本文1行目\n');
       try {
         const { html } = parseTextFile(tmp, { vertical: false });
-        expect(html).toMatch(/<div class="epigraph">[\s\S]*?<\/div>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
+        expect(html).toMatch(
+          /<div class="epigraph">[\s\S]*?<\/div>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/,
+        );
+      } finally {
+        unlinkSync(tmp);
+      }
+    });
+  });
+
+  describe('escapeHtml の組み', () => {
+    test('rubyLayout: 句読点の前・開き括弧の後にはルビをはみ出させる', () => {
+      expect(escapeHtml('。|蹲《うずくま》漢', { rubyLayout: true })).toBe(
+        '。<ruby class="fit" style="--rt-off:-1;--rt-ls:0;--rb-pad:0.25">蹲<rt>うずくま</rt></ruby>漢',
+      );
+    });
+    test('rubyLayout: 1字を挟んで隣り合うルビは、その1字へのはみ出しを半分ずつ分け合う', () => {
+      expect(escapeHtml('漢|蹲《うずくま》の|蹲《うずくま》漢', { rubyLayout: true })).toBe(
+        '漢<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.375">蹲<rt>うずくま</rt></ruby>' +
+          'の<ruby class="fit" style="--rt-off:-0.5;--rt-ls:0;--rb-pad:0.375">蹲<rt>うずくま</rt></ruby>漢',
+      );
+    });
+    test('rubyLayout: 縦書きの2桁数字・横書きの半角2字は親文字1字分として数える', () => {
+      expect(escapeHtml('漢|12《じゅうに》漢', { rubyLayout: true })).toBe(
+        '漢<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.5"><span class="tcy">12</span><rt>じゅうに</rt></ruby>漢',
+      );
+      expect(escapeHtml('漢|AB《えーびー》漢', { rubyLayout: true, vertical: false })).toBe(
+        '漢<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.5">AB<rt>えーびー</rt></ruby>漢',
+      );
+    });
+    test('縦書きで × は latin にしない、略語のピリオドは dot、小数点は全角にする', () => {
+      expect(escapeHtml('a×b')).toBe('<span class="latin">a</span>×<span class="latin">b</span>');
+      expect(escapeHtml('O.M.')).toBe(
+        '<span class="latin">O</span><span class="dot">.</span><span class="latin">M</span><span class="dot">.</span>',
+      );
+      expect(escapeHtml('1.5')).toBe(
+        '<span class="upright">1</span><span class="upright">．</span><span class="upright">5</span>',
+      );
+    });
+    test('縦書きで ASCII のローマ数字を1字のローマ数字にして立てる', () => {
+      expect(escapeHtml('XII世')).toBe('<span class="upright">\u216B</span>世');
+    });
+    test('青空文庫の縦中横は縦書きだけ tcy にし、横書きでは中身をそのまま組む', () => {
+      expect(escapeHtml(`${TCY_OPEN}123${TCY_CLOSE}`)).toBe('<span class="tcy">123</span>');
+      expect(escapeHtml(`${TCY_OPEN}123${TCY_CLOSE}`, { vertical: false })).toBe('123');
+    });
+    test('横倒しの中のルビも組む', () => {
+      expect(tokenizeInlineMarkup('<<A|漢《かん》>>')).toEqual([{ type: 'sideways', text: 'A|漢《かん》' }]);
+      expect(escapeHtml('<<A|漢《かん》>>', { vertical: false })).toBe(
+        '<span class="sideways-latin">A<ruby>漢<rt>かん</rt></ruby></span>',
+      );
+    });
+  });
+
+  describe('本文として組まない行', () => {
+    test('Memo: と Epigraph: はメタ行', () => {
+      expect(isMetaLine('Memo: x')).toBe(true);
+      expect(isMetaLine('Epigraph: x')).toBe(true);
+      expect(isMetaLine('本文')).toBe(false);
+    });
+    test('stripInlineMarkup は行の単位の注記も数えない', () => {
+      expect(stripInlineMarkup('［＃３字下げ］本文')).toBe('本文');
+    });
+    test('getBodyLines は元の行番号を返し、aozora: false なら注記を読み替えない', () => {
+      const content = 'Memo: x\nEpigraph: 引用\n本文［＃「本文」に傍点］';
+      expect(getBodyLinesFromContent(content)).toEqual({
+        lines: ['《《本文》》'],
+        indices: [2],
+        hasViewpointStart: false,
+      });
+      expect(getBodyLinesFromContent(content, { keepEpigraphs: true, aozora: false })).toEqual({
+        lines: ['Epigraph: 引用', '本文［＃「本文」に傍点］'],
+        indices: [1, 2],
+        hasViewpointStart: false,
+      });
+    });
+    test('fileHasViewpointStart は空行・メタ行を飛ばした最初の行で判定する', () => {
+      const tmp = join(tmpdir(), `vp-start-${Date.now()}.txt`);
+      try {
+        writeFileSync(tmp, 'Memo: x\n\n【】\n本文\n');
+        expect(fileHasViewpointStart(tmp)).toBe(true);
+        writeFileSync(tmp, '本文\n【】\n');
+        expect(fileHasViewpointStart(tmp)).toBe(false);
+      } finally {
+        unlinkSync(tmp);
+      }
+    });
+  });
+
+  describe('parseTextLines 段落', () => {
+    test('推定3行を超える段落は long、「で始まる段落は dialogue', () => {
+      const { html } = parseTextLines(['あ'.repeat(91), '「い」', 'う'.repeat(90)], { chars: 30 });
+      expect(html).toBe(
+        `<p class="paragraph-long">${'あ'.repeat(91)}</p>\n<p class="dialogue-short">「い」</p>\n<p class="paragraph-short">${'う'.repeat(90)}</p>`,
+      );
+    });
+  });
+
+  describe('parseTextFileForEpub', () => {
+    test('先頭・末尾の空行と、区切り・視点行に隣接する空行は出さない', () => {
+      const tmp = join(tmpdir(), `epub-blank-${Date.now()}.txt`);
+      try {
+        writeFileSync(tmp, '\n【夜】\n\n一\n\n二\n\n*\n\n三\n\n');
+        const { xhtml, chapterTitle } = parseTextFileForEpub(tmp);
+        expect(chapterTitle).toBe('夜');
+        expect(xhtml).toBe(
+          '<p class="viewpoint">【夜】</p>\n<p>一</p>\n<p><br /></p>\n<p>二</p>\n<p class="separator">◇◇◇</p>\n<p>三</p>',
+        );
       } finally {
         unlinkSync(tmp);
       }
@@ -1058,7 +1317,9 @@ if (import.meta.vitest) {
     });
     test('separator-block \u3068 p.separator \u306F\u9664\u5916', () => {
       expect(countChars('<p>\u672C\u6587</p>\n<p class="separator">\u25C7\u25C7\u25C7</p>')).toBe(2);
-      expect(countChars('<p>\u672C\u6587</p>\n<div class="separator-block"><p class="separator">\u25C7</p></div>')).toBe(2);
+      expect(
+        countChars('<p>\u672C\u6587</p>\n<div class="separator-block"><p class="separator">\u25C7</p></div>'),
+      ).toBe(2);
     });
     test('&nbsp; \u3084 &amp; \u306A\u3069\u306E\u30A8\u30F3\u30C6\u30A3\u30C6\u30A3\u306F\u4E2D\u8EAB\u306B\u5C55\u958B\u305B\u305A\u7A7A\u767D\u6271\u3044', () => {
       expect(countChars('<p>&nbsp;</p>')).toBe(0);

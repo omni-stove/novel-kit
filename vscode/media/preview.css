@@ -4,7 +4,8 @@
   --sheet-fg: var(--vscode-editor-foreground, #000);
 }
 
-html, body {
+html,
+body {
   height: 100%;
   margin: 0;
   padding: 0;
@@ -19,7 +20,8 @@ body {
   font-size: var(--vscode-font-size);
 }
 
-#toolbar, #setup {
+#toolbar,
+#setup {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -41,7 +43,8 @@ body {
   display: none;
 }
 
-#toolbar label, #setup label {
+#toolbar label,
+#setup label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -64,7 +67,9 @@ legend {
   color: var(--vscode-descriptionForeground);
 }
 
-input, select, button {
+input,
+select,
+button {
   font: inherit;
   color: var(--vscode-input-foreground);
   background: var(--vscode-input-background);
@@ -134,7 +139,9 @@ button:disabled {
   white-space: nowrap;
 }
 
-#derived, #layout-file, #language-note {
+#derived,
+#layout-file,
+#language-note {
   color: var(--vscode-descriptionForeground);
   align-self: center;
 }
@@ -221,6 +228,11 @@ button:disabled {
 
 /* PDF の改ページ（page-break-before: always）を段の区切りに置き換える */
 #flow .section.page-break {
+  break-before: column;
+}
+
+/* 青空文庫の［＃改ページ］も段の区切りにする */
+#flow .page-break-marker {
   break-before: column;
 }
 

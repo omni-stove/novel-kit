@@ -1,0 +1,74 @@
+# main に push すると、前回のリリースから変わったものだけを CalVer（YYYY.MDD.N、日付は JST）でリリースする。
+# MDD はゼロ埋めしない月と日（1月5日なら 105）。semver の各部は先頭に 0 を置けず、VS Code 拡張の version も semver に限られるため。
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cli
+            dir: .
+            tag-prefix: cli-v
+            paths: bin src package.json pnpm-lock.yaml
+          - name: vscode
+            dir: vscode
+            tag-prefix: vscode-v
+            paths: vscode src package.json pnpm-lock.yaml
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # 前回のタグとの差分と、今日のリリース数を数えるのにタグと履歴が要る
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: version
+        env:
+          PREFIX: ${{ matrix.tag-prefix }}
+          PATHS: ${{ matrix.paths }}
+        run: |
+          last=$(git tag -l "${PREFIX}*" --sort=-creatordate | head -n 1)
+          # shellcheck disable=SC2086
+          if [ -n "$last" ] && git diff --quiet "$last" HEAD -- $PATHS; then
+            echo "$last から変更なし"
+            exit 0
+          fi
+          date=$(TZ=Asia/Tokyo date +%Y.%-m%d)
+          count=$(git tag -l "${PREFIX}${date}.*" | wc -l | tr -d ' ')
+          echo "version=${date}.${count}" >> "$GITHUB_OUTPUT"
+
+      # pnpm のバージョンは package.json の packageManager から読む
+      - if: steps.version.outputs.version
+        uses: pnpm/action-setup@v4
+
+      - if: steps.version.outputs.version
+        uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - if: steps.version.outputs.version
+        run: pnpm install --frozen-lockfile
+
+      # リポジトリの version は 0.0.0 のままにして、リリースのときだけ書き込む
+      - if: steps.version.outputs.version
+        working-directory: ${{ matrix.dir }}
+        run: |
+          npm pkg set version=${{ steps.version.outputs.version }}
+          pnpm run release

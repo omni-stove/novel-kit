@@ -2,5 +2,8 @@
 !package.json
 !README.md
 !dist/extension.cjs
+!dist/novel-cli.cjs
+!dist/pdf-renderer.cjs
+!dist/viewer/**
 !media/**
 !schemas/**

@@ -2,7 +2,10 @@
  * Vivliostyle で PDF 化する HTML の共通部品
  */
 
-// Google Fonts の読み込みタグ（family は css2 API のクエリ形式。例: 'Noto+Serif+JP:wght@400'）
+/**
+ * Google Fonts の読み込みタグを返す。
+ * family は css2 API のクエリ形式（例: 'Noto+Serif+JP:wght@400'）。
+ */
 export function googleFontsLinks(family) {
   return `  <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,11 +13,32 @@ export function googleFontsLinks(family) {
 }
 
 /**
+ * 青空文庫の注記（改ページ・見出し・太字）から組んだ要素のスタイル。pdf / novel-pdf / epub が共有する。
+ * 見出しは本文と同じ大きさのゴシック体の太字にする（章の見出し【】とは別の、本文中の見出し）
+ */
+export const AOZORA_CSS = `
+    .page-break-marker {
+      break-before: page;
+      page-break-before: always;
+    }
+
+    .aozora-heading {
+      font-family: "Noto Sans JP", "游ゴシック", "Yu Gothic", "Hiragino Sans", sans-serif;
+      font-weight: bold;
+      text-indent: 0;
+    }
+
+    strong.bold {
+      font-weight: bold;
+    }
+`;
+
+/**
  * 縦書き本文で escapeHtml（text-parser）が生成する span クラスのスタイル。
  * pdf / novel-pdf が共有する。
  */
 export const VERTICAL_GLYPH_CSS = `
-    /* 1文字ずつの欧文・数字（.latin / .upright）。text-combine-upright: all だと
+    /* text-combine-upright: all だと
        Chromium は合成した横組みをフォントの ascent/descent で配置するため、
        Noto Serif JP（Web フォント版）では列の中央より約 0.2em 右・やや下へ寄る。
        フォントの縦組み用メトリクス（vmtx）で配置する upright なら列の中央に揃う。 */
@@ -34,8 +58,7 @@ export const VERTICAL_GLYPH_CSS = `
       text-orientation: upright;
     }
 
-    /* 縦中横（1〜2桁の数字・!?等）。
-       text-combine-upright: all は Chromium/Vivliostyle で合成結果が
+    /* text-combine-upright: all は Chromium/Vivliostyle で合成結果が
        1em より狭いと中央に揃わず左へ寄る（例: 【+42Y】の「42」だけが左寄り）。
        横書きの inline-block を 1em 幅で中央寄せして確実にセンタリングする。 */
     .tcy {
@@ -47,8 +70,7 @@ export const VERTICAL_GLYPH_CSS = `
       line-height: 1em;
     }
 
-    /* 単独の全角ハイフン（章番号「1-1」の区切り等）。
-       .dash の sideways や glyph の rotate ではフォントのインク位置の都合で列の中央より
+    /* .dash の sideways や glyph の rotate ではフォントのインク位置の都合で列の中央より
        左へずれるため、tcy と同じ 1em の正方セル（配置が確実）にグリフを透明で残して
        文字数カウントを保ちつつ、::before でセル中央に縦向きの短い棒を実描画する。 */
     .hyphen {
@@ -73,9 +95,8 @@ export const VERTICAL_GLYPH_CSS = `
       background: #000;
     }
 
-    /* 略語の区切りピリオド（O.M. / U.S.A. 等）。素の「.」は mixed のまま
-       セルの左下へ寄ってずれる。縦書きの句点と同じく、1em セルの右上へ
-       フォント本来のピリオド字形のまま寄せる（前の文字の直後にまとまって読める）。 */
+    /* 素の「.」は mixed のままだとセルの左下へ寄ってずれるため、
+       1em セルの右上へフォント本来のピリオド字形のまま寄せる。 */
     .dot {
       display: inline-flex;
       writing-mode: horizontal-tb;
@@ -97,8 +118,7 @@ export const VERTICAL_GLYPH_CSS = `
       position: relative;
     }
 
-    /* ルビは親文字の右（block-start 側）に絶対配置する。
-       プレビューは段組み（multicol）で頁を送るため、rt の箱を段の端より外に置くと
+    /* プレビューは段組み（multicol）で頁を送るため、rt の箱を段の端より外に置くと
        Chromium が段の内側へ押し戻して親文字に重ねて描く（各頁の先頭行だけルビが潰れる）。
        箱は親文字の右端に揃えて段内に置き、レイアウトに影響しない transform で
        自分の幅ぶん（-0.4em の食い込み込み）右へ見かけだけずらす。 */
@@ -111,8 +131,6 @@ export const VERTICAL_GLYPH_CSS = `
       white-space: nowrap;
     }
 
-    /* escapeHtml の rubyLayout が字数から決めた配置（--rt-* は rt の em、--rb-* は親文字の em）。
-       ルビが短ければ字間を空けて親文字いっぱいに広げ、長ければ親文字側の字間・前後のアキを広げる */
     ruby.fit {
       white-space: nowrap;
       padding-inline: calc(var(--rb-pad, 0) * 1em);
@@ -132,3 +150,15 @@ export const VERTICAL_GLYPH_CSS = `
       letter-spacing: calc(var(--rt-ls, 0) * 1em);
     }
 `;
+
+if (import.meta.vitest) {
+  const { describe, test, expect } = import.meta.vitest;
+
+  describe('googleFontsLinks', () => {
+    test('css2 API のクエリ形式の family をそのまま読み込む', () => {
+      expect(googleFontsLinks('Noto+Serif+JP:wght@400')).toContain(
+        '<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400&display=swap" rel="stylesheet">',
+      );
+    });
+  });
+}

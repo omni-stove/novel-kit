@@ -13,24 +13,25 @@
  *   --title <text>        書籍タイトル（デフォルト: ファイル名）
  *   --author <text>       著者名
  *   --horizontal          横書きモード（デフォルトは縦書き）
+ *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ◇◇◇）
  */
 
-import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
-import { join, basename, resolve } from 'path';
-import { tmpdir } from 'os';
-import { execSync } from 'child_process';
-import { randomUUID } from 'crypto';
-import { parseTextFileForEpub } from './lib/text-parser.mjs';
-import { parseWithSectionNumbering, requireInputFiles, logSections, startsNewChapter, FILE_SEPARATOR_MARK } from './lib/manuscript.mjs';
-import { parseCliArgs, ARG, requireOutput, runMain } from './lib/cli.mjs';
+import { execSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
+import { ARG, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
+import { AOZORA_CSS } from './lib/html.mjs';
+import { logSections, parseWithSectionNumbering, requireInputFiles, startsNewChapter } from './lib/manuscript.mjs';
+import { escapeXml, parseTextFileForEpub, SCENE_BREAK_MARK } from './lib/text-parser.mjs';
 
-function parseArgs(argv) {
-  return parseCliArgs(argv, [
-    ARG.output,
-    ARG.title,
-    ARG.author,
-    { key: 'vertical', flags: ['--horizontal'], value: false },
-  ], { vertical: true });
+export function parseArgs(argv) {
+  return parseCliArgs(
+    argv,
+    [ARG.output, ARG.title, ARG.author, { key: 'vertical', flags: ['--horizontal'], value: false }, ARG.sceneBreak],
+    { vertical: true, sceneBreak: SCENE_BREAK_MARK },
+  );
 }
 function generateStyleCss(vertical) {
   const writingMode = vertical ? 'vertical-rl' : 'horizontal-tb';
@@ -64,7 +65,7 @@ p.viewpoint {
   text-align: start;
   text-indent: 0;
 }
-
+${AOZORA_CSS}
 
 .dash {
   ${vertical ? 'text-orientation: sideways;\n  -webkit-text-orientation: sideways;' : ''}
@@ -276,8 +277,12 @@ ${navItems.join('\n')}
 </html>`;
 }
 
-// 1章を1つのxhtmlにする（目次と改ページの単位）。章題のない章の目次名はファイル名で代用する
-export function groupIntoChapters(sections, fileNames, bookTitle) {
+/**
+ * 1章を1つのxhtmlにする（目次と改ページの単位）。章題のない章の目次名は、章が1つなら書名、
+ * 複数なら「番号. ファイル名」で代用する
+ * sceneBreak: 章の途中で切れたファイルの継ぎ目に挟む記号（場面区切りと同じ）
+ */
+export function groupIntoChapters(sections, fileNames, bookTitle, sceneBreak = SCENE_BREAK_MARK) {
   const chapters = [];
   sections.forEach((section, i) => {
     if (startsNewChapter(sections, i)) {
@@ -285,7 +290,7 @@ export function groupIntoChapters(sections, fileNames, bookTitle) {
       return;
     }
     const chapter = chapters[chapters.length - 1];
-    chapter.xhtml += `\n<p class="separator">${FILE_SEPARATOR_MARK}</p>\n${section.xhtml}`;
+    chapter.xhtml += `\n<p class="separator">${escapeXml(sceneBreak)}</p>\n${section.xhtml}`;
     chapter.fileNames.push(fileNames[i]);
   });
 
@@ -306,10 +311,15 @@ export async function main(argv = process.argv.slice(2)) {
 
   console.log(`入力ファイル: ${inputFiles.length}件`);
 
-  const sections = parseWithSectionNumbering(inputFiles, parseTextFileForEpub);
+  const sections = parseWithSectionNumbering(inputFiles, parseTextFileForEpub, { sceneBreak: args.sceneBreak });
   const totalChars = logSections(sections, inputFiles);
 
-  const chapters = groupIntoChapters(sections, inputFiles.map(f => basename(f)), title);
+  const chapters = groupIntoChapters(
+    sections,
+    inputFiles.map((f) => basename(f)),
+    title,
+    args.sceneBreak,
+  );
 
   const tmpDir = mkdtempSync(join(tmpdir(), 'epub-'));
   const oebpsDir = join(tmpDir, 'OEBPS');
@@ -324,7 +334,10 @@ export async function main(argv = process.argv.slice(2)) {
     writeFileSync(join(tmpDir, 'mimetype'), 'application/epub+zip');
     writeFileSync(join(metaInfDir, 'container.xml'), generateContainerXml());
     writeFileSync(join(oebpsDir, 'style.css'), generateStyleCss(args.vertical));
-    writeFileSync(join(oebpsDir, 'content.opf'), generateContentOpf(bookId, title, args.author, chapters, hasTitle, args.vertical));
+    writeFileSync(
+      join(oebpsDir, 'content.opf'),
+      generateContentOpf(bookId, title, args.author, chapters, hasTitle, args.vertical),
+    );
     writeFileSync(join(oebpsDir, 'toc.xhtml'), generateTocXhtml(chapters, hasTitle));
 
     if (hasTitle) {
@@ -352,7 +365,7 @@ runMain(import.meta.url, main);
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
-  const section = (xhtml, opts = {}) => ({ xhtml, chapterTitle: null, hasViewpointStart: false, hasViewpointEnd: false, ...opts });
+  const section = (xhtml, opts = {}) => ({ xhtml, chapterTitle: null, hasViewpointStart: false, ...opts });
 
   describe('groupIntoChapters', () => {
     test('章の途中で切れたファイルは◇◇◇を挟んで前の章のxhtmlにつなぐ', () => {
@@ -361,28 +374,57 @@ if (import.meta.vitest) {
         ['010.txt', '020.txt'],
         '本',
       );
-      expect(chapters).toEqual([{
-        xhtml: '<p>一</p>\n<p class="separator">◇◇◇</p>\n<p>続き</p>',
-        title: '1　朝',
-        fileNames: ['010.txt', '020.txt'],
-      }]);
+      expect(chapters).toEqual([
+        {
+          xhtml: '<p>一</p>\n<p class="separator">◇◇◇</p>\n<p>続き</p>',
+          title: '1　朝',
+          fileNames: ['010.txt', '020.txt'],
+        },
+      ]);
     });
-    test('視点行で始まるファイルと、前のファイルが【】で終わるファイルから新しい章にする', () => {
+    test('【】の見出しで始まるファイルから新しい章にする', () => {
       const chapters = groupIntoChapters(
-        [section('a', { hasViewpointEnd: true }), section('b'), section('c', { hasViewpointStart: true, chapterTitle: '3' })],
+        [
+          section('a'),
+          section('b', { hasViewpointStart: true }),
+          section('c', { hasViewpointStart: true, chapterTitle: '3' }),
+        ],
         ['010.txt', '020.txt', '030.txt'],
         '本',
       );
-      expect(chapters.map(ch => ch.xhtml)).toEqual(['a', 'b', 'c']);
+      expect(chapters.map((ch) => ch.xhtml)).toEqual(['a', 'b', 'c']);
     });
     test('章題のない章の目次名は、1章だけなら書名、複数章なら「番号. ファイル名」', () => {
       expect(groupIntoChapters([section('a')], ['010.txt'], '本')[0].title).toBe('本');
       const chapters = groupIntoChapters(
-        [section('a', { hasViewpointEnd: true }), section('b'), section('c')],
+        [section('a'), section('b', { hasViewpointStart: true }), section('c')],
         ['010.txt', '020.txt', '030.txt'],
         '本',
       );
-      expect(chapters.map(ch => ch.title)).toEqual(['1. 010.txt', '2. 020.txt, 030.txt']);
+      expect(chapters.map((ch) => ch.title)).toEqual(['1. 010.txt', '2. 020.txt, 030.txt']);
+    });
+    test('継ぎ目の記号は指定でき、XMLとしてエスケープする', () => {
+      const chapters = groupIntoChapters([section('a'), section('b')], ['010.txt', '020.txt'], '本', '<*>');
+      expect(chapters[0].xhtml).toBe('a\n<p class="separator">&lt;*&gt;</p>\nb');
+    });
+  });
+
+  describe('parseArgs', () => {
+    test('既定は縦書き・場面区切り ◇◇◇、--horizontal で横書き', () => {
+      expect(parseArgs(['-o', 'out.epub', 'a.txt'])).toEqual({
+        files: ['a.txt'],
+        output: 'out.epub',
+        title: null,
+        author: null,
+        vertical: true,
+        sceneBreak: '◇◇◇',
+      });
+      expect(parseArgs(['--horizontal']).vertical).toBe(false);
+    });
+    test('--output・--title・--author・--scene-break を読む', () => {
+      expect(
+        parseArgs(['--output=o.epub', '--title', '書名', '--author', '著者', '--scene-break', '＊', 'dir/']),
+      ).toMatchObject({ files: ['dir/'], output: 'o.epub', title: '書名', author: '著者', sceneBreak: '＊' });
     });
   });
 }

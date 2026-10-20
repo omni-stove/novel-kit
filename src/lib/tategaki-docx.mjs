@@ -6,22 +6,25 @@
  * 文字グリッド（cols/rows）は呼び出し側の応募規定に合わせて渡す。
  */
 
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { parseAozoraLine } from './aozora.mjs';
+import { fail } from './cli.mjs';
+import { toFullWidth, toVerticalBase, toVerticalText } from './docx.mjs';
+import { countWrappedRows, normalizeTcy } from './grid.mjs';
 import {
-  escapeXml,
+  countTextChars,
   epigraphDisplayLines,
+  escapeXml,
   isEpigraphLine,
   isSeparator,
   isViewpointLine,
   parseEpigraphLine,
+  SCENE_BREAK_MARK,
+  separatorMark,
   stripInlineMarkup,
   tokenizeInlineMarkup,
-  countTextChars,
 } from './text-parser.mjs';
-import { countWrappedRows, normalizeTcy } from './grid.mjs';
-import { toFullWidth, toVerticalBase, toVerticalText } from './docx.mjs';
-import { existsSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { fail } from './cli.mjs';
 
 const DEFAULT_TEMPLATE_PATH = fileURLToPath(new URL('../templates/tategaki-a4-42x34.docx', import.meta.url));
 
@@ -41,10 +44,13 @@ function plainRunXml(text) {
   return runXml(toFullWidth(text));
 }
 
-// 2桁数字の縦中横。idは隣接する縦中横同士が結合しないよう連番にする
+/** 2桁数字を縦中横にしたランの XML を返す。隣接する縦中横同士が Word で結合しないよう、id は連番にする。 */
 let tcyId = 1;
 function tcyRunXml(digits) {
-  return runXml(digits, `<w:rPr><w:rFonts w:hint="eastAsia"/><w:eastAsianLayout w:id="${tcyId++}" w:vert="1" w:vertCompress="1"/></w:rPr>`);
+  return runXml(
+    digits,
+    `<w:rPr><w:rFonts w:hint="eastAsia"/><w:eastAsianLayout w:id="${tcyId++}" w:vert="1" w:vertCompress="1"/></w:rPr>`,
+  );
 }
 
 // 数字の立て方は PDF 出力（text-parser の escapeHtml）と揃える
@@ -65,10 +71,12 @@ export function textRunXml(text) {
 function rubyRunXml(base, ruby) {
   const rt = runXml(toVerticalText(ruby), '<w:rPr><w:rFonts w:hint="eastAsia"/><w:sz w:val="10"/></w:rPr>');
   const rb = runXml(toVerticalText(base));
-  return `<w:r>${RPR}<w:ruby>` +
+  return (
+    `<w:r>${RPR}<w:ruby>` +
     '<w:rubyPr><w:rubyAlign w:val="distributeSpace"/><w:hps w:val="10"/><w:hpsRaise w:val="18"/>' +
     '<w:hpsBaseText w:val="21"/><w:lid w:val="ja-JP"/></w:rubyPr>' +
-    `<w:rt>${rt}</w:rt><w:rubyBase>${rb}</w:rubyBase></w:ruby></w:r>`;
+    `<w:rt>${rt}</w:rt><w:rubyBase>${rb}</w:rubyBase></w:ruby></w:r>`
+  );
 }
 
 function emphasisRunXml(text) {
@@ -85,15 +93,22 @@ function sidewaysRunXml(text) {
 }
 
 export function lineToRunsXml(line) {
-  return tokenizeInlineMarkup(line).map(token => {
-    switch (token.type) {
-      case 'emphasis': return emphasisRunXml(token.text);
-      case 'ruby': return rubyRunXml(token.base, token.ruby);
-      case 'italic': return italicRunXml(token.text);
-      case 'sideways': return sidewaysRunXml(token.text);
-      default: return textRunXml(token.text);
-    }
-  }).join('');
+  return tokenizeInlineMarkup(line)
+    .map((token) => {
+      switch (token.type) {
+        case 'emphasis':
+          return emphasisRunXml(token.text);
+        case 'ruby':
+          return rubyRunXml(token.base, token.ruby);
+        case 'italic':
+          return italicRunXml(token.text);
+        case 'sideways':
+          return sidewaysRunXml(token.text);
+        default:
+          return textRunXml(token.text);
+      }
+    })
+    .join('');
 }
 
 export function paragraphXml(runsXml, { center = false, right = false, pageBreakBefore = false } = {}) {
@@ -103,13 +118,25 @@ export function paragraphXml(runsXml, { center = false, right = false, pageBreak
   return `<w:p>${pPr}${br}${runsXml}</w:p>`;
 }
 
-// 出力（buildBodyXml）とページ見積もり（estimateBodyPages）で改ページ位置がずれないよう、走査を共有する
+/**
+ * 本文の行を走査し、出す行ごとに emit(line, { pageBreakBefore, epigraph }) を呼ぶ。
+ * 2つ目以降の視点行【】と、pageBreakBeforeBody 指定時の最初の行は改ページ付きにする。
+ * 青空文庫の改ページは次の行の前で改ページし、字下げ範囲の注記行は出さず、行頭の字下げなどの注記は外す。
+ * エピグラフは cols で折り返した表示行を epigraph に渡し、直後が空行でなければ空行を1つ補う。
+ * 出力（buildBodyXml）とページ見積もり（estimateBodyPages）で改ページ位置がずれないよう、走査を共有する。
+ */
 export function walkBodyLines(lines, { cols, pageBreakBeforeBody = false }, emit) {
   let isFirstViewpoint = true;
   let needBodyPageBreak = pageBreakBeforeBody;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const aozora = parseAozoraLine(lines[i]);
+    if (aozora.kind === 'pageBreak') {
+      needBodyPageBreak = true;
+      continue;
+    }
+    if (aozora.kind !== 'text') continue;
+    const line = aozora.text;
 
     if (isEpigraphLine(line)) {
       const { quote, source } = parseEpigraphLine(line);
@@ -132,40 +159,53 @@ export function countGridRows(line, cols) {
 }
 
 export function bodyDisplayText(lines) {
-  return lines.map(l => {
-    if (isEpigraphLine(l)) {
-      const { quote, source } = parseEpigraphLine(l);
-      return stripInlineMarkup(epigraphDisplayLines(quote, source).join(''));
-    }
-    return stripInlineMarkup(l);
-  }).join('');
+  return lines
+    .map((l) => {
+      if (isEpigraphLine(l)) {
+        const { quote, source } = parseEpigraphLine(l);
+        return stripInlineMarkup(epigraphDisplayLines(quote, source).join(''));
+      }
+      return stripInlineMarkup(l);
+    })
+    .join('');
 }
 
 export function countBodyChars(lines) {
   return countTextChars(bodyDisplayText(lines));
 }
 
-// テンプレート配布元の名前が作成者に残らないよう差し替える（作者名を出さない応募先では author に空文字を渡す）
+/**
+ * docProps/core.xml のタイトル・作成者・最終更新者を差し替える。
+ * テンプレート配布元の名前が作成者に残らないようにするためで、作者名を出さない応募先では author に空文字を渡す。
+ */
 export function updateCoreProps(coreXml, title, author) {
   return coreXml
     .replace(/<dc:title>.*?<\/dc:title>/s, `<dc:title>${escapeXml(title)}</dc:title>`)
     .replace(/<dc:creator>.*?<\/dc:creator>/s, `<dc:creator>${escapeXml(author)}</dc:creator>`)
-    .replace(/<cp:lastModifiedBy>.*?<\/cp:lastModifiedBy>/s, `<cp:lastModifiedBy>${escapeXml(author)}</cp:lastModifiedBy>`);
+    .replace(
+      /<cp:lastModifiedBy>.*?<\/cp:lastModifiedBy>/s,
+      `<cp:lastModifiedBy>${escapeXml(author)}</cp:lastModifiedBy>`,
+    );
 }
 
-export function buildBodyXml(lines, { cols, headParagraphs = [], tailParagraphs = [], pageBreakBeforeBody = false }) {
+export function buildBodyXml(
+  lines,
+  { cols, headParagraphs = [], tailParagraphs = [], pageBreakBeforeBody = false, sceneBreak = SCENE_BREAK_MARK },
+) {
   const paragraphs = [...headParagraphs];
 
   walkBodyLines(lines, { cols, pageBreakBeforeBody }, (line, { pageBreakBefore, epigraph }) => {
     if (epigraph) {
-      // エピグラフ: PDFと同じく下揃え（縦書きのright）
+      // PDF と同じく下揃えにする（縦書きでは right が下揃え）
       epigraph.forEach((text, i) => {
-        paragraphs.push(paragraphXml(lineToRunsXml(text), { right: true, pageBreakBefore: i === 0 && pageBreakBefore }));
+        paragraphs.push(
+          paragraphXml(lineToRunsXml(text), { right: true, pageBreakBefore: i === 0 && pageBreakBefore }),
+        );
       });
     } else if (line.trim() === '') {
       paragraphs.push(paragraphXml('', { pageBreakBefore }));
     } else if (isSeparator(line)) {
-      paragraphs.push(paragraphXml(textRunXml(line), { center: true, pageBreakBefore }));
+      paragraphs.push(paragraphXml(textRunXml(separatorMark(line, sceneBreak)), { center: true, pageBreakBefore }));
     } else {
       paragraphs.push(paragraphXml(lineToRunsXml(line), { pageBreakBefore }));
     }
@@ -182,7 +222,7 @@ export function estimateBodyPages(lines, { cols, rows, headLines = [], tailLines
     pages++;
     pageRows = 0;
   };
-  const addLine = line => {
+  const addLine = (line) => {
     for (let n = countGridRows(line, cols); n > 0; n--) {
       if (pageRows >= rows) breakPage();
       pageRows++;
@@ -214,34 +254,26 @@ export function injectBody(documentXml, bodyXml, synopsisXml = null) {
   let content;
   let finalSectPr = sectPr;
   if (synopsisXml != null) {
-    // セクション1（あらすじ）: フッターなし。区切りは改ページ
-    const synopsisSectPr = sectPr
-      .replace(/<w:footerReference[^>]*\/>/g, '')
-      .replace(/<w:type[^>]*\/>/, '');
-    // セクション2（本文）: 改ページ開始（continuousを外す）＋ページ番号を1から
-    finalSectPr = sectPr
-      .replace(/<w:type[^>]*\/>/, '')
-      .replace(/<w:cols/, '<w:pgNumType w:start="1"/><w:cols');
+    const synopsisSectPr = sectPr.replace(/<w:footerReference[^>]*\/>/g, '').replace(/<w:type[^>]*\/>/, '');
+    finalSectPr = sectPr.replace(/<w:type[^>]*\/>/, '').replace(/<w:cols/, '<w:pgNumType w:start="1"/><w:cols');
     content = `${synopsisXml}<w:p><w:pPr>${synopsisSectPr}</w:pPr></w:p>${bodyXml}`;
   } else {
     content = bodyXml;
   }
 
-  return documentXml.replace(
-    /<w:body>[\s\S]*<\/w:body>/,
-    () => `<w:body>${content}${finalSectPr}</w:body>`,
-  );
+  return documentXml.replace(/<w:body>[\s\S]*<\/w:body>/, () => `<w:body>${content}${finalSectPr}</w:body>`);
 }
 
 /**
  * テンプレートの文字グリッド（w:docGrid）を指定の字詰めに組み替える。
- * 用紙サイズ・余白・本文フォントサイズはテンプレートのものを使い、
+ * 用紙サイズ・余白はテンプレートのものを使い、本文フォントサイズは fontPt（既定 10.5pt）で受け取って、
  * 縦書き（tbRl）として「紙の高さ方向＝1行の字数」「紙の幅方向＝行数」で刻み幅を出す。
  *
  * Word の docGrid の刻み幅:
  *   linePitch = 行の送り（twip）
  *   charSpace = （1字の送り − フォントサイズ）を 1/4096 pt 単位で表した値
  * 端数は切り捨て側（＝送りを詰める側）に寄せて、指定の字数・行数が必ず収まるようにする。
+ * 全セクションの w:sectPr に適用し、w:docGrid がなければ追加する。
  */
 export function applyDocGrid(documentXml, { cols, rows, fontPt = 10.5 }) {
   const sectPr = documentXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/)?.[0];
@@ -256,26 +288,24 @@ export function applyDocGrid(documentXml, { cols, rows, fontPt = 10.5 }) {
   const pgSz = /<w:pgSz[^>]*\/>/;
   const pgMar = /<w:pgMar[^>]*\/>/;
 
-  // 縦書き: 字は紙の高さ方向に並び、行は紙の幅方向に並ぶ
   const charAxis = attr(pgSz, 'h') - attr(pgMar, 'top') - attr(pgMar, 'bottom');
   const lineAxis = attr(pgSz, 'w') - attr(pgMar, 'left') - attr(pgMar, 'right');
 
   const linePitch = Math.floor(lineAxis / rows);
-  const charSpace = Math.floor((charAxis / cols - fontPt * 20) / 20 * 4096);
+  const charSpace = Math.floor(((charAxis / cols - fontPt * 20) / 20) * 4096);
   const docGrid = `<w:docGrid w:type="linesAndChars" w:linePitch="${linePitch}" w:charSpace="${charSpace}"/>`;
 
-  return documentXml.replace(
-    /<w:sectPr[\s\S]*?<\/w:sectPr>/g,
-    section => (/<w:docGrid[^>]*\/>/.test(section)
+  return documentXml.replace(/<w:sectPr[\s\S]*?<\/w:sectPr>/g, (section) =>
+    /<w:docGrid[^>]*\/>/.test(section)
       ? section.replace(/<w:docGrid[^>]*\/>/, docGrid)
-      : section.replace('</w:sectPr>', `${docGrid}</w:sectPr>`)),
+      : section.replace('</w:sectPr>', `${docGrid}</w:sectPr>`),
   );
 }
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
 
-  const texts = xml => [...xml.matchAll(/<w:t [^>]*>(.*?)<\/w:t>/g)].map(m => m[1]);
+  const texts = (xml) => [...xml.matchAll(/<w:t [^>]*>(.*?)<\/w:t>/g)].map((m) => m[1]);
 
   describe('textRunXml', () => {
     test('2桁の数字だけ縦中横にし、1桁・3桁以上は全角化して1字ずつ立てる', () => {
@@ -284,7 +314,7 @@ if (import.meta.vitest) {
       expect(xml.match(/w:vertCompress="1"/g)).toHaveLength(1);
     });
     test('隣り合う縦中横には別々のidを振る', () => {
-      const ids = [...textRunXml('10と20').matchAll(/w:eastAsianLayout w:id="(\d+)"/g)].map(m => m[1]);
+      const ids = [...textRunXml('10と20').matchAll(/w:eastAsianLayout w:id="(\d+)"/g)].map((m) => m[1]);
       expect(ids).toHaveLength(2);
       expect(ids[0]).not.toBe(ids[1]);
     });
@@ -334,11 +364,11 @@ if (import.meta.vitest) {
 
     test('2つ目以降の視点行で改ページする（冒頭の視点行はしない）', () => {
       const out = walk(['【1】', '本文', '【2】', '本文']);
-      expect(out.map(o => o.pageBreakBefore)).toEqual([false, false, true, false]);
+      expect(out.map((o) => o.pageBreakBefore)).toEqual([false, false, true, false]);
     });
     test('pageBreakBeforeBodyなら本文の先頭で改ページする', () => {
       const out = walk(['【1】', '本文'], { pageBreakBeforeBody: true });
-      expect(out.map(o => o.pageBreakBefore)).toEqual([true, false]);
+      expect(out.map((o) => o.pageBreakBefore)).toEqual([true, false]);
     });
     test('エピグラフは表示行に展開して渡し、直後に空行がなければ1行補う', () => {
       const out = walk(['【1】', 'Epigraph: 引用——出典', '本文']);
@@ -346,8 +376,21 @@ if (import.meta.vitest) {
       expect(out[2]).toEqual({ line: '', pageBreakBefore: false, epigraph: null });
       expect(out[3].line).toBe('本文');
     });
+    test('青空文庫の改ページは次の行の前で改ページし、字下げ範囲の注記行は出さず、行頭の注記は外す', () => {
+      const out = walk([
+        '【1】',
+        '［＃改ページ］',
+        '本文',
+        '［＃ここから２字下げ］',
+        '中',
+        '［＃ここで字下げ終わり］',
+        '［＃３字下げ］行',
+      ]);
+      expect(out.map((o) => o.line)).toEqual(['【1】', '本文', '中', '行']);
+      expect(out.map((o) => o.pageBreakBefore)).toEqual([false, true, false, false]);
+    });
     test('エピグラフの直後に空行があれば補わない', () => {
-      expect(walk(['Epigraph: 引用', '', '本文']).map(o => o.line)).toEqual(['Epigraph: 引用', '', '本文']);
+      expect(walk(['Epigraph: 引用', '', '本文']).map((o) => o.line)).toEqual(['Epigraph: 引用', '', '本文']);
     });
     test('1行に収まらないエピグラフは引用行と出典行に分ける', () => {
       const out = walk([`Epigraph: ${'あ'.repeat(10)}——出典`], { cols: 10 });
@@ -401,14 +444,16 @@ if (import.meta.vitest) {
 
   describe('updateCoreProps', () => {
     test('タイトル・作成者・最終更新者を差し替え、空文字なら作者名を消す', () => {
-      const core = '<dc:title>雛形</dc:title><dc:creator>配布元</dc:creator><cp:lastModifiedBy>配布元</cp:lastModifiedBy>';
+      const core =
+        '<dc:title>雛形</dc:title><dc:creator>配布元</dc:creator><cp:lastModifiedBy>配布元</cp:lastModifiedBy>';
       expect(updateCoreProps(core, 'A&B', '')).toBe(
         '<dc:title>A&amp;B</dc:title><dc:creator></dc:creator><cp:lastModifiedBy></cp:lastModifiedBy>',
       );
     });
   });
 
-  const SECT_PR = '<w:sectPr><w:footerReference w:type="default" r:id="rId1"/><w:type w:val="continuous"/>' +
+  const SECT_PR =
+    '<w:sectPr><w:footerReference w:type="default" r:id="rId1"/><w:type w:val="continuous"/>' +
     '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1080" w:bottom="1440" w:left="1080"/>' +
     '<w:cols w:space="425"/><w:docGrid w:type="lines" w:linePitch="386"/></w:sectPr>';
   const TEMPLATE = `<w:document><w:body><w:p/>${SECT_PR}</w:body></w:document>`;

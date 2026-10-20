@@ -1,10 +1,9 @@
 /**
  * 縦書き原稿の「N字×M行」グリッド換算に関する共通ロジック。
- * 400字詰め原稿用紙換算（count-pages）、応募用docxの枚数見積もり（txt-to-tategaki-docx）、
- * 規定書式チェック（check-manuscript-format）が同じ規則で数える。
+ * 原稿用紙換算（novel count / novel pdf --count-only）と縦書き docx の枚数見積もりが同じ規則で数える。
  */
 
-// ぶら下げ対象文字（行末に1字だけはみ出すなら前の行の最後のマスに追い込む）
+/** ぶら下げ対象文字（行末に1字だけはみ出すなら前の行の最後のマスに追い込む） */
 export const HANGING_CHARS = '。、，．」』）】〉》〕｝！？!?';
 
 /**
@@ -25,8 +24,11 @@ export function countWrappedRows(line, cols, { hanging = true } = {}) {
   return rows;
 }
 
-// 縦書き出力では2桁の数字は縦中横で1マスに収まる（txt-to-tategaki-docx の textRunXml と同じ規則）。
-// 1桁・3桁以上は1字1マスのまま
+/**
+ * 縦中横で1マスに収まる2桁の数字を1字（〇）に置き換え、マス数を数えられる形にする。
+ * 1桁・3桁以上の数字は1字1マスのまま。
+ * tategaki-docx の textRunXml が2桁の数字を縦中横で組むのと同じ規則で数える必要がある。
+ */
 export function normalizeTcy(text) {
   return text.replace(/(?<![0-9])[0-9]{2}(?![0-9])/g, '〇');
 }
@@ -45,8 +47,8 @@ if (import.meta.vitest) {
       expect(countWrappedRows('あ'.repeat(42), 42)).toBe(1);
     });
     test('cols+1字目がぶら下げ対象なら1行に収まる', () => {
-      expect(countWrappedRows('あ'.repeat(20) + '。', 20)).toBe(1);
-      expect(countWrappedRows('あ'.repeat(42) + '」', 42)).toBe(1);
+      expect(countWrappedRows(`${'あ'.repeat(20)}。`, 20)).toBe(1);
+      expect(countWrappedRows(`${'あ'.repeat(42)}」`, 42)).toBe(1);
       for (const ch of '、」）』】〉》') {
         expect(countWrappedRows('あ'.repeat(20) + ch, 20)).toBe(1);
       }
@@ -56,11 +58,15 @@ if (import.meta.vitest) {
       expect(countWrappedRows('あ'.repeat(43), 42)).toBe(2);
     });
     test('hanging=false ならぶら下げ対象でも2行', () => {
-      expect(countWrappedRows('あ'.repeat(42) + '。', 42, { hanging: false })).toBe(2);
+      expect(countWrappedRows(`${'あ'.repeat(42)}。`, 42, { hanging: false })).toBe(2);
     });
     test('途中の行末ぶら下げも効く', () => {
-      expect(countWrappedRows('あ'.repeat(20) + '。' + 'あ'.repeat(20), 20)).toBe(2);
-      expect(countWrappedRows('あ'.repeat(42) + '。' + 'あ'.repeat(42), 42)).toBe(2);
+      expect(countWrappedRows(`${'あ'.repeat(20)}。${'あ'.repeat(20)}`, 20)).toBe(2);
+      expect(countWrappedRows(`${'あ'.repeat(42)}。${'あ'.repeat(42)}`, 42)).toBe(2);
+    });
+    test('行頭の全角スペースもマスとして数える', () => {
+      expect(countWrappedRows(`　${'あ'.repeat(19)}`, 20)).toBe(1);
+      expect(countWrappedRows(`　${'あ'.repeat(20)}`, 20)).toBe(2);
     });
     test('複数行', () => {
       expect(countWrappedRows('あ'.repeat(40), 20)).toBe(2);

@@ -3,8 +3,10 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
-  // 用紙と用紙の間隔（mm）と、表示領域の縁の余白（px。preview.css の #stage の margin と同じ）
+  /** 用紙と用紙の間隔（mm） */
   const SHEET_GAP_MM = 2;
+  /** 表示領域の縁の余白（px） */
+  // preview.css の #stage の margin と揃える
   const STAGE_MARGIN_PX = 24;
   const PX_PER_MM = 96 / 25.4;
 
@@ -16,8 +18,10 @@
   let model = null;
   let geometry = null;
   let lastReveal = null;
-  // 表示倍率と編集のオンオフは設定ファイル（render で届く view）の値に従う
-  // 数値（%）でなければ「画面に合わせる」。旧い値（fit-width / fit-page）もここに寄せる
+  /**
+   * 表示倍率の値を select の値にする。数値（%）でなければ「画面に合わせる」（'fit'）。旧い値（fit-width / fit-page）もここに寄せる。
+   * 表示倍率と編集のオンオフは設定ファイル（render で届く view）の値に従う
+   */
   const normalizeZoom = (value) => (Number(value) > 0 ? String(value) : 'fit');
   let zoom = 'fit';
   $('zoom').value = zoom;
@@ -26,24 +30,30 @@
   const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
   const isEnglish = () => model?.language === 'en';
 
-  // ---- ページ割り ----
-
-  // 「画面に合わせる」では左右の余白を取らず、幅が決め手になるときは用紙を表示領域の幅いっぱいに広げる
+  /** 左右の余白（px）。「画面に合わせる」では取らず、幅が決め手になるときは用紙を表示領域の幅いっぱいに広げる */
   const sideMarginPx = () => (zoom === 'fit' ? 0 : STAGE_MARGIN_PX);
-  // 用紙の並びの先頭の余白。横書きの「画面に合わせる」では用紙を高さに合わせ、1ページずつ表示領域の中央に置く
-  // （ペーパーバックを1ページずつめくる見え方）ので、先頭のページが中央に来るぶんの余白を取る
+  /**
+   * 用紙の並びの先頭の余白（px）。横書きの「画面に合わせる」では用紙を高さに合わせ、1ページずつ表示領域の中央に置く
+   * （ペーパーバックを1ページずつめくる見え方）ので、先頭のページが中央に来るぶんの余白を取る
+   */
   const leadPx = () => geometry?.lead ?? sideMarginPx();
 
-  // 横書きで縦長の用紙（英語のペーパーバックなど）は、幅が狭くても高さに合わせて1ページを丸ごと見せる
-  // （幅が足りないぶんは左右の余白が切れるだけで、本文は見える）。上下の余白は取らず、表示領域の高さいっぱいに使う
+  /**
+   * 横書きで縦長の用紙（英語のペーパーバックなど）なら true。幅が狭くても高さに合わせて1ページを丸ごと見せる
+   * （幅が足りないぶんは左右の余白が切れるだけで、本文は見える）。上下の余白は取らず、表示領域の高さいっぱいに使う
+   */
   const fitsHeight = (metrics) => !metrics.vertical && metrics.paperH > metrics.paperW;
 
   function pxPerMm(metrics) {
     viewport.classList.toggle('fit', zoom === 'fit');
     const fitWidth = (viewport.clientWidth - sideMarginPx() * 2) / metrics.paperW;
     const fitHeight = (viewport.clientHeight - STAGE_MARGIN_PX * 2) / metrics.paperH;
-    if (zoom === 'fit') return Math.max(fitsHeight(metrics) ? viewport.clientHeight / metrics.paperH : Math.min(fitWidth, fitHeight), 0.5);
-    return PX_PER_MM * Number(zoom) / 100;
+    if (zoom === 'fit')
+      return Math.max(
+        fitsHeight(metrics) ? viewport.clientHeight / metrics.paperH : Math.min(fitWidth, fitHeight),
+        0.5,
+      );
+    return (PX_PER_MM * Number(zoom)) / 100;
   }
 
   function layoutStage() {
@@ -53,7 +63,7 @@
     const fontPx = m.fontSizeMm * u;
     const inlinePx = m.chars * fontPx;
     const blockPx = m.availBlock * u;
-    // 縦書きはページを下へ、横書きは右へ並べる（あふれた段は字を送る方向に並ぶため）
+    // あふれた段は字を送る方向に並ぶため、縦書きはページを下へ、横書きは右へ並べる
     const period = ((m.vertical ? m.paperH : m.paperW) + SHEET_GAP_MM) * u;
 
     const s = flow.style;
@@ -74,7 +84,7 @@
     const gap = SHEET_GAP_MM * u;
     const centered = !m.vertical && zoom === 'fit';
     const lead = centered ? Math.max(0, (viewport.clientWidth - sheetW) / 2) : sideMarginPx();
-    // 先頭と末尾のページも中央に置けるよう、並びの両側に同じ余白を取る。上下は高さに合わせた用紙なら余白なし
+    // 先頭と末尾のページも中央に置けるよう、並びの両側に同じ余白を取る
     stage.style.margin = centered ? `${fitsHeight(m) ? 0 : STAGE_MARGIN_PX}px ${lead}px` : '';
 
     while (sheets.children.length > pages) sheets.lastChild.remove();
@@ -101,7 +111,7 @@
 
     const first = !geometry;
     geometry = { vertical: m.vertical, period, pages, sheet: m.vertical ? sheetH : sheetW, lead, centered };
-    // 用紙が表示領域より広いときは、最初の表示で先頭ページの真ん中（本文）が見えるようにする
+    // 用紙が表示領域より広いと先頭ページの端しか見えないので、最初の表示で真ん中（本文）を見せる
     if (first && centered && sheetW > viewport.clientWidth) scrollToPage(1);
     updateStats();
   }
@@ -119,23 +129,27 @@
     if (!model || !geometry) return;
     if (isEnglish()) {
       const { words, chars } = model.stats;
-      $('stats').textContent = `${words.toLocaleString('en-US')} words ・ ${formatNumber(chars)}字 ・ ${currentPage()} / ${geometry.pages}頁`;
+      $('stats').textContent =
+        `${words.toLocaleString('en-US')} words ・ ${formatNumber(chars)}字 ・ ${currentPage()} / ${geometry.pages}頁`;
       return;
     }
     const { chars, genkoPages } = model.stats;
-    $('stats').textContent = `${formatNumber(chars)}字 ・ 400字詰め ${formatPages(genkoPages)}枚 ・ ${currentPage()} / ${geometry.pages}頁`;
+    $('stats').textContent =
+      `${formatNumber(chars)}字 ・ 400字詰め ${formatPages(genkoPages)}枚 ・ ${currentPage()} / ${geometry.pages}頁`;
   }
 
-  // ---- エディタとの行の行き来 ----
-  // 日本語組版はファイルごとに #flow 直下の .section になる。英語組版はファイルが章にまとめられるので、
-  // 各段落の data-file でファイルを指す
-
+  /**
+   * fileIndex 番目のファイルの、行番号（data-line）を持つ要素。
+   * 日本語組版はファイルごとに #flow 直下の .section になる。英語組版はファイルが章にまとめられて
+   * .section がファイルに対応しないので、段落の data-file でファイルを指す
+   */
   function lineElementsOf(fileIndex) {
     const section = flow.querySelectorAll(':scope > .section')[fileIndex];
     if (section) return [...section.querySelectorAll('[data-line]')];
     return [...flow.querySelectorAll(`[data-file="${fileIndex}"][data-line]`)];
   }
 
+  /** fileIndex のファイルで、行番号が line 以下で一番近い要素（無ければそのファイルの先頭の要素、それも無ければ null） */
   function findLineElement(fileIndex, line) {
     const elements = lineElementsOf(fileIndex);
     let found = null;
@@ -146,6 +160,7 @@
     return found ?? elements[0] ?? null;
   }
 
+  /** エディタのカーソル行 target（{ fileIndex, line }）の段落に印を付け、見えていなければそのページへスクロールする */
   function reveal(target) {
     lastReveal = target;
     flow.querySelector('.cursor-line')?.classList.remove('cursor-line');
@@ -158,7 +173,8 @@
     const rect = el.getClientRects()[0];
     if (!rect) return;
     const view = viewport.getBoundingClientRect();
-    const visible = rect.bottom > view.top && rect.top < view.bottom && rect.right > view.left && rect.left < view.right;
+    const visible =
+      rect.bottom > view.top && rect.top < view.bottom && rect.right > view.left && rect.left < view.right;
     if (visible) return;
 
     const stageRect = stage.getBoundingClientRect();
@@ -178,28 +194,31 @@
     }
   }
 
-  const sectionIndexOf = (el) => (el.dataset.file !== undefined
-    ? Number(el.dataset.file)
-    : [...flow.querySelectorAll(':scope > .section')].indexOf(el.closest('#flow > .section')));
+  /** 要素が属するファイルの番号 */
+  const sectionIndexOf = (el) =>
+    el.dataset.file !== undefined
+      ? Number(el.dataset.file)
+      : [...flow.querySelectorAll(':scope > .section')].indexOf(el.closest('#flow > .section'));
 
+  /** 要素の行をテキストエディタで開いてもらう */
   function jumpToEditor(el) {
     vscode.postMessage({ type: 'jump', fileIndex: sectionIndexOf(el), line: Number(el.dataset.line) });
   }
 
-  // ---- プレビュー上での編集 ----
-  // クリックした段落を元テキスト（ルビなどの記法つき）に戻してその場で編集し、1行ぶんの変更としてエディタへ送る。
-  // 編集中は拡張機能から届く再描画を保留し、編集を終えたときに組み直してもらう
-
+  /**
+   * ルビ・傍点などの記法。プレビュー上での編集は、クリックした段落を元テキスト（記法つき）に戻してその場で編集し、
+   * 1行ぶんの変更としてエディタへ送る。編集中は拡張機能から届く再描画を保留し、編集を終えたときに組み直してもらう
+   */
   // src/lib/text-parser.mjs の INLINE_MARKUP_RE と同じ記法
   const INLINE_MARKUP_RE = /《《(.+?)》》|\|(.+?)《(.+?)》|<<(.+?)>>|\*([^*]+)\*/g;
 
   let editEnabled = true;
   let editing = null;
-  // 元テキストに戻した段落が残っている（＝組み直しが要る）
+  /** 元テキストに戻した段落が残っている（＝組み直しが要る） */
   let staleDom = false;
   let refreshTimer = 0;
 
-  // 表示上の文字位置（ルビを除く）を元テキストの位置に直す
+  /** 表示上の文字位置 visible（ルビを除く）を元テキスト raw の位置に直す */
   function rawOffsetFromVisible(raw, visible) {
     let pos = 0;
     let seen = 0;
@@ -216,6 +235,7 @@
     return Math.min(raw.length, pos + (visible - seen));
   }
 
+  /** 画面上の点 (x, y) が段落 el の表示上の何文字目か（ルビを除く）。el の外なら null */
   function visibleOffsetAt(el, x, y) {
     let node;
     let offset;
@@ -233,10 +253,11 @@
     range.selectNodeContents(el);
     range.setEnd(node, offset);
     const fragment = range.cloneContents();
-    fragment.querySelectorAll('rt, rp, .pov').forEach(n => n.remove());
+    for (const n of fragment.querySelectorAll('rt, rp')) n.remove();
     return fragment.textContent.length;
   }
 
+  /** 段落 el の中の選択範囲の { start, end }（文字位置）。el の中に無ければ null */
   function selectionOffsets(el) {
     const sel = getSelection();
     if (!sel.rangeCount || !el.contains(sel.anchorNode)) return null;
@@ -248,6 +269,7 @@
     return { start, end: start + range.toString().length };
   }
 
+  /** 段落 el を元テキストに戻して編集を始め、offset の位置（省略時は末尾）にカーソルを置く */
   function beginEdit(el, offset) {
     const fileIndex = sectionIndexOf(el);
     const line = Number(el.dataset.line);
@@ -255,7 +277,7 @@
     if (raw === undefined) return;
 
     clearTimeout(refreshTimer);
-    // html / original: 何も変えずに抜けたとき、組版ずみの表示へその場で戻すために取っておく
+    // 何も変えずに抜けたときは組み直しを頼まずその場で戻せるよう、組版ずみの html を取っておく
     editing = { el, fileIndex, line, text: raw, original: raw, html: el.innerHTML };
     el.textContent = raw;
     el.contentEditable = 'plaintext-only';
@@ -267,6 +289,7 @@
     layoutStage();
   }
 
+  /** 編集を終える。何も変えていなければ組版ずみの表示に戻し、変えていれば元テキストのまま残して組み直しを待つ */
   function endEdit() {
     if (!editing) return;
     // contenteditable を外すとその場で focusout が走るので、先に編集状態を畳んでおく
@@ -277,33 +300,31 @@
     if (el.textContent === original) {
       el.innerHTML = html;
     } else {
-      // 変更した段落は元テキストのまま残し、編集を終えたときにまとめて組み直してもらう
       el.classList.add('stale-raw');
       staleDom = true;
     }
   }
 
-  // ---- カーソルキーでの段落間の移動 ----
-
+  /** 段落 el の表示上の行ごとの矩形 */
   function lineRects(el) {
     const range = document.createRange();
     range.selectNodeContents(el);
-    const rects = [...range.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+    const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
     return rects.length > 0 ? rects : [el.getBoundingClientRect()];
   }
 
   const rectsOverlap = (a, b) =>
-    Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5
-    && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+    Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 &&
+    Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
 
-  // カーソルが段落の先頭行・最終行・文頭・文末のどこにあるかと、行の中での位置（字を送る方向のpx）
+  /** カーソルが段落の先頭行・最終行・文頭・文末のどこにあるかと、行の中での位置 inline（字を送る方向のpx）。範囲を選択中・el の外なら null */
   function caretPosition(el) {
     const sel = getSelection();
     if (!sel.isCollapsed || !el.contains(sel.anchorNode)) return null;
     const text = el.firstChild;
     if (!text || text.length === 0) return { first: true, last: true, atStart: true, atEnd: true, inline: 0 };
 
-    const offset = sel.anchorNode === text ? sel.anchorOffset : (sel.anchorOffset === 0 ? 0 : text.length);
+    const offset = sel.anchorNode === text ? sel.anchorOffset : sel.anchorOffset === 0 ? 0 : text.length;
     const charRect = (from, to) => {
       const range = document.createRange();
       range.setStart(text, from);
@@ -314,11 +335,11 @@
     const after = offset < text.length ? charRect(offset, offset + 1) : null;
     const rect = after ?? charRect(offset - 1, offset);
     const lines = lineRects(el);
-    const current = rect && lines.find(l => rectsOverlap(l, rect));
+    const current = rect && lines.find((l) => rectsOverlap(l, rect));
     if (!current) return null;
 
     const vertical = geometry.vertical;
-    const caretEdge = after ? (vertical ? rect.top : rect.left) : (vertical ? rect.bottom : rect.right);
+    const caretEdge = after ? (vertical ? rect.top : rect.left) : vertical ? rect.bottom : rect.right;
     return {
       first: current === lines[0],
       last: current === lines[lines.length - 1],
@@ -328,6 +349,7 @@
     };
   }
 
+  /** rect が表示領域の縁から 24px 以内に入るようスクロールする */
   function scrollRectIntoView(rect) {
     const view = viewport.getBoundingClientRect();
     const margin = 24;
@@ -337,7 +359,7 @@
     else if (rect.right > view.right - margin) viewport.scrollLeft += rect.right - (view.right - margin);
   }
 
-  // 隣の段落へ編集を移す。inline があれば、行の中での位置を保って先頭行（dir > 0）／最終行（dir < 0）に入る
+  /** 隣の段落へ編集を移す。inline があれば、行の中での位置を保って先頭行（dir > 0）／最終行（dir < 0）に入る */
   function moveEditTo(target, dir, inline) {
     endEdit();
     beginEdit(target, dir > 0 ? 0 : undefined);
@@ -357,6 +379,7 @@
     if (node && target.contains(node)) getSelection().collapse(node, pos?.offset ?? range.startOffset);
   }
 
+  /** 編集中のカーソルキー。段落の端から外へ出る向きなら、隣の段落へ編集を移す */
   function handleArrowKey(e) {
     const vertical = geometry.vertical;
     const keys = vertical
@@ -368,7 +391,7 @@
 
     const pos = caretPosition(editing.el);
     if (!pos) return;
-    const leaving = byLine ? (dir > 0 ? pos.last : pos.first) : (dir > 0 ? pos.atEnd : pos.atStart);
+    const leaving = byLine ? (dir > 0 ? pos.last : pos.first) : dir > 0 ? pos.atEnd : pos.atStart;
     if (!leaving) return;
 
     const editable = [...flow.querySelectorAll('[data-line]')];
@@ -378,13 +401,14 @@
     moveEditTo(target, dir, byLine ? pos.inline : null);
   }
 
-  // 元テキストに戻した段落を組み直してもらう。focusEdit があれば描画後にそこで編集を始める
+  /** 元テキストに戻した段落を組み直してもらう。focusEdit があれば描画後にそこで編集を始める */
   function requestRefresh(focusEdit = null) {
     clearTimeout(refreshTimer);
     endEdit();
     vscode.postMessage({ type: 'refresh', focusEdit });
   }
 
+  /** 編集中の段落のテキストが変わっていれば、1行の置き換えとして拡張機能へ送る */
   function sendLineEdit() {
     const { el, fileIndex, line } = editing;
     const text = el.textContent;
@@ -401,6 +425,7 @@
     layoutStage();
   }
 
+  /** プレビュー上での編集のオンオフ。オフにしたとき元テキストのままの段落があれば組み直してもらう */
   function setEditEnabled(enabled) {
     editEnabled = enabled;
     $('toggle-edit').setAttribute('aria-pressed', String(enabled));
@@ -415,12 +440,13 @@
     if (!editEnabled || el === editing?.el) return;
 
     // 見出しは表示（章番号つき・【】なし）と元テキストが一致しないので、行末にカーソルを置く
-    const heading = el.classList.contains('viewpoint') || el.classList.contains('empty') || el.classList.contains('chapter-title');
+    const heading =
+      el.classList.contains('viewpoint') || el.classList.contains('empty') || el.classList.contains('chapter-title');
     const visible = heading ? null : visibleOffsetAt(el, e.clientX, e.clientY);
     const raw = model.sources[sectionIndexOf(el)]?.[Number(el.dataset.line)] ?? '';
     // 変更ずみで元テキストのまま表示している段落は、表示位置がそのまま元テキストの位置
-    const offset = visible == null ? raw.length
-      : el.classList.contains('stale-raw') ? visible : rawOffsetFromVisible(raw, visible);
+    const offset =
+      visible == null ? raw.length : el.classList.contains('stale-raw') ? visible : rawOffsetFromVisible(raw, visible);
     beginEdit(el, offset);
   });
 
@@ -446,7 +472,6 @@
       e.preventDefault();
       requestRefresh();
     } else if (e.key === 'Enter') {
-      // 改行は新しい段落（＝元テキストの次の行）にする
       e.preventDefault();
       const text = el.textContent;
       const { start, end } = selectionOffsets(el) ?? { start: text.length, end: text.length };
@@ -460,8 +485,7 @@
       });
     } else if (e.key === 'Backspace' && line > 0) {
       const offsets = selectionOffsets(el);
-      if (!offsets || offsets.start !== 0 || offsets.end !== 0) return;
-      // 行頭での Backspace は前の行につなげる
+      if (offsets?.start !== 0 || offsets.end !== 0) return;
       e.preventDefault();
       endEdit();
       vscode.postMessage({ type: 'merge', fileIndex, line });
@@ -480,14 +504,18 @@
   // 取り消し・やり直しは VS Code に渡さず拡張機能に頼む。カスタムエディタのタブでは VS Code の取り消しが
   // 開いたファイルにしか効かず、作品全体の表示で別のファイルを編集したあとに無関係な変更を取り消してしまうため。
   // VS Code が webview のキー入力を拾うのは window のバブリング段階なので、キャプチャ段階で止める
-  window.addEventListener('keydown', (e) => {
-    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.isComposing) return;
-    const key = e.key.toLowerCase();
-    if (key !== 'z' && key !== 'y') return;
-    e.preventDefault();
-    e.stopPropagation();
-    vscode.postMessage({ type: key === 'y' || e.shiftKey ? 'redo' : 'undo' });
-  }, true);
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.isComposing) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'z' && key !== 'y') return;
+      e.preventDefault();
+      e.stopPropagation();
+      vscode.postMessage({ type: key === 'y' || e.shiftKey ? 'redo' : 'undo' });
+    },
+    true,
+  );
 
   window.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -496,8 +524,7 @@
     }
   });
 
-  // ---- ツールバー / ページ設定 ----
-
+  /** ツールバーとページ設定の欄を、render で届いた値で埋める。英語の原稿は横書き固定で、設定ファイルの "english" のレイアウトを見せる */
   function fillForm() {
     const { layout, metrics, presets, presetName, scope, canShowWork, userPresetNames, layoutFile, language } = model;
     const english = language === 'en';
@@ -516,7 +543,6 @@
     $('font-size').value = english ? layout.fontSize : '';
     $('line-height').value = english ? layout.lineHeight : '';
 
-    // 言語は原稿の文字から判定する。英語は横書き固定で、設定ファイルの "english" のレイアウトを使う
     $('language-note').textContent = english ? '英語の原稿（横書き固定。設定は english に保存）' : '';
     $('writing-mode-fields').hidden = english;
     for (const radio of document.querySelectorAll('input[name="writing-mode"]')) {
@@ -527,11 +553,13 @@
     for (const side of ['top', 'bottom', 'left', 'right']) $(`margin-${side}`).value = layout.margin[side];
     $('font-family').value = layout.fontFamily;
     $('font-family').placeholder = english ? '既定（EB Garamond / Georgia）' : '既定（Noto Serif JP / 游明朝）';
-    const pitch = `行送り ${(Math.round(metrics.linePitchMm * 100) / 100)}mm`;
+    const pitch = `行送り ${Math.round(metrics.linePitchMm * 100) / 100}mm`;
     $('derived').textContent = english
       ? `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（約${metrics.charsApprox}字×${metrics.lines}行）`
       : `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（${metrics.chars}字×${metrics.lines}行）`;
-    $('layout-file').textContent = layoutFile ? `設定ファイル: ${layoutFile}` : '設定ファイル: なし（変更すると原稿と同じ場所に novel.json を作ります）';
+    $('layout-file').textContent = layoutFile
+      ? `設定ファイル: ${layoutFile}`
+      : '設定ファイル: なし（変更すると原稿と同じ場所に novel.json を作ります）';
     $('delete-preset').disabled = !userPresetNames.includes(presetName);
 
     for (const button of document.querySelectorAll('#scope button')) {
@@ -540,6 +568,7 @@
     }
   }
 
+  /** ページ設定の欄の値（レイアウト） */
   function readForm() {
     return {
       writingMode: document.querySelector('input[name="writing-mode"]:checked')?.value,
@@ -580,14 +609,15 @@
     vscode.postMessage({ type: 'view', view: { edit: editEnabled } });
   });
   $('open-text').addEventListener('click', () => {
-    // 編集中ならその行、そうでなければ画面に見えている最初の段落の行で開く
     const view = viewport.getBoundingClientRect();
-    const isVisible = (el) => [...el.getClientRects()].some(r =>
-      r.bottom > view.top && r.top < view.bottom && r.right > view.left && r.left < view.right);
+    const isVisible = (el) =>
+      [...el.getClientRects()].some(
+        (r) => r.bottom > view.top && r.top < view.bottom && r.right > view.left && r.left < view.right,
+      );
     const el = editing?.el ?? [...flow.querySelectorAll('[data-line]')].find(isVisible);
-    vscode.postMessage(el
-      ? { type: 'openText', fileIndex: sectionIndexOf(el), line: Number(el.dataset.line) }
-      : { type: 'openText' });
+    vscode.postMessage(
+      el ? { type: 'openText', fileIndex: sectionIndexOf(el), line: Number(el.dataset.line) } : { type: 'openText' },
+    );
   });
   $('zoom').addEventListener('change', (e) => {
     zoom = normalizeZoom(e.target.value);
@@ -596,10 +626,11 @@
     reveal(lastReveal);
   });
   $('save-preset').addEventListener('click', () => vscode.postMessage({ type: 'savePreset' }));
-  $('delete-preset').addEventListener('click', () => vscode.postMessage({ type: 'deletePreset', name: $('preset').value }));
+  $('delete-preset').addEventListener('click', () =>
+    vscode.postMessage({ type: 'deletePreset', name: $('preset').value }),
+  );
   $('export-pdf').addEventListener('click', () => vscode.postMessage({ type: 'exportPdf' }));
 
-  // ---- ぶら下げ ----
   // PDF 用 CSS の hanging-punctuation: allow-end last は Chromium では効かないので、Vivliostyle と同じ方法で再現する。
   // 句読点を文字送り 0（letter-spacing: -1em）にし、直後に 1 字ぶんの隠しスペースを置く（preview.css の .hang）。
   // 行の途中ではスペースが句読点のマスを埋めて見た目が変わらず、行末に来たときだけスペースが行末の空白として消え、
@@ -609,6 +640,7 @@
   const NO_HANG_BEFORE_RE = /^[\p{Pe}\p{Pf}·‧・　：；、。，．]/u;
   const HANG_LAST_RE = /[\p{Pe}\p{Pf}\p{Pi}'"]$/u;
 
+  /** テキストノード node の index 文字目を className の span で包む */
   function wrapChar(node, index, className) {
     const target = index > 0 ? node.splitText(index) : node;
     if (target.length > 1) target.splitText(1);
@@ -618,6 +650,7 @@
     span.append(target);
   }
 
+  /** root の段落の、ぶら下げる句読点を .hang、段落末の括弧・引用符を .hang-last で包む */
   function wrapHangingPunctuation(root) {
     for (const p of root.querySelectorAll('p')) {
       const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT, {
@@ -626,7 +659,7 @@
       const nodes = [];
       while (walker.nextNode()) nodes.push(walker.currentNode);
       if (nodes.length === 0) continue;
-      const text = nodes.map(n => n.data).join('');
+      const text = nodes.map((n) => n.data).join('');
       const targets = [];
       let base = 0;
       for (const node of nodes) {
@@ -643,19 +676,17 @@
     }
   }
 
-  // ---- 拡張機能本体とのやりとり ----
-
   window.addEventListener('message', ({ data }) => {
     if (data.type === 'render') {
       if (editing && !data.focusEdit && !data.external) {
-        // 自分の入力の反映なら、編集中の段落を壊さないよう組み直しを編集を終えるまで保留する（統計だけ更新）
+        // 編集中の段落を壊さないよう、自分の入力の反映による組み直しは編集を終えるまで保留する
         model.stats = data.stats;
         updateStats();
         return;
       }
       if (editing && !data.focusEdit) {
-        // 取り消し（Cmd+Z）など外からの変更。組み直したうえで、同じ行・同じ位置で編集を続ける
         const { fileIndex, line } = editing;
+        // 外からの変更（取り消しなど）は編集中の段落も組み直すので、同じ行・同じ位置で編集を続けられるようにする
         data.focusEdit = { fileIndex, line, offset: selectionOffsets(editing.el)?.start ?? 0 };
       }
       endEdit();
@@ -668,7 +699,7 @@
       $('message').hidden = true;
       stage.hidden = false;
       $('doc-style').textContent = data.css;
-      // 言語は hyphens: auto（英語の分綴）と、ぶら下げ（日本語だけ）の切り替えに使う
+      // lang で hyphens: auto（英語の分綴）が効く
       flow.lang = data.language;
       flow.classList.toggle('en', isEnglish());
       flow.innerHTML = data.body;
@@ -679,8 +710,9 @@
       layoutStage();
       const restored = !scrollRestored && restoreScroll();
       const focus = data.focusEdit;
-      const target = focus && flow.querySelectorAll(':scope > .section')[focus.fileIndex]
-        ?.querySelector(`[data-line="${focus.line}"]`);
+      const target =
+        focus &&
+        flow.querySelectorAll(':scope > .section')[focus.fileIndex]?.querySelector(`[data-line="${focus.line}"]`);
       if (target && editEnabled) {
         beginEdit(target, focus.offset);
         target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -688,7 +720,6 @@
         // 再読み込み前の位置に戻したので、エディタのカーソル位置へは動かさない（行の色付けだけ）
         lastReveal = data.reveal ?? lastReveal;
       } else if (data.forceReveal) {
-        // タブを開いた直後。開いたファイルの位置（テキストエディタから切り替えたなら、そこで見ていた位置）から表示する
         reveal(data.reveal);
       } else if (!document.hasFocus() || !editEnabled) {
         // プレビュー側で作業している間は、エディタのカーソル位置へ引き戻さない
@@ -703,17 +734,18 @@
     }
   });
 
-  // スクロール位置はページ単位（倍率に依らない値）で覚え、ウィンドウの再読み込み後に戻す
+  // 倍率が変わっても同じ位置に戻せるよう、スクロール位置はページ単位で覚える
   let scrollRestored = false;
   let saveScrollFrame = 0;
 
+  /** スクロール位置をページ単位で webview の state に覚える（ウィンドウの再読み込み後に戻すため） */
   function saveScroll() {
     if (!geometry || !scrollRestored) return;
     const offset = geometry.vertical ? viewport.scrollTop : viewport.scrollLeft;
     vscode.setState({ scrollPages: offset / geometry.period });
   }
 
-  // 再読み込み後の最初の描画でだけ呼ぶ。戻す位置があれば true
+  /** 覚えたスクロール位置に戻す。再読み込み後の最初の描画でだけ呼ぶ。戻す位置があれば true */
   function restoreScroll() {
     scrollRestored = true;
     const pages = vscode.getState()?.scrollPages;
@@ -723,34 +755,41 @@
     return true;
   }
 
-  viewport.addEventListener('scroll', () => {
-    updateStats();
-    cancelAnimationFrame(saveScrollFrame);
-    saveScrollFrame = requestAnimationFrame(saveScroll);
-  }, { passive: true });
-
-  // ---- ホイールでのページ送り ----
-  // ひと払い（トラックパッドなら慣性まで含めたひと続き）で1ページだけ送る。
-  // 送ったあとの入力は、途切れる・向きが変わる・慣性で弱まったあとに強まる（＝次を払った）まで捨てる
+  viewport.addEventListener(
+    'scroll',
+    () => {
+      updateStats();
+      cancelAnimationFrame(saveScrollFrame);
+      saveScrollFrame = requestAnimationFrame(saveScroll);
+    },
+    { passive: true },
+  );
 
   const WHEEL_THRESHOLD_PX = 8;
   const WHEEL_QUIET_MS = 150;
   const WHEEL_MIN_INTERVAL_MS = 250;
+  /**
+   * ホイールでのページ送りの状態。ひと払い（トラックパッドなら慣性まで含めたひと続き）で1ページだけ送り、
+   * 送ったあとの入力は、途切れる・向きが変わる・慣性で弱まったあとに強まる（＝次を払った）まで捨てる
+   */
   const wheel = { armed: true, accum: 0, lastAt: 0, lastAbs: 0, lastSign: 0, peak: 0, decaying: false, turnedAt: 0 };
 
+  /**
+   * page ページ目（1始まり）へスクロールする。用紙が表示領域に収まるなら真ん中に、収まらなければ用紙の頭を表示領域の頭に合わせる
+   * （横書きで1ページずつ中央に出す表示では、収まらなくても真ん中を見せる＝左右の余白だけが切れる）
+   */
   function scrollToPage(page) {
     if (!geometry) return;
     const index = Math.min(Math.max(page, 1), geometry.pages) - 1;
     const start = (geometry.vertical ? STAGE_MARGIN_PX : leadPx()) + index * geometry.period;
     const client = geometry.vertical ? viewport.clientHeight : viewport.clientWidth;
-    // 用紙が表示領域に収まるなら真ん中に、収まらなければ用紙の頭を表示領域の頭に合わせる
-    // （横書きで1ページずつ中央に出す表示では、収まらなくても真ん中を見せる＝左右の余白だけが切れる）
     const slack = (client - geometry.sheet) / 2;
     const offset = start - (geometry.centered ? slack : Math.max(0, slack));
     if (geometry.vertical) viewport.scrollTop = offset;
     else viewport.scrollLeft = offset;
   }
 
+  /** 送ったあとの入力が次のひと払いか（途切れた・向きが変わった・慣性で弱まったあとに強まった） */
   function isNewWheelGesture(now, abs, sign) {
     if (now - wheel.lastAt > WHEEL_QUIET_MS) return true;
     if (sign !== wheel.lastSign) return true;
@@ -758,42 +797,62 @@
     return wheel.decaying && abs > wheel.lastAbs * 1.5 + 2;
   }
 
-  viewport.addEventListener('wheel', (e) => {
-    // ピンチ（Ctrl+ホイール）は VS Code の拡大縮小に任せる
-    if (!geometry || e.ctrlKey) return;
-    // 縦書きで横方向に回したときは、ページ内の左右の移動として通常どおりスクロールさせる
-    if (geometry.vertical && Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-    e.preventDefault();
-    const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-    if (delta === 0) return;
-    const now = e.timeStamp;
-    const abs = Math.abs(delta);
-    const sign = Math.sign(delta);
-    if (!wheel.armed && isNewWheelGesture(now, abs, sign)) {
-      wheel.armed = true;
-      wheel.accum = 0;
-    }
-    wheel.lastAt = now;
-    wheel.lastAbs = abs;
-    wheel.lastSign = sign;
-    wheel.peak = Math.max(wheel.peak, abs);
-    if (abs < wheel.peak * 0.5) wheel.decaying = true;
-    if (!wheel.armed) return;
-    wheel.accum += delta;
-    if (Math.abs(wheel.accum) < WHEEL_THRESHOLD_PX) return;
-    wheel.armed = false;
-    wheel.turnedAt = now;
-    wheel.peak = abs;
-    wheel.decaying = false;
-    scrollToPage(currentPage() + Math.sign(wheel.accum));
-  }, { passive: false });
+  viewport.addEventListener(
+    'wheel',
+    (e) => {
+      // ピンチ（Ctrl+ホイール）は VS Code の拡大縮小に任せる
+      if (!geometry || e.ctrlKey) return;
+      // 縦書きの横方向はページ内の左右の移動なので、通常のスクロールに任せる
+      if (geometry.vertical && Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      if (delta === 0) return;
+      const now = e.timeStamp;
+      const abs = Math.abs(delta);
+      const sign = Math.sign(delta);
+      if (!wheel.armed && isNewWheelGesture(now, abs, sign)) {
+        wheel.armed = true;
+        wheel.accum = 0;
+      }
+      wheel.lastAt = now;
+      wheel.lastAbs = abs;
+      wheel.lastSign = sign;
+      wheel.peak = Math.max(wheel.peak, abs);
+      if (abs < wheel.peak * 0.5) wheel.decaying = true;
+      if (!wheel.armed) return;
+      wheel.accum += delta;
+      if (Math.abs(wheel.accum) < WHEEL_THRESHOLD_PX) return;
+      wheel.armed = false;
+      wheel.turnedAt = now;
+      wheel.peak = abs;
+      wheel.decaying = false;
+      scrollToPage(currentPage() + Math.sign(wheel.accum));
+    },
+    { passive: false },
+  );
 
-  // ---- キーでのページ送り ----
-  // 段落を編集していないとき（入力欄にもいないとき）は、カーソルキーなどで1ページずつ送る。
+  /**
+   * キーでのページ送り（キー → 送るページ数）。段落を編集していないとき（入力欄にもいないとき）に使う
+   */
   // 縦書きは左へ読み進めるので ← を次のページにする
-
-  const PAGE_KEYS_VERTICAL = { ArrowDown: 1, ArrowLeft: 1, PageDown: 1, ' ': 1, ArrowUp: -1, ArrowRight: -1, PageUp: -1 };
-  const PAGE_KEYS_HORIZONTAL = { ArrowDown: 1, ArrowRight: 1, PageDown: 1, ' ': 1, ArrowUp: -1, ArrowLeft: -1, PageUp: -1 };
+  const PAGE_KEYS_VERTICAL = {
+    ArrowDown: 1,
+    ArrowLeft: 1,
+    PageDown: 1,
+    ' ': 1,
+    ArrowUp: -1,
+    ArrowRight: -1,
+    PageUp: -1,
+  };
+  const PAGE_KEYS_HORIZONTAL = {
+    ArrowDown: 1,
+    ArrowRight: 1,
+    PageDown: 1,
+    ' ': 1,
+    ArrowUp: -1,
+    ArrowLeft: -1,
+    PageUp: -1,
+  };
 
   window.addEventListener('keydown', (e) => {
     if (!geometry || editing || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;

@@ -17,39 +17,72 @@
  *   --dark               ダークモード（黒背景・白文字）
  *   --open               生成後にプレビューを開く
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
+ *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ◇◇◇）
  */
 
-import { PDFDocument, PDFName, StandardFonts, rgb } from 'pdf-lib';
-import { readFileSync, writeFileSync, statSync, unlinkSync } from 'fs';
-import { execSync } from 'child_process';
-import { parseTextFile } from './lib/text-parser.mjs';
-import { parseWithSectionNumbering, requireInputFiles, logSections, startsNewChapter, FILE_SEPARATOR_MARK } from './lib/manuscript.mjs';
-import { googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
-import { parseCliArgs, ARG, buildPdfFromHtml, openFile, requireOutput, runMain } from './lib/cli.mjs';
+import { execSync } from 'node:child_process';
+import { readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { PDFDocument, PDFName, rgb, StandardFonts } from 'pdf-lib';
+import { ARG, buildPdfFromHtml, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
+import { AOZORA_CSS, googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
+import { logSections, parseWithSectionNumbering, requireInputFiles, startsNewChapter } from './lib/manuscript.mjs';
+import { escapeHtml, parseTextFile, SCENE_BREAK_MARK } from './lib/text-parser.mjs';
 
-// 単ページサイズ定義（mm）- 縦長
-const PAGE_SIZES = {
-  a6: { width: 105, height: 148, name: 'A6文庫本', fontSize: '8.5pt', lineHeight: '1.6', charsPerLine: 43, linesPerPage: 18, margin: { top: 9, bottom: 9, left: 9, right: 9 } },
-  b6: { width: 128, height: 182, name: 'B6単行本', fontSize: '9pt', lineHeight: '1.6', charsPerLine: 42, linesPerPage: 17, margin: { top: 13, bottom: 13, left: 13, right: 13 } },
-  a5: { width: 148, height: 210, name: 'A5', fontSize: '9.5pt', lineHeight: '1.65', charsPerLine: 44, linesPerPage: 20, margin: { top: 15, bottom: 15, left: 15, right: 15 } },
+/** 単ページの判型定義（寸法は mm・縦長）。見開きはこの2ページを横に並べて作る */
+export const PAGE_SIZES = {
+  a6: {
+    width: 105,
+    height: 148,
+    name: 'A6文庫本',
+    fontSize: '8.5pt',
+    lineHeight: '1.6',
+    charsPerLine: 43,
+    linesPerPage: 18,
+    margin: { top: 9, bottom: 9, left: 9, right: 9 },
+  },
+  b6: {
+    width: 128,
+    height: 182,
+    name: 'B6単行本',
+    fontSize: '9pt',
+    lineHeight: '1.6',
+    charsPerLine: 42,
+    linesPerPage: 17,
+    margin: { top: 13, bottom: 13, left: 13, right: 13 },
+  },
+  a5: {
+    width: 148,
+    height: 210,
+    name: 'A5',
+    fontSize: '9.5pt',
+    lineHeight: '1.65',
+    charsPerLine: 44,
+    linesPerPage: 20,
+    margin: { top: 15, bottom: 15, left: 15, right: 15 },
+  },
 };
 
 function mmToPt(mm) {
-  return mm * 72 / 25.4;
+  return (mm * 72) / 25.4;
 }
 
-function parseArgs(argv) {
-  return parseCliArgs(argv, [
-    ARG.output,
-    ARG.title,
-    ARG.author,
-    { key: 'pageSize', flags: ['--a6'], value: 'a6' },
-    { key: 'pageSize', flags: ['--b6'], value: 'b6' },
-    { key: 'pageSize', flags: ['--a5'], value: 'a5' },
-    { key: 'dark', flags: ['--dark'] },
-    ARG.open,
-    { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
-  ], { pageSize: 'a6' });
+export function parseArgs(argv) {
+  return parseCliArgs(
+    argv,
+    [
+      ARG.output,
+      ARG.title,
+      ARG.author,
+      { key: 'pageSize', flags: ['--a6'], value: 'a6' },
+      { key: 'pageSize', flags: ['--b6'], value: 'b6' },
+      { key: 'pageSize', flags: ['--a5'], value: 'a5' },
+      { key: 'dark', flags: ['--dark'] },
+      ARG.open,
+      { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
+      ARG.sceneBreak,
+    ],
+    { pageSize: 'a6', sceneBreak: SCENE_BREAK_MARK },
+  );
 }
 
 function generateHtml(sections, size, options) {
@@ -58,7 +91,7 @@ function generateHtml(sections, size, options) {
   const sectionHtmls = sections.map((s, i) => {
     const needsPageBreak = startsNewChapter(sections, i);
     const className = needsPageBreak ? 'section page-break' : 'section';
-    const separator = needsPageBreak ? '' : `<p class="separator">${FILE_SEPARATOR_MARK}</p>\n`;
+    const separator = needsPageBreak ? '' : `<p class="separator">${escapeHtml(options.sceneBreak)}</p>\n`;
 
     let html = s.html;
     if (needsPageBreak) {
@@ -76,22 +109,34 @@ ${googleFontsLinks('Noto+Serif+JP:wght@400')}
   <style>
     @page {
       size: ${size.width}mm ${size.height}mm;
-      margin: ${m.top}mm ${m.right}mm ${m.bottom}mm ${m.left}mm;${options.dark ? `
-      background: #1a1a1a;` : ''}
+      margin: ${m.top}mm ${m.right}mm ${m.bottom}mm ${m.left}mm;${
+        options.dark
+          ? `
+      background: #1a1a1a;`
+          : ''
+      }
     }
-${options.dark ? `
+${
+  options.dark
+    ? `
     html {
       background: #1a1a1a;
     }
-` : ''}
+`
+    : ''
+}
     body {
       font-family: "Noto Serif JP", "游明朝", "Yu Mincho", "Hiragino Mincho Pro", serif;
       font-size: ${size.fontSize};
       line-height: ${size.lineHeight};
       writing-mode: vertical-rl;
       text-orientation: upright;
-      hanging-punctuation: allow-end last;${options.dark ? `
-      color: #d4d4d4;` : ''}
+      hanging-punctuation: allow-end last;${
+        options.dark
+          ? `
+      color: #d4d4d4;`
+          : ''
+      }
     }
 
     .section.page-break {
@@ -144,7 +189,7 @@ ${options.dark ? `
     .dash {
       text-orientation: sideways;
     }
-${VERTICAL_GLYPH_CSS}
+${VERTICAL_GLYPH_CSS}${AOZORA_CSS}
     .title-page {
       display: flex;
       align-items: center;
@@ -193,7 +238,7 @@ async function createSpreadPdf(singlePageBuffer, size, { titlePages = 0, dark = 
   const numColor = dark ? rgb(0.6, 0.6, 0.6) : rgb(0.4, 0.4, 0.4);
   const lineOpacity = dark ? 0.3 : 0.15;
 
-  // 全ページを一括でembedしてフォントリソースを共有
+  // 1ページずつ embed するとフォントリソースがページごとに重複するため、全ページを一括で embed する
   const allPages = singleDoc.getPages();
   const embeddedPages = await spreadDoc.embedPages(allPages);
 
@@ -202,7 +247,10 @@ async function createSpreadPdf(singlePageBuffer, size, { titlePages = 0, dark = 
 
     if (dark) {
       spreadPage.drawRectangle({
-        x: 0, y: 0, width: spreadW, height: pageH,
+        x: 0,
+        y: 0,
+        width: spreadW,
+        height: pageH,
         color: rgb(0.102, 0.102, 0.102),
       });
     }
@@ -262,7 +310,10 @@ export async function main(argv = process.argv.slice(2)) {
 
   const inputFiles = requireInputFiles(args.files);
 
-  const sections = parseWithSectionNumbering(inputFiles, parseTextFile, { blankAfterHeading: args.blankAfterHeading });
+  const sections = parseWithSectionNumbering(inputFiles, parseTextFile, {
+    blankAfterHeading: args.blankAfterHeading,
+    sceneBreak: args.sceneBreak,
+  });
   const totalChars = logSections(sections, inputFiles);
 
   const html = generateHtml(sections, size, args);
@@ -278,15 +329,21 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`単ページPDF: ${(singleSize / 1024 / 1024).toFixed(1)}MB (${singlePageCount}頁)`);
 
   console.log('見開きPDF合成中...');
-  const spreadBuffer = await createSpreadPdf(singlePageBuffer, size, { titlePages: args.title ? 2 : 0, dark: args.dark });
+  const spreadBuffer = await createSpreadPdf(singlePageBuffer, size, {
+    titlePages: args.title ? 2 : 0,
+    dark: args.dark,
+  });
   const rawPath = args.output.replace(/\.pdf$/, '-raw.pdf');
   writeFileSync(rawPath, spreadBuffer);
   const rawSize = statSync(rawPath).size;
   console.log(`見開き(raw): ${(rawSize / 1024 / 1024).toFixed(1)}MB`);
 
-  // Ghostscriptで圧縮（フォント重複排除）
+  // 合成後の PDF に残るフォントの重複を除くため、Ghostscript で圧縮し直す
   console.log('PDF圧縮中...');
-  execSync(`gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dNOPAUSE -dBATCH -dQUIET -dSubsetFonts=true -dCompressFonts=true -sOutputFile="${args.output}" "${rawPath}"`, { stdio: 'inherit' });
+  execSync(
+    `gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dNOPAUSE -dBATCH -dQUIET -dSubsetFonts=true -dCompressFonts=true -sOutputFile="${args.output}" "${rawPath}"`,
+    { stdio: 'inherit' },
+  );
   const finalSize = statSync(args.output).size;
   console.log(`圧縮後: ${(finalSize / 1024 / 1024).toFixed(1)}MB`);
 
@@ -309,3 +366,53 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 runMain(import.meta.url, main);
+
+if (import.meta.vitest) {
+  const { describe, test, expect } = import.meta.vitest;
+
+  describe('parseArgs', () => {
+    test('既定は A6 文庫本・場面区切りは ◇◇◇', () => {
+      expect(parseArgs(['-o', 'out.pdf', 'a.txt', 'dir/'])).toMatchObject({
+        output: 'out.pdf',
+        pageSize: 'a6',
+        sceneBreak: '◇◇◇',
+        dark: false,
+        open: false,
+        blankAfterHeading: false,
+        title: null,
+        author: null,
+        files: ['a.txt', 'dir/'],
+      });
+    });
+    test('判型フラグで PAGE_SIZES のキーを選ぶ', () => {
+      expect(parseArgs(['--b6']).pageSize).toBe('b6');
+      expect(parseArgs(['--a5']).pageSize).toBe('a5');
+      expect(parseArgs(['--a5', '--a6']).pageSize).toBe('a6');
+      for (const key of ['a6', 'b6', 'a5']) expect(PAGE_SIZES[key]).toBeDefined();
+    });
+    test('値付きオプションとフラグを解釈する', () => {
+      expect(
+        parseArgs([
+          '--output=o.pdf',
+          '--title',
+          'T',
+          '--author',
+          'A',
+          '--dark',
+          '--open',
+          '--blank-after-heading',
+          '--scene-break',
+          '＊',
+        ]),
+      ).toMatchObject({
+        output: 'o.pdf',
+        title: 'T',
+        author: 'A',
+        dark: true,
+        open: true,
+        blankAfterHeading: true,
+        sceneBreak: '＊',
+      });
+    });
+  });
+}

@@ -13,24 +13,42 @@
  *   --splits:   ファイル名（数値プレフィックス）で章境界を指定。
  *               指定された場合は【】ではなくファイル単位でまとめて区切る。
  *               例: --splits=070,120,170 → 070から、120から、170からが新しい章
+ *   --scene-break: 場面区切り（* の行）とファイルの継ぎ目に書く記号（既定: ◇◇◇）
  */
 
-import { writeFileSync, mkdirSync, rmSync } from 'fs';
-import { join, basename } from 'path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { ARG, fail, parseCliArgs, parseList, runMain } from './lib/cli.mjs';
 import {
-  readLines, getFilteredLines, isViewpointLine, isEpigraphLine, applyViewpointLabel, trimBlankEdges, countTextChars,
-} from './lib/text-parser.mjs';
-import {
-  getTextFilesFromDir, startsNewChapter, moveEpigraphsAfterHeading,
-  FILE_SEPARATOR_LINES, SYNOPSIS_FILENAME, CHARACTERS_FILENAME,
+  CHARACTERS_FILENAME,
+  fileSeparatorLines,
+  getTextFilesFromDir,
+  moveEpigraphsAfterHeading,
+  SYNOPSIS_FILENAME,
+  startsNewChapter,
 } from './lib/manuscript.mjs';
-import { parseCliArgs, parseList, fail, runMain } from './lib/cli.mjs';
+import {
+  applyViewpointLabel,
+  countTextChars,
+  getFilteredLines,
+  isEpigraphLine,
+  isSeparator,
+  isViewpointLine,
+  SCENE_BREAK_MARK,
+  separatorMark,
+  trimBlankEdges,
+} from './lib/text-parser.mjs';
 
-function parseArgs(argv) {
-  return parseCliArgs(argv, [
-    { key: 'splits', flags: ['--splits'], takesValue: true, parse: parseList },
-    { key: 'target', flags: ['--target', '--persona'], takesValue: true },
-  ]);
+export function parseArgs(argv) {
+  return parseCliArgs(
+    argv,
+    [
+      { key: 'splits', flags: ['--splits'], takesValue: true, parse: parseList },
+      { key: 'target', flags: ['--target', '--persona'], takesValue: true },
+      ARG.sceneBreak,
+    ],
+    { sceneBreak: SCENE_BREAK_MARK },
+  );
 }
 
 function fileNumOf(path) {
@@ -50,35 +68,24 @@ function groupIndexOf(path, markerNums) {
   return idx;
 }
 
-function collectLines(filePaths, markerNums) {
+function collectLines(filePaths, markerNums, sceneBreak) {
   const allLines = [];
-  const files = filePaths.map(f => getFilteredLines(f, { keepEpigraphs: true }));
+  const files = filePaths.map((f) => getFilteredLines(f, { keepEpigraphs: true, aozora: false }));
   let prevGroup = -1;
-  files.forEach(({ lines, pov }, i) => {
+  files.forEach(({ lines }, i) => {
     const src = basename(filePaths[i]);
     const group = groupIndexOf(filePaths[i], markerNums);
     const groupChanged = markerNums && i > 0 && group !== prevGroup;
     // ファイル末尾の空行の数が継ぎ目の空きに持ち込まれないよう、ファイルごとに詰めてから1行だけ空ける
     if (i > 0 && !groupChanged) {
-      const gap = startsNewChapter(files, i) ? [''] : FILE_SEPARATOR_LINES;
-      allLines.push(...gap.map(text => ({ text, source: null, group })));
+      const gap = startsNewChapter(files, i) ? [''] : fileSeparatorLines(sceneBreak);
+      allLines.push(...gap.map((text) => ({ text, source: null, group })));
     }
     for (const line of trimBlankEdges(lines)) {
-      const text = pov && isViewpointLine(line) ? `${line}　${pov}` : line;
-      allLines.push({ text, source: src, group });
+      allLines.push({ text: isSeparator(line) ? separatorMark(line, sceneBreak) : line, source: src, group });
     }
     prevGroup = group;
   });
-  const prevHasViewpointEnd = files.length > 0 && files[files.length - 1].hasViewpointEnd;
-
-  // 最終ファイル末尾の【】は「次章のアンカー」ではなく終端マーカーなので、本文末尾に残す
-  if (prevHasViewpointEnd && filePaths.length > 0) {
-    const lastPath = filePaths[filePaths.length - 1];
-    // 空アンカー【】は次章用のプレースホルダーなので対象外。中身のある【…】だけを終端マーカーとして残す
-    const lastLine = [...readLines(lastPath)].reverse().find(l => l.trim() !== '');
-    const endLine = lastLine && isViewpointLine(lastLine) && /^【\s*[^】\s]/.test(lastLine) ? lastLine : null;
-    if (endLine) allLines.push({ text: endLine, source: basename(lastPath), group: prevGroup, endMarker: true });
-  }
   return allLines;
 }
 
@@ -88,11 +95,14 @@ function splitByGroups(allLines) {
     if (!groups.has(item.group)) groups.set(item.group, []);
     groups.get(item.group).push(item);
   }
-  return [...groups.values()].map(items => ({
+  return [...groups.values()].map((items) => ({
     header: null,
     epigraphs: [],
-    lines: moveEpigraphsAfterHeading(items.map(it => it.text), { blankAfter: true }),
-    sources: new Set(items.filter(it => it.source && it.text.trim() !== '').map(it => it.source)),
+    lines: moveEpigraphsAfterHeading(
+      items.map((it) => it.text),
+      { blankAfter: true },
+    ),
+    sources: new Set(items.filter((it) => it.source && it.text.trim() !== '').map((it) => it.source)),
   }));
 }
 
@@ -101,12 +111,12 @@ function splitByViewpoints(allLines) {
   let currentChapter = null;
   let pendingEpigraphs = [];
 
-  for (const { text: line, source, endMarker } of allLines) {
+  for (const { text: line, source } of allLines) {
     if (isEpigraphLine(line)) {
       pendingEpigraphs.push(line);
       continue;
     }
-    if (isViewpointLine(line) && !endMarker) {
+    if (isViewpointLine(line)) {
       if (currentChapter) chapters.push(currentChapter);
       currentChapter = { header: line, epigraphs: pendingEpigraphs, lines: [], sources: new Set() };
       if (source) currentChapter.sources.add(source);
@@ -117,7 +127,6 @@ function splitByViewpoints(allLines) {
       currentChapter.lines.push(line);
       if (source && line.trim() !== '') currentChapter.sources.add(source);
     } else {
-      // 最初の【】の前にテキストがある場合（通常はない）
       currentChapter = { header: null, epigraphs: pendingEpigraphs, lines: [line], sources: new Set() };
       if (source) currentChapter.sources.add(source);
       pendingEpigraphs = [];
@@ -154,12 +163,11 @@ function numberViewpoints(chapters, byGroups) {
   }
 }
 
-export function buildChapters(filePaths, markerNums = null) {
-  const allLines = collectLines(filePaths, markerNums);
+export function buildChapters(filePaths, markerNums = null, { sceneBreak = SCENE_BREAK_MARK } = {}) {
+  const allLines = collectLines(filePaths, markerNums, sceneBreak);
   const chapters = markerNums ? splitByGroups(allLines) : splitByViewpoints(allLines);
 
-  // 本文のない章（最初の【】前の空行や、ヘッダーのみの章）は出力しない
-  const nonEmptyChapters = chapters.filter(ch => ch.lines.some(l => l.trim() !== ''));
+  const nonEmptyChapters = chapters.filter((ch) => ch.lines.some((l) => l.trim() !== ''));
   numberViewpoints(nonEmptyChapters, Boolean(markerNums));
   return nonEmptyChapters;
 }
@@ -185,13 +193,16 @@ export function main(argv = process.argv.slice(2)) {
   const genre = args.files[3] || null;
   const target = args.target;
   const markerNums = args.splits
-    ? args.splits.map(s => parseInt(s, 10)).filter(n => !Number.isNaN(n)).sort((a, b) => a - b)
+    ? args.splits
+        .map((s) => parseInt(s, 10))
+        .filter((n) => !Number.isNaN(n))
+        .sort((a, b) => a - b)
     : null;
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(outputDir, { recursive: true });
 
   const filePaths = getTextFilesFromDir(storyDir, [SYNOPSIS_FILENAME, CHARACTERS_FILENAME]);
-  const nonEmptyChapters = buildChapters(filePaths, markerNums);
+  const nonEmptyChapters = buildChapters(filePaths, markerNums, { sceneBreak: args.sceneBreak });
 
   for (let i = 0; i < nonEmptyChapters.length; i++) {
     const chapter = nonEmptyChapters[i];
@@ -203,7 +214,7 @@ export function main(argv = process.argv.slice(2)) {
     if (i === 0 && target) leadLines.push(`ターゲット: ${target}`);
     const bodyLines = chapterFileLines(chapter, leadLines);
 
-    writeFileSync(join(outputDir, fileName), bodyLines.join('\n') + '\n', 'utf-8');
+    writeFileSync(join(outputDir, fileName), `${bodyLines.join('\n')}\n`, 'utf-8');
     console.log(`${fileName} (${countTextChars(bodyLines.join(''))}字) ← ${[...chapter.sources].join(', ')}`);
   }
 
@@ -213,9 +224,9 @@ export function main(argv = process.argv.slice(2)) {
 runMain(import.meta.url, main);
 
 if (import.meta.vitest) {
-  const { describe, test, expect } = import.meta.vitest;
-  const { mkdtempSync } = await import('fs');
-  const { tmpdir } = await import('os');
+  const { describe, test, expect, vi } = import.meta.vitest;
+  const { mkdtempSync, readdirSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
 
   const split = (files, markerNums = null) => {
     const dir = mkdtempSync(join(tmpdir(), 'split-chapters-'));
@@ -224,7 +235,7 @@ if (import.meta.vitest) {
         writeFileSync(join(dir, name), content);
         return join(dir, name);
       });
-      return buildChapters(paths, markerNums).map(ch => ({
+      return buildChapters(paths, markerNums).map((ch) => ({
         lines: chapterFileLines(ch),
         sources: [...ch.sources],
       }));
@@ -234,12 +245,14 @@ if (import.meta.vitest) {
   };
 
   describe('【】ごとに分ける（--splits なし）', () => {
-    test('視点行ごとに章を切り、通し番号とPOV名を見出しに付ける', () => {
-      expect(split({
-        '010.txt': 'POV: アキ\n【】\n本文一\n【】\n',
-        '020.txt': '【夜】\n本文二\n',
-      })).toEqual([
-        { lines: ['【1】　アキ', '', '本文一'], sources: ['010.txt'] },
+    test('見出しごとに章を切り、通し番号を見出しに付ける', () => {
+      expect(
+        split({
+          '010.txt': '【】\n本文一\n',
+          '020.txt': '【夜】\n本文二\n',
+        }),
+      ).toEqual([
+        { lines: ['【1】', '', '本文一'], sources: ['010.txt'] },
         { lines: ['【2　夜】', '', '本文二'], sources: ['020.txt'] },
       ]);
     });
@@ -249,12 +262,15 @@ if (import.meta.vitest) {
       ]);
     });
     test('エピグラフは見出しの下にまとめる', () => {
-      expect(split({ '010.txt': 'Epigraph: 引用——出典\n【】\n本文\n' })[0].lines)
-        .toEqual(['【1】', 'Epigraph: 引用——出典', '', '本文']);
+      expect(split({ '010.txt': 'Epigraph: 引用——出典\n【】\n本文\n' })[0].lines).toEqual([
+        '【1】',
+        'Epigraph: 引用——出典',
+        '',
+        '本文',
+      ]);
     });
-    test('最終ファイル末尾の章題つき【…】は終端マーカーとして本文に残し、空の【】は落とす', () => {
-      expect(split({ '010.txt': '【】\n本文\n【了】\n' })[0].lines).toEqual(['【1】', '', '本文', '【了】']);
-      expect(split({ '010.txt': '【】\n本文\n【】\n' })[0].lines).toEqual(['【1】', '', '本文']);
+    test('* の場面区切りは ◇◇◇ にする', () => {
+      expect(split({ '010.txt': '【】\n一\n\n*\n\n二\n' })[0].lines).toEqual(['【1】', '', '一', '', '◇◇◇', '', '二']);
     });
   });
 
@@ -270,6 +286,98 @@ if (import.meta.vitest) {
         { lines: ['【1-1】', 'Epigraph: 一', '', '本文一', '', '【1-2】', '本文二'], sources: ['010.txt', '020.txt'] },
         { lines: ['【2-1】', 'Epigraph: 三', '', '本文三', '', '◇◇◇', '', '続き'], sources: ['030.txt', '040.txt'] },
       ]);
+    });
+  });
+
+  describe('章の切り出し', () => {
+    test('最初の【】より前の本文は見出しのない章にし、本文のない章は出さない', () => {
+      expect(split({ '010.txt': '前置き\n【】\n\n【】\n本文\n' })).toEqual([
+        { lines: ['前置き'], sources: ['010.txt'] },
+        { lines: ['【1】', '', '本文'], sources: ['010.txt'] },
+      ]);
+    });
+    test('青空文庫の注記は書いたまま出す', () => {
+      expect(split({ '010.txt': '【】\n一\n［＃改ページ］\n［＃３字下げ］二\n' })[0].lines).toEqual([
+        '【1】',
+        '',
+        '一',
+        '［＃改ページ］',
+        '［＃３字下げ］二',
+      ]);
+    });
+  });
+
+  describe('parseArgs', () => {
+    test('位置引数と既定値', () => {
+      expect(parseArgs(['story', 'out', '題', 'SF'])).toEqual({
+        files: ['story', 'out', '題', 'SF'],
+        splits: null,
+        target: null,
+        sceneBreak: '◇◇◇',
+      });
+    });
+    test('--splits はカンマ区切り、--persona は --target と同じ', () => {
+      expect(parseArgs(['--splits=070, 120,170', '--persona', '30代', '--scene-break', '＊'])).toMatchObject({
+        splits: ['070', '120', '170'],
+        target: '30代',
+        sceneBreak: '＊',
+      });
+    });
+  });
+
+  describe('main', () => {
+    const run = (files, argsAfterDir) => {
+      const dir = mkdtempSync(join(tmpdir(), 'split-main-'));
+      try {
+        for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+        try {
+          main([dir, ...argsAfterDir(dir)]);
+        } finally {
+          log.mockRestore();
+        }
+        const outDir = argsAfterDir(dir).find((a) => !a.startsWith('-')) ?? join(dir, 'chapters');
+        return Object.fromEntries(
+          readdirSync(outDir)
+            .sort()
+            .map((f) => [f, readFileSync(join(outDir, f), 'utf-8')]),
+        );
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
+    };
+
+    test('既定では <story-dir>/chapters に章ごとに書き、あらすじと登場人物は含めない', () => {
+      expect(
+        run(
+          {
+            '010.txt': '【】\n一\n',
+            '020.txt': '【】\n二\n',
+            'synopsis.txt': 'あらすじ\n',
+            'characters.txt': '人物\n',
+          },
+          () => [],
+        ),
+      ).toEqual({ 'chapter-001.txt': '【1】\n\n一\n', 'chapter-002.txt': '【2】\n\n二\n' });
+    });
+    test('ジャンル・タイトル・ターゲットは最初の章の先頭にだけ入れる', () => {
+      const out = run({ '010.txt': '【】\n一\n', '020.txt': '【】\n二\n' }, (dir) => [
+        join(dir, 'out'),
+        '題',
+        'SF',
+        '--target=30代',
+      ]);
+      expect(out).toEqual({
+        'chapter-001.txt': 'SF\n題\nターゲット: 30代\n【1】\n\n一\n',
+        'chapter-002.txt': '【2】\n\n二\n',
+      });
+    });
+    test('--splits の番号のファイルから新しい章にする', () => {
+      const out = run({ '070.txt': '【】\n一\n', '100.txt': '【】\n二\n', '120.txt': '【】\n三\n' }, () => [
+        '--splits=120',
+      ]);
+      expect(Object.keys(out)).toEqual(['chapter-001.txt', 'chapter-002.txt']);
+      expect(out['chapter-002.txt']).toBe('【2-1】\n三\n');
     });
   });
 }

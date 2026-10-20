@@ -1,8 +1,8 @@
-import { execSync } from 'child_process';
-import { readFileSync, writeFileSync } from 'fs';
-import { createRequire } from 'module';
-import { dirname, join, resolve } from 'path';
-import { pathToFileURL } from 'url';
+import { execFileSync, execSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export function parseCliArgs(argv, defs, defaults = {}) {
   const result = { files: [] };
@@ -38,7 +38,10 @@ export function parseCliArgs(argv, defs, defaults = {}) {
 }
 
 export function parseList(value) {
-  return value.split(',').map(s => s.trim()).filter(s => s.length > 0);
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 export function parseGridSize(value) {
@@ -53,8 +56,10 @@ export const ARG = {
   author: { key: 'author', flags: ['--author'], takesValue: true },
   open: { key: 'open', flags: ['--open'] },
   size: { key: 'size', flags: ['--size'], takesValue: true, parse: parseGridSize },
-  // 部の境界となるファイル名プレフィックス（novel split の --splits と同形式）
+  /** 部の境界となるファイル名プレフィックス（novel split の --splits と同形式） */
   parts: { key: 'parts', flags: ['--part', '--parts'], takesValue: true, parse: parseList },
+  /** 場面区切り（原稿の * の行）と章の途中のファイルの継ぎ目に組む記号（省略時は出力ごとの既定） */
+  sceneBreak: { key: 'sceneBreak', flags: ['--scene-break'], takesValue: true },
 };
 
 export function fail(message) {
@@ -72,10 +77,12 @@ export function requireOutput(args, example) {
  */
 export function runMain(importMetaUrl, main) {
   if (!process.argv[1] || importMetaUrl !== pathToFileURL(process.argv[1]).href) return;
-  Promise.resolve().then(main).catch(err => {
-    console.error('エラー:', err.message);
-    process.exit(1);
-  });
+  Promise.resolve()
+    .then(main)
+    .catch((err) => {
+      console.error('エラー:', err.message);
+      process.exit(1);
+    });
 }
 
 // 呼び出し元のディレクトリに依らず、このパッケージが依存している vivliostyle を使う
@@ -85,11 +92,17 @@ function vivliostyleBin() {
   return join(dirname(pkgPath), JSON.parse(readFileSync(pkgPath, 'utf-8')).bin.vivliostyle);
 }
 
+// VS Code 拡張は @vivliostyle/cli を同梱できないので、同じ手順で組む代わりのもの（vscode/src/pdf-renderer.mjs）を
+// NOVEL_PDF_RENDERER に渡してくる
 export function vivliostyleBuild(htmlPath, outputPath, { quiet = false } = {}) {
-  execSync(`"${process.execPath}" "${vivliostyleBin()}" build "${htmlPath}" -o "${outputPath}"`, { stdio: quiet ? 'pipe' : 'inherit' });
+  const command = process.env.NOVEL_PDF_RENDERER ? [process.env.NOVEL_PDF_RENDERER] : [vivliostyleBin(), 'build'];
+  execFileSync(process.execPath, [...command, htmlPath, '-o', outputPath], { stdio: quiet ? 'pipe' : 'inherit' });
 }
 
-// 組版の崩れを調べられるよう、PDFの隣にHTMLも書き出す（不要なら呼び出し側で消す）
+/**
+ * HTML から PDF を作り、書き出した HTML のパスを返す。
+ * 組版の崩れを調べられるよう HTML は PDF の隣に残す（不要なら呼び出し側で消す）。
+ */
 export function buildPdfFromHtml(html, outputPath, opts) {
   const htmlPath = outputPath.replace(/\.pdf$/, '.html');
   writeFileSync(htmlPath, html);
@@ -97,13 +110,14 @@ export function buildPdfFromHtml(html, outputPath, opts) {
   return htmlPath;
 }
 
+/** ファイルを open コマンドで開く。AUTO_OPEN=0 のときは --open 指定があっても開かない */
 export function openFile(path) {
-  // AUTO_OPEN=0 のときは --open 指定があっても開かない
   if (process.env.AUTO_OPEN === '0') return;
-  // openコマンドが使えない環境（CI等）では黙って無視する
   try {
     execSync(`open "${resolve(path)}"`);
-  } catch { /* ignore */ }
+  } catch {
+    // open コマンドが無い環境（CI 等）でも、ファイルはできているので失敗にしない
+  }
 }
 
 if (import.meta.vitest) {
@@ -114,7 +128,7 @@ if (import.meta.vitest) {
       ARG.output,
       ARG.open,
       { key: 'vertical', flags: ['--horizontal'], value: false },
-      { key: 'limit', flags: ['--limit'], takesValue: true, parse: v => parseInt(v, 10) },
+      { key: 'limit', flags: ['--limit'], takesValue: true, parse: (v) => parseInt(v, 10) },
       ARG.parts,
     ];
 
@@ -156,6 +170,14 @@ if (import.meta.vitest) {
     });
   });
 
+  describe('ARG', () => {
+    test('--part は --parts と同じくカンマ区切りの一覧、--scene-break は記号をそのまま受け取る', () => {
+      const args = parseCliArgs(['--part', '070,085', '--scene-break', '＊　＊'], [ARG.parts, ARG.sceneBreak]);
+      expect(args.parts).toEqual(['070', '085']);
+      expect(args.sceneBreak).toBe('＊　＊');
+    });
+  });
+
   describe('parseGridSize', () => {
     test('字数x行数を { cols, rows } にする', () => {
       expect(parseGridSize('42x34')).toEqual({ cols: 42, rows: 34 });
@@ -172,7 +194,9 @@ if (import.meta.vitest) {
   describe('runMain', () => {
     test('別モジュールから import されたときは main を実行しない', () => {
       let ran = false;
-      runMain('file:///not/the/entry.mts', () => { ran = true; });
+      runMain('file:///not/the/entry.mts', () => {
+        ran = true;
+      });
       expect(ran).toBe(false);
     });
   });

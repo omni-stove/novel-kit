@@ -182,9 +182,18 @@ importers:
 
   vscode:
     devDependencies:
+      '@puppeteer/browsers':
+        specifier: 2.10.5
+        version: 2.10.5(supports-color@7.2.0)
+      '@vivliostyle/viewer':
+        specifier: 2.42.1
+        version: 2.42.1
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      puppeteer-core:
+        specifier: 24.27.0
+        version: 24.27.0(supports-color@7.2.0)
 
 packages:
 

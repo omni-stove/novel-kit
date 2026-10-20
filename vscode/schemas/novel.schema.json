@@ -6,6 +6,10 @@
     "$schema": {
       "type": "string"
     },
+    "id": {
+      "type": "string",
+      "description": "出力ファイル名のもと（省略時は title）。novel build で out を省いた出力の名前に使う"
+    },
     "title": {
       "type": "string",
       "description": "作品名（PDF の扉・柱に使う）"
@@ -37,16 +41,11 @@
       "description": "部の境界になるファイル名の先頭の番号（例: [\"070\", \"085\"]）。pdf / pdf-en / split / merge が使う"
     },
     "outputs": {
-      "type": "object",
-      "description": "novel build で作る出力（名前 → 定義）",
-      "additionalProperties": {
-        "type": "object",
-        "required": [
-          "format",
-          "out"
-        ],
-        "properties": {
-          "format": {
+      "description": "novel build で作る出力。出力名の配列か、出力名 → 項目（項目が無ければ true）。出力名が format の名前なら format は省ける",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
             "enum": [
               "pdf",
               "pdf-en",
@@ -56,141 +55,24 @@
               "rtf-en",
               "split",
               "merge"
-            ],
-            "description": "出力形式（pdf: 縦書き/横書き PDF、pdf-en: 英語のペーパーバック風 PDF、novel-pdf: 文庫本見開き PDF、epub、rtf: 日本語原稿の RTF、rtf-en: Shunn 形式の RTF、split: 章ごとの txt、merge: 1つにまとめた txt）"
+            ]
           },
-          "out": {
-            "type": "string",
-            "description": "出力ファイル（split はディレクトリ）。プロジェクトのルート＝package.json のあるディレクトリから"
-          },
-          "title": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "この出力だけのタイトル（省略時は作品の title、null で入れない）"
-          },
-          "author": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "この出力だけの著者名（省略時は作品の author、null で入れない）"
-          },
-          "input": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "この出力だけの原稿（省略時は作品の input）"
-          },
-          "parts": {
-            "type": [
-              "array",
-              "null"
-            ],
-            "items": {
-              "type": "string"
-            },
-            "description": "この出力だけの部の境界（省略時は作品の parts、null で部に分けない）"
-          },
-          "writingMode": {
-            "enum": [
-              "vertical",
-              "horizontal"
-            ],
-            "description": "文字方向（縦書き / 横書き）"
-          },
-          "chars": {
-            "type": "integer",
-            "minimum": 5,
-            "maximum": 100,
-            "description": "1行の文字数"
-          },
-          "lines": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 1,
-            "maximum": 100,
-            "description": "1ページの行数（null で行送り自動）"
-          },
-          "coverless": {
-            "type": "boolean",
-            "description": "表紙を作らず、梗概と本文の頭にタイトル・著者名を本文サイズで出す"
-          },
-          "chapterBreak": {
-            "type": "boolean",
-            "description": "false で章ごとに改ページしない（pdf / rtf / rtf-en）"
-          },
-          "pageBreak": {
-            "type": "boolean",
-            "description": "false でファイルの間で改ページしない"
-          },
-          "synopsis": {
-            "type": "boolean",
-            "description": "false で梗概（synopsis.txt）を入れない"
-          },
-          "synopsisOnTitle": {
-            "type": "boolean",
-            "description": "梗概をタイトルページに出す"
-          },
-          "blankAfterHeading": {
-            "type": "boolean",
-            "description": "章見出し（視点行）と本文の間に空行を1行補う"
-          },
-          "review": {
-            "type": "boolean",
-            "description": "下読み用。表紙・梗概・人物紹介・部構成を無視し、先頭から約2万字までを組む"
-          },
-          "recto": {
-            "type": "boolean",
-            "description": "章を必ず右ページから始める"
-          },
-          "smartQuotes": {
-            "type": "boolean",
-            "description": "false でストレート引用符をカーリー引用符にしない"
-          },
-          "genre": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "この出力だけのジャンル（split / merge）"
-          },
-          "target": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "この出力だけの想定読者（split / merge）"
-          },
-          "size": {
-            "enum": [
-              "a6",
-              "b6",
-              "a5"
-            ],
-            "description": "novel-pdf の判型（既定は a6）"
-          },
-          "dark": {
-            "type": "boolean",
-            "description": "novel-pdf を黒背景・白文字にする"
-          },
-          "rubyParens": {
-            "type": "boolean",
-            "description": "rtf / merge でルビを 漢字（かんじ） の括弧表記にする"
-          },
-          "contact": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "rtf-en の1ページ目左上に出す連絡先（1要素1行）"
+          "uniqueItems": true
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "const": true
+              },
+              {
+                "$ref": "#/definitions/output"
+              }
+            ]
           }
         }
-      }
+      ]
     },
     "writingMode": {
       "enum": [
@@ -255,10 +137,35 @@
       "type": "string",
       "description": "本文フォント（空なら PDF 出力と同じ。日本語は明朝、英語は EB Garamond）"
     },
+    "sceneBreak": {
+      "type": "string",
+      "description": "日本語の出力で場面区切り（原稿の * / *** / * * * の行）と、章の途中で切れたファイルの継ぎ目に組む記号（既定は ◇◇◇）。例: \"＊　＊　＊\""
+    },
     "english": {
       "type": "object",
       "description": "英語の原稿（本文のアルファベットが日本語の文字より多いもの）のレイアウト。横書き固定で、文字サイズと行送りを指定する。省略時は 6×9in ペーパーバック",
       "properties": {
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "英語の出力（pdf-en / rtf-en）のタイトル（省略時は作品の title）"
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "英語の出力（pdf-en / rtf-en）の著者名（省略時は作品の author）"
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "英語の出力（pdf-en / rtf-en）の原稿（この設定ファイルのディレクトリから。省略時は [\"en\"]）"
+        },
         "paper": {
           "enum": [
             "A4",
@@ -311,6 +218,10 @@
         "fontFamily": {
           "type": "string",
           "description": "本文フォント（空なら PDF 出力と同じ EB Garamond）"
+        },
+        "sceneBreak": {
+          "type": "string",
+          "description": "英語の出力（pdf-en とプレビュー）で場面区切りに組む記号（既定は * * *。空白は字間のアキになる）"
         }
       }
     },
@@ -351,6 +262,160 @@
         "edit": {
           "type": "boolean",
           "description": "プレビュー上で段落をクリックして編集する"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "output": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "enum": [
+            "pdf",
+            "pdf-en",
+            "novel-pdf",
+            "epub",
+            "rtf",
+            "rtf-en",
+            "split",
+            "merge"
+          ],
+          "description": "出力形式（省略時は出力名。pdf: 縦書き/横書き PDF、pdf-en: 英語のペーパーバック風 PDF、novel-pdf: 文庫本見開き PDF、epub、rtf: 日本語原稿の RTF、rtf-en: Shunn 形式の RTF、split: 章ごとの txt、merge: 1つにまとめた txt）"
+        },
+        "out": {
+          "type": "string",
+          "description": "出力ファイル（split はディレクトリ）。novel build --out-dir のディレクトリ（既定は out）から。省略時は id と format（format と違う出力名ならその名前）から決める"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "この出力だけのタイトル（省略時は作品の（pdf-en / rtf-en は english の、無ければ作品の） title、null で入れない）"
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "この出力だけの著者名（省略時は作品の（pdf-en / rtf-en は english の、無ければ作品の） author、null で入れない）"
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "この出力だけの原稿（省略時は作品の（pdf-en / rtf-en は english の、無ければ作品の） input）"
+        },
+        "parts": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "この出力だけの部の境界（省略時は作品の parts、null で部に分けない）"
+        },
+        "writingMode": {
+          "enum": [
+            "vertical",
+            "horizontal"
+          ],
+          "description": "文字方向（縦書き / 横書き）"
+        },
+        "chars": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 100,
+          "description": "1行の文字数"
+        },
+        "lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 100,
+          "description": "1ページの行数（null で行送り自動）"
+        },
+        "coverless": {
+          "type": "boolean",
+          "description": "表紙を作らず、梗概と本文の頭にタイトル・著者名を本文サイズで出す"
+        },
+        "chapterBreak": {
+          "type": "boolean",
+          "description": "false で章ごとに改ページしない（pdf / rtf / rtf-en）"
+        },
+        "pageBreak": {
+          "type": "boolean",
+          "description": "false でファイルの間で改ページしない"
+        },
+        "synopsis": {
+          "type": "boolean",
+          "description": "false で梗概（synopsis.txt）を入れない"
+        },
+        "synopsisOnTitle": {
+          "type": "boolean",
+          "description": "梗概をタイトルページに出す"
+        },
+        "blankAfterHeading": {
+          "type": "boolean",
+          "description": "章見出し（視点行）と本文の間に空行を1行補う"
+        },
+        "review": {
+          "type": "boolean",
+          "description": "下読み用。表紙・梗概・人物紹介・部構成を無視し、先頭から約2万字までを組む"
+        },
+        "recto": {
+          "type": "boolean",
+          "description": "章を必ず右ページから始める"
+        },
+        "smartQuotes": {
+          "type": "boolean",
+          "description": "false でストレート引用符をカーリー引用符にしない"
+        },
+        "genre": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "この出力だけのジャンル（split / merge）"
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "この出力だけの想定読者（split / merge）"
+        },
+        "size": {
+          "enum": [
+            "a6",
+            "b6",
+            "a5"
+          ],
+          "description": "novel-pdf の判型（既定は a6）"
+        },
+        "dark": {
+          "type": "boolean",
+          "description": "novel-pdf を黒背景・白文字にする"
+        },
+        "rubyParens": {
+          "type": "boolean",
+          "description": "rtf / merge でルビを 漢字（かんじ） の括弧表記にする"
+        },
+        "contact": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "rtf-en の1ページ目左上に出す連絡先（1要素1行）"
+        },
+        "sceneBreak": {
+          "type": "string",
+          "description": "この出力だけの場面区切りの記号（省略時は sceneBreak、pdf-en は english.sceneBreak、rtf-en は #）"
         }
       }
     }

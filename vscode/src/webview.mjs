@@ -5,10 +5,7 @@
 
 import { PAPER_SIZES } from '../../src/layout.mjs';
 
-const ZOOM_OPTIONS = [
-  ['fit', '画面に合わせる'],
-  ...[50, 75, 100, 125, 150, 200].map(p => [String(p), `${p}%`]),
-];
+const ZOOM_OPTIONS = [['fit', '画面に合わせる'], ...[50, 75, 100, 125, 150, 200].map((p) => [String(p), `${p}%`])];
 
 const options = (pairs) => pairs.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
 
@@ -16,7 +13,6 @@ const marginInput = (side, label) =>
   `<label>${label}<input id="margin-${side}" data-layout-field type="number" min="0" max="100" step="any">mm</label>`;
 
 const PAPER_LABELS = { '6x9in': '6×9in', '5x8in': '5×8in' };
-
 
 export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
   const csp = [
@@ -62,8 +58,11 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
     </fieldset>
     <fieldset>
       <legend>用紙</legend>
-      <label>サイズ<select id="paper" data-layout-field>${options(Object.keys(PAPER_SIZES).map(p => [p, PAPER_LABELS[p] ?? p]))}</select></label>
-      <label>向き<select id="orientation" data-layout-field>${options([['landscape', '横'], ['portrait', '縦']])}</select></label>
+      <label>サイズ<select id="paper" data-layout-field>${options(Object.keys(PAPER_SIZES).map((p) => [p, PAPER_LABELS[p] ?? p]))}</select></label>
+      <label>向き<select id="orientation" data-layout-field>${options([
+        ['landscape', '横'],
+        ['portrait', '縦'],
+      ])}</select></label>
     </fieldset>
     <fieldset>
       <legend>余白</legend>
