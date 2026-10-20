@@ -19,7 +19,6 @@
     "node": ">=24"
   },
   "scripts": {
-    "preinstall": "npx only-allow pnpm",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -30,5 +29,6 @@
   },
   "devDependencies": {
     "vitest": "^4.1.9"
-  }
+  },
+  "packageManager": "pnpm@12.4.2"
 }
