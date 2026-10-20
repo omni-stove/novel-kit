@@ -5,15 +5,26 @@
 
 ## 入れ方
 
+GitHub Release に置いた vsix を入れる（creation では `mise run ext-install` がこれを行う）。
+
 ```sh
-pnpm install
-pnpm --dir vscode run install-extension
+gh release download --repo omni-stove/novel-kit --pattern novel-preview.vsix --dir /tmp --clobber
+code --install-extension /tmp/novel-preview.vsix --force
 ```
 
-`vscode/dist/novel-preview.vsix` を作って `code --install-extension` で入れる。更新するときも同じ。
-（creation では `mise run ext-install` が、隣に clone した novel-kit でこれを行う）
+手元で直したものを試すときは、このリポジトリで `pnpm install && pnpm --dir vscode run install-extension`
+（`vscode/dist/novel-preview.vsix` を作って入れる）。
 
 「PDF出力」ボタンは、開いているワークスペースの `node_modules/.bin/novel` を使う。ワークスペースの依存に novel-kit を入れておく。
+
+## リリース
+
+`vscode/package.json` の `version` を上げてコミットし、`vscode-v<version>` のタグを push する。
+GitHub Actions（`.github/workflows/release-extension.yml`）がテスト・vsix の作成をして、Release に置く。
+
+```sh
+git tag vscode-v0.8.0 && git push origin vscode-v0.8.0
+```
 
 ## 使い方
 

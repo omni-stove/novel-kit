@@ -1,0 +1,32 @@
+# vscode-v<版> のタグを push すると、VS Code 拡張の vsix を作って GitHub Release に置く。
+# 版は vscode/package.json の version と同じにする（例: 0.8.0 なら vscode-v0.8.0）
+name: release-extension
+
+on:
+  push:
+    tags: ['vscode-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: タグと拡張の版が合っているか
+        run: |
+          version=$(node -p "require('./vscode/package.json').version")
+          test "vscode-v$version" = "$GITHUB_REF_NAME" || { echo "タグ $GITHUB_REF_NAME と vscode/package.json の version $version が違う"; exit 1; }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm --dir vscode run package
+      - name: Release を作って vsix を置く
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" vscode/dist/novel-preview.vsix --title "小説プレビュー ${GITHUB_REF_NAME#vscode-v}" --generate-notes
