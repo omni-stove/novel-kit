@@ -74,7 +74,6 @@ export function readWorkConfig(filePath) {
     genre: raw.genre ?? null,
     target: raw.target ?? null,
     input: raw.input ?? ['.'],
-    parts: raw.parts ?? null,
     outputs: raw.outputs ?? {},
   };
 }
