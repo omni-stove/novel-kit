@@ -702,7 +702,79 @@
   $('delete-preset').addEventListener('click', () =>
     vscode.postMessage({ type: 'deletePreset', name: $('preset').value }),
   );
-  $('export-pdf').addEventListener('click', () => vscode.postMessage({ type: 'exportPdf' }));
+
+  /**
+   * 「出力」のメニュー。現在のレイアウトでPDF と、render で届いた novel.json の出力（model.outputs）を並べる。
+   * 選ぶと export を送る（names: 作る出力名。無ければ現在のレイアウトでPDF）
+   */
+  function setExportMenuOpen(open) {
+    const menu = $('export-menu');
+    $('export').setAttribute('aria-expanded', String(open));
+    menu.hidden = !open;
+    if (!open) return;
+    const outputs = model?.outputs ?? [];
+    const item = (label, description, names, title = '') => {
+      const button = document.createElement('button');
+      button.setAttribute('role', 'menuitem');
+      button.title = title;
+      button.append(label);
+      if (description) {
+        const span = document.createElement('span');
+        span.className = 'description';
+        span.textContent = description;
+        button.append(span);
+      }
+      button.addEventListener('click', () => {
+        setExportMenuOpen(false);
+        vscode.postMessage({ type: 'export', names });
+      });
+      return button;
+    };
+    const note = (text) => Object.assign(document.createElement('div'), { className: 'note', textContent: text });
+    menu.replaceChildren(
+      item(
+        '現在のレイアウトでPDF',
+        'out/preview/',
+        null,
+        '日本語: novel pdf でこの字数×行数のPDFを出力\nEnglish: novel pdf-en でこの判型のPDFを出力',
+      ),
+      document.createElement('hr'),
+      ...(outputs.length > 0
+        ? [
+            note(model.layoutFile),
+            ...outputs.map((o) => item(o.name, o.description, [o.name])),
+            ...(outputs.length > 1
+              ? [
+                  item(
+                    'すべての出力',
+                    '',
+                    outputs.map((o) => o.name),
+                  ),
+                ]
+              : []),
+          ]
+        : [note('novel.json の "outputs" に書いた出力もここから作れる')]),
+    );
+    // ツールバーは折り返すので、ボタンが右端に来ていればメニューを右に揃えて画面からはみ出さないようにする
+    menu.classList.remove('align-right');
+    menu.classList.toggle('align-right', menu.getBoundingClientRect().right > window.innerWidth);
+    menu.querySelector('button')?.focus();
+  }
+  $('export').addEventListener('click', () => setExportMenuOpen($('export-menu').hidden));
+  document.addEventListener('click', (e) => {
+    if (!$('export-wrap').contains(e.target)) setExportMenuOpen(false);
+  });
+  $('export-wrap').addEventListener('keydown', (e) => {
+    const items = [...$('export-menu').querySelectorAll('button')];
+    if (e.key === 'Escape') {
+      setExportMenuOpen(false);
+      $('export').focus();
+    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !$('export-menu').hidden) {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      items[(items.indexOf(document.activeElement) + step + items.length) % items.length]?.focus();
+    }
+  });
 
   /** 作品設定の欄のフォーム（settings.js）。初めて開いたときに作る */
   let workForm = null;
@@ -975,7 +1047,8 @@
   window.addEventListener('keydown', (e) => {
     if (!geometry || editing || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
     const target = /** @type {HTMLElement} */ (e.target);
-    if (target.isContentEditable || target.closest('input, select, textarea, #setup, #work-panel')) return;
+    if (target.isContentEditable || target.closest('input, select, textarea, #setup, #work-panel, #export-wrap'))
+      return;
     if (geometry.scroll) return scrollByKey(e);
     if (e.key === 'Home' || e.key === 'End') {
       e.preventDefault();

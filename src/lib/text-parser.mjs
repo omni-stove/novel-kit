@@ -464,8 +464,8 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
 
   result = result.replace(/\uE001([\uE010-\uEFFF])\uE001/g, (_, ch) => {
     const html = processInnerText(emphasisPlaceholders[ch.charCodeAt(0) - 0xe010]);
-    if (!(vertical && rubyLayout)) return `<span class="emphasis">${html}</span>`;
-    // text-emphasis の圏点は Chromium が行の箱に含めて行送りを広げ、字詰めの版面が崩れるため、
+    if (!rubyLayout) return `<span class="emphasis">${html}</span>`;
+    // text-emphasis の圏点は Chromium が行の箱に含めて行送りを広げ、字詰めの版面や行間が崩れるため、
     // 1字ずつの箱にレイアウトに影響しない点を CSS（lib/html.mjs の .emphasis-dot）で描く
     return html.replace(EMPHASIS_UNIT_RE, (unit) => {
       const markup = unit.startsWith('\uE002') ? spanPlaceholders[unit.charCodeAt(1) - 0xe010] : unit;
@@ -1138,6 +1138,11 @@ if (import.meta.vitest) {
     test('rubyLayout: 縦書きの傍点は行送りを広げないよう1字ずつの箱にし、約物には打たない', () => {
       expect(escapeHtml('《《覚悟、12》》', { rubyLayout: true })).toBe(
         '<span class="emphasis-dot">覚</span><span class="emphasis-dot">悟</span>、<span class="emphasis-dot"><span class="tcy">12</span></span>',
+      );
+    });
+    test('rubyLayout: 横書きの傍点も行間を広げないよう1字ずつの箱にする', () => {
+      expect(escapeHtml('《《覚悟、12》》', { rubyLayout: true, vertical: false })).toBe(
+        '<span class="emphasis-dot">覚</span><span class="emphasis-dot">悟</span>、<span class="emphasis-dot">1</span><span class="emphasis-dot">2</span>',
       );
     });
     test('\u6A2A\u5012\u3057 <<text>> \u3092 span.sideways-latin \u306B\u5909\u63DB', () => {

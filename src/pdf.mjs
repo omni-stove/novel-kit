@@ -45,7 +45,7 @@ import { basename } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { PDFDocument, PDFName, ReadingDirection, rgb } from 'pdf-lib';
 import { ARG, buildPdfFromHtml, fail, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
-import { AOZORA_CSS, googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
+import { AOZORA_CSS, googleFontsLinks, HORIZONTAL_GLYPH_CSS, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
 import {
   CHARACTERS_FILENAME,
   countGenkoRows,
@@ -304,7 +304,7 @@ ${googleFontsLinks('Noto+Serif+JP:wght@400')}
       text-orientation: sideways;
       vertical-align: central;
     }
-${VERTICAL_GLYPH_CSS}${AOZORA_CSS}
+${VERTICAL_GLYPH_CSS}${options.vertical ? '' : HORIZONTAL_GLYPH_CSS}${AOZORA_CSS}
     .title-page {
       display: flex;
       align-items: center;
