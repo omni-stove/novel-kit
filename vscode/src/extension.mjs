@@ -247,8 +247,13 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     const { layout, view, english, sceneBreak, parts } = resolvedSettingsFor(session.doc);
     session.scope = view.scope;
     const metrics = computeMetrics(layout, { english });
+    // スクロール表示はウェブ小説の読み味を見るためのもので、縦書きのレイアウトでも横書きに組む
+    const flowMetrics =
+      view.mode === 'scroll' && metrics.vertical
+        ? computeMetrics({ ...layout, writingMode: 'horizontal' }, { english })
+        : metrics;
     try {
-      const built = buildDocument({ filePath, scope: session.scope, metrics, linesOf, sceneBreak, parts });
+      const built = buildDocument({ filePath, scope: session.scope, metrics: flowMetrics, linesOf, sceneBreak, parts });
       session.files = built.files;
       const presets = allPresets(english);
       const initialReveal = takeInitialReveal();
@@ -450,7 +455,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   }
 
   /**
-   * webview からのメッセージ。view は表示範囲・倍率・編集のオンオフを設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する。
+   * webview からのメッセージ。view は表示範囲・倍率・編集のオンオフ・表示の形（ページ・スクロール）を設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する。
    * jump は見ている位置のファイル（作品全体の表示なら、開いたファイルとは限らない）をテキストエディタで開く
    */
   function onMessage(msg) {

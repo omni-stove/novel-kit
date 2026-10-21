@@ -40,6 +40,8 @@ export const DEFAULT_VIEW = {
   zoom: 'fit',
   /** プレビュー上で段落をクリックして編集するか */
   edit: true,
+  /** 'page' = 用紙に組んでページで見せる / 'scroll' = カクヨム・小説家になろうのように横書きでページを区切らず縦に流す */
+  mode: 'page',
 };
 
 export function normalizeView(raw) {
@@ -49,6 +51,7 @@ export function normalizeView(raw) {
     scope: r.scope === 'file' ? 'file' : DEFAULT_VIEW.scope,
     zoom: Number.isFinite(percent) && percent >= 10 && percent <= 400 ? Math.round(percent) : DEFAULT_VIEW.zoom,
     edit: typeof r.edit === 'boolean' ? r.edit : DEFAULT_VIEW.edit,
+    mode: r.mode === 'scroll' ? 'scroll' : DEFAULT_VIEW.mode,
   };
 }
 
@@ -173,16 +176,16 @@ if (import.meta.vitest) {
         writeSettingsFile(file, {
           layout: { chars: 40, lines: 40 },
           english: { paper: 'A5' },
-          view: { scope: 'file', zoom: '150', edit: false },
+          view: { scope: 'file', zoom: '150', edit: false, mode: 'scroll' },
         });
         expect(JSON.parse(readFileSync(file, 'utf-8'))).toEqual({
           ...DEFAULT_LAYOUT,
           chars: 40,
           lines: 40,
           english: { ...DEFAULT_ENGLISH_LAYOUT, paper: 'A5' },
-          view: { scope: 'file', zoom: 150, edit: false },
+          view: { scope: 'file', zoom: 150, edit: false, mode: 'scroll' },
         });
-        expect(readSettingsFile(file).view).toEqual({ scope: 'file', zoom: 150, edit: false });
+        expect(readSettingsFile(file).view).toEqual({ scope: 'file', zoom: 150, edit: false, mode: 'scroll' });
         expect(readSettingsFile(file).english.paper).toBe('A5');
       });
     });

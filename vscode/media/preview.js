@@ -10,6 +10,12 @@
   // preview.css の #stage の margin と揃える
   const STAGE_MARGIN_PX = 24;
   const PX_PER_MM = 96 / 25.4;
+  /** スクロール表示の文字サイズ（px、倍率 100% のとき） */
+  const SCROLL_FONT_PX = 18;
+  /** スクロール表示の1行の長さの上限（em）。カクヨム・小説家になろうの本文欄と同じくらいにする */
+  const SCROLL_LINE_EM = { ja: 40, en: 34 };
+  /** スクロール表示の ↑↓ キーで送る量（px） */
+  const SCROLL_STEP_PX = 40;
 
   const viewport = $('viewport');
   const stage = $('stage');
@@ -26,6 +32,8 @@
   const normalizeZoom = (value) => (Number(value) > 0 ? String(value) : 'fit');
   let zoom = 'fit';
   $('zoom').value = zoom;
+  /** 表示の形。'page' = 用紙に組んでページで見せる / 'scroll' = ページを区切らず横書きで縦に流す */
+  let mode = 'page';
 
   const formatNumber = (n) => n.toLocaleString('ja-JP');
   const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
@@ -59,6 +67,8 @@
 
   function layoutStage() {
     if (!model) return;
+    if (mode === 'scroll') return layoutScroll();
+    viewport.classList.remove('scroll');
     const m = model.metrics;
     const u = pxPerMm(m);
     const fontPx = m.fontSizeMm * u;
@@ -117,6 +127,35 @@
     updateStats();
   }
 
+  /**
+   * スクロール表示。用紙を置かず、横書きの段を表示領域の中央に置いて縦に流す。
+   * 行の長さは SCROLL_LINE_EM までで、表示領域が狭ければその幅で折り返す。「画面に合わせる」は 100% と同じ
+   */
+  function layoutScroll() {
+    viewport.classList.remove('fit');
+    viewport.classList.add('scroll');
+    sheets.replaceChildren();
+    const fontPx = (SCROLL_FONT_PX * (zoom === 'fit' ? 100 : Number(zoom))) / 100;
+    const width = Math.max(
+      fontPx * 5,
+      Math.min(SCROLL_LINE_EM[model.language] * fontPx, viewport.clientWidth - STAGE_MARGIN_PX * 2),
+    );
+
+    const s = flow.style;
+    s.writingMode = 'horizontal-tb';
+    s.fontSize = `${fontPx}px`;
+    s.lineHeight = String(isEnglish() ? model.metrics.lineHeight : 1.8);
+    s.fontFamily = model.metrics.layout.fontFamily || '';
+    s.top = s.left = s.height = s.columnGap = '';
+    s.width = `${width}px`;
+    stage.style.margin = '';
+    stage.style.width = `${width}px`;
+    stage.style.height = '';
+
+    geometry = { scroll: true, vertical: false, period: viewport.clientHeight, pages: 1, sheet: 0, lead: 0 };
+    updateStats();
+  }
+
   function currentPage() {
     if (!geometry) return 1;
     const offset = geometry.vertical
@@ -126,17 +165,23 @@
     return Math.min(Math.max(page, 1), geometry.pages);
   }
 
+  /** 見ている位置。ページ表示はページ番号、スクロール表示は読んだ割合 */
+  function positionText() {
+    if (!geometry.scroll) return `${currentPage()} / ${geometry.pages}頁`;
+    const range = viewport.scrollHeight - viewport.clientHeight;
+    return `${range > 0 ? Math.round((viewport.scrollTop / range) * 100) : 100}%`;
+  }
+
   function updateStats() {
     if (!model || !geometry) return;
     if (isEnglish()) {
       const { words, chars } = model.stats;
       $('stats').textContent =
-        `${words.toLocaleString('en-US')} words ・ ${formatNumber(chars)}字 ・ ${currentPage()} / ${geometry.pages}頁`;
+        `${words.toLocaleString('en-US')} words ・ ${formatNumber(chars)}字 ・ ${positionText()}`;
       return;
     }
     const { chars, genkoPages } = model.stats;
-    $('stats').textContent =
-      `${formatNumber(chars)}字 ・ 400字詰め ${formatPages(genkoPages)}枚 ・ ${currentPage()} / ${geometry.pages}頁`;
+    $('stats').textContent = `${formatNumber(chars)}字 ・ 400字詰め ${formatPages(genkoPages)}枚 ・ ${positionText()}`;
   }
 
   /**
@@ -161,15 +206,22 @@
     return found ?? elements[0] ?? null;
   }
 
-  /** エディタのカーソル行 target（{ fileIndex, line }）の段落に印を付け、見えていなければそのページへスクロールする */
-  function reveal(target) {
+  /**
+   * エディタのカーソル行 target（{ fileIndex, line }）の段落に印を付け、見えていなければそのページへスクロールする。
+   * scroll: false なら印を付けるだけ
+   */
+  function reveal(target, { scroll = true } = {}) {
     lastReveal = target;
     flow.querySelector('.cursor-line')?.classList.remove('cursor-line');
     if (!target || !geometry) return;
     const el = findLineElement(target.fileIndex, target.line);
     if (!el) return;
     el.classList.add('cursor-line');
+    if (scroll) scrollToElement(el);
+  }
 
+  /** 段落 el が表示領域に見えていなければ、見える位置（ページ表示ではそのページ）へスクロールする */
+  function scrollToElement(el) {
     // 段落がページをまたぐと矩形が複数になる。先頭の断片を基準にする
     const rect = el.getClientRects()[0];
     if (!rect) return;
@@ -178,6 +230,10 @@
       rect.bottom > view.top && rect.top < view.bottom && rect.right > view.left && rect.left < view.right;
     if (visible) return;
 
+    if (geometry.scroll) {
+      viewport.scrollTop += rect.top - view.top - viewport.clientHeight / 3;
+      return;
+    }
     const stageRect = stage.getBoundingClientRect();
     if (geometry.vertical) {
       const page = Math.floor((rect.top - stageRect.top) / geometry.period);
@@ -616,16 +672,25 @@
     setEditEnabled(!editEnabled);
     vscode.postMessage({ type: 'view', view: { edit: editEnabled } });
   });
-  $('open-text').addEventListener('click', () => {
+  /** 表示領域に見えている最初の段落（行番号を持つ要素）。無ければ undefined */
+  function firstVisibleLineElement() {
     const view = viewport.getBoundingClientRect();
     const isVisible = (el) =>
       [...el.getClientRects()].some(
         (r) => r.bottom > view.top && r.top < view.bottom && r.right > view.left && r.left < view.right,
       );
-    const el = editing?.el ?? [...flow.querySelectorAll('[data-line]')].find(isVisible);
+    return [...flow.querySelectorAll('[data-line]')].find(isVisible);
+  }
+
+  $('open-text').addEventListener('click', () => {
+    const el = editing?.el ?? firstVisibleLineElement();
     vscode.postMessage(
       el ? { type: 'openText', fileIndex: sectionIndexOf(el), line: Number(el.dataset.line) } : { type: 'openText' },
     );
+  });
+  $('mode').addEventListener('click', (e) => {
+    const next = e.target.dataset?.mode;
+    if (next && next !== mode) vscode.postMessage({ type: 'view', view: { mode: next } });
   });
   $('zoom').addEventListener('change', (e) => {
     zoom = normalizeZoom(e.target.value);
@@ -710,12 +775,19 @@
         // 外からの変更（取り消しなど）は編集中の段落も組み直すので、同じ行・同じ位置で編集を続けられるようにする
         data.focusEdit = { fileIndex, line, offset: selectionOffsets(editing.el)?.start ?? 0 };
       }
+      // 表示の形を切り替えたら、見ていた段落を切り替えたあとも見せる
+      const anchorEl = model && data.view.mode !== mode ? (editing?.el ?? firstVisibleLineElement()) : null;
+      const anchor = anchorEl && { fileIndex: sectionIndexOf(anchorEl), line: Number(anchorEl.dataset.line) };
       endEdit();
       clearTimeout(refreshTimer);
       model = data;
       staleDom = false;
       zoom = normalizeZoom(data.view.zoom);
       $('zoom').value = zoom;
+      mode = data.view.mode;
+      for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('#mode button'))) {
+        button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+      }
       if (data.view.edit !== editEnabled) setEditEnabled(data.view.edit);
       $('message').hidden = true;
       stage.hidden = false;
@@ -737,6 +809,10 @@
       if (target && editEnabled) {
         beginEdit(target, focus.offset);
         target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      } else if (anchor) {
+        reveal(data.reveal ?? lastReveal, { scroll: false });
+        const el = findLineElement(anchor.fileIndex, anchor.line);
+        if (el) scrollToElement(el);
       } else if (restored) {
         // 再読み込み前の位置に戻したので、エディタのカーソル位置へは動かさない（行の色付けだけ）
         lastReveal = data.reveal ?? lastReveal;
@@ -764,7 +840,7 @@
   /** スクロール位置をページ単位で webview の state に覚える（ウィンドウの再読み込み後に戻すため） */
   function saveScroll() {
     if (!geometry || !scrollRestored) return;
-    const offset = geometry.vertical ? viewport.scrollTop : viewport.scrollLeft;
+    const offset = geometry.vertical || geometry.scroll ? viewport.scrollTop : viewport.scrollLeft;
     vscode.setState({ scrollPages: offset / geometry.period });
   }
 
@@ -773,7 +849,7 @@
     scrollRestored = true;
     const pages = vscode.getState()?.scrollPages;
     if (!geometry || !(pages > 0)) return false;
-    if (geometry.vertical) viewport.scrollTop = pages * geometry.period;
+    if (geometry.vertical || geometry.scroll) viewport.scrollTop = pages * geometry.period;
     else viewport.scrollLeft = pages * geometry.period;
     return true;
   }
@@ -823,8 +899,8 @@
   viewport.addEventListener(
     'wheel',
     (e) => {
-      // ピンチ（Ctrl+ホイール）は VS Code の拡大縮小に任せる
-      if (!geometry || e.ctrlKey) return;
+      // ピンチ（Ctrl+ホイール）は VS Code の拡大縮小に任せる。スクロール表示はページで送らない
+      if (!geometry || geometry.scroll || e.ctrlKey) return;
       // 縦書きの横方向はページ内の左右の移動なので、通常のスクロールに任せる
       if (geometry.vertical && Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
       e.preventDefault();
@@ -877,10 +953,30 @@
     PageUp: -1,
   };
 
+  /**
+   * スクロール表示でのキー操作。何もフォーカスしていないと表示領域がキーでスクロールしないため、自分で送る
+   */
+  function scrollByKey(e) {
+    const screen = viewport.clientHeight * 0.9;
+    const delta = {
+      ArrowDown: SCROLL_STEP_PX,
+      ArrowUp: -SCROLL_STEP_PX,
+      PageDown: screen,
+      PageUp: -screen,
+      ' ': e.shiftKey ? -screen : screen,
+      Home: -viewport.scrollHeight,
+      End: viewport.scrollHeight,
+    }[e.key];
+    if (!delta) return;
+    e.preventDefault();
+    viewport.scrollTop += delta;
+  }
+
   window.addEventListener('keydown', (e) => {
     if (!geometry || editing || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
     const target = /** @type {HTMLElement} */ (e.target);
     if (target.isContentEditable || target.closest('input, select, textarea, #setup, #work-panel')) return;
+    if (geometry.scroll) return scrollByKey(e);
     if (e.key === 'Home' || e.key === 'End') {
       e.preventDefault();
       scrollToPage(e.key === 'Home' ? 1 : geometry.pages);

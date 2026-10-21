@@ -278,6 +278,11 @@ export function layoutRuby(n, m, capBefore = 0, capAfter = 0) {
   return { gap: 0, rtStart: -before, widen: excess - before - after };
 }
 
+// 生成済みの span を1単位にするのは、縦中横などの1字分の箱を割って点を打ち分けないため
+const EMPHASIS_UNIT_RE = /\uE002[\uE010-\uEFFF]\uE002|<span[^>]*>[^<]*<\/span>|&[^;]+;|./gsu;
+// text-emphasis と同じく約物・空白には点を打たない。私用領域は太字の目印
+const NO_EMPHASIS_RE = /^[\p{P}\p{Z}\p{Cc}\p{Co}]+$/u;
+
 const cssNum = (v) => String(Math.round(v * 1000) / 1000);
 
 export function escapeHtml(text, { vertical = true, separateSymbolClasses = false, rubyLayout = false } = {}) {
@@ -450,8 +455,15 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   });
 
   result = result.replace(/\uE001([\uE010-\uEFFF])\uE001/g, (_, ch) => {
-    const content = emphasisPlaceholders[ch.charCodeAt(0) - 0xe010];
-    return `<span class="emphasis">${processInnerText(content)}</span>`;
+    const html = processInnerText(emphasisPlaceholders[ch.charCodeAt(0) - 0xe010]);
+    if (!(vertical && rubyLayout)) return `<span class="emphasis">${html}</span>`;
+    // text-emphasis の圏点は Chromium が行の箱に含めて行送りを広げ、字詰めの版面が崩れるため、
+    // 1字ずつの箱にレイアウトに影響しない点を CSS（lib/html.mjs の .emphasis-dot）で描く
+    return html.replace(EMPHASIS_UNIT_RE, (unit) =>
+      !unit.startsWith('\uE002') && NO_EMPHASIS_RE.test(unit.replace(/<[^>]+>/g, ''))
+        ? unit
+        : `<span class="emphasis-dot">${unit}</span>`,
+    );
   });
 
   result = result.replace(/\uE003([\uE010-\uEFFF])\uE003/g, (_, ch) => {
@@ -850,7 +862,7 @@ if (import.meta.vitest) {
       );
       expect(html).toContain('<rt>');
       expect(html).toContain('とうきょう');
-      expect(html).toContain('<span class="emphasis">覚悟</span>');
+      expect(html).toContain('<span class="emphasis-dot">覚</span><span class="emphasis-dot">悟</span>');
       expect(html).toContain('<span class="tcy">123</span>');
       expect(html).toContain('<strong class="bold">ここ</strong>');
       expect(html).not.toContain('［＃');
@@ -1114,6 +1126,11 @@ if (import.meta.vitest) {
     test('\u508D\u70B9 \u300A\u300Atext\u300B\u300B \u3092 span.emphasis \u306B\u5909\u63DB', () => {
       expect(escapeHtml('\u300A\u300A\u5F37\u8ABF\u300B\u300B', { vertical: false })).toBe(
         '<span class="emphasis">\u5F37\u8ABF</span>',
+      );
+    });
+    test('rubyLayout: 縦書きの傍点は行送りを広げないよう1字ずつの箱にし、約物には打たない', () => {
+      expect(escapeHtml('《《覚悟、12》》', { rubyLayout: true })).toBe(
+        '<span class="emphasis-dot">覚</span><span class="emphasis-dot">悟</span>、<span class="emphasis-dot"><span class="tcy">12</span></span>',
       );
     });
     test('\u6A2A\u5012\u3057 <<text>> \u3092 span.sideways-latin \u306B\u5909\u63DB', () => {
