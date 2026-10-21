@@ -39,8 +39,16 @@ description = "Build the VS Code extension and publish it to the Marketplace"
 run = "pnpm --dir vscode run publish"
 
 [lint]
-description = "Check lint, formatting and import order with Biome"
-run = "biome check ."
+description = "Biome lint and format check, knip for unused files, exports and dependencies, then actionlint for the workflows"
+run = ["biome check .", "pnpm --silent knip", "actionlint"]
+
+[typecheck]
+description = "tsc --noEmit over the JS (checkJs) for the engine, CLI, extension and webview"
+run = "pnpm run typecheck"
+
+[coverage]
+description = "Vitest with coverage; the HTML report goes to coverage/"
+run = "pnpm exec vitest run --coverage"
 
 [format]
 description = "Apply Biome's safe fixes and formatting"

@@ -102,6 +102,8 @@ export function readSettingsFile(filePath) {
 /**
  * 日本語のレイアウトの項目はトップレベルに、英語のレイアウトは "english" に、表示設定は "view" に書く。
  * 作品情報や出力の定義など、それ以外の項目（english の中の sceneBreak なども）はそのまま残す
+ * @param {string} filePath
+ * @param {{ layout?: object, english?: object, view?: object }} settings
  */
 export function writeSettingsFile(filePath, { layout, english, view }) {
   const current = existsSync(filePath) ? JSON.parse(readFileSync(filePath, 'utf-8')) : {};

@@ -181,6 +181,7 @@ function activeManuscript() {
 function createSession(panel, { doc = null, follow = false, initialLine = null } = {}) {
   const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media');
   let renderTimer;
+  /** @type {Promise<unknown>} */
   let editQueue = Promise.resolve();
 
   const session = {
@@ -674,7 +675,7 @@ function exportPdf(session = activeSession()) {
         const finish = async (ok) => {
           if (finished) return;
           finished = true;
-          resolve();
+          resolve(undefined);
           if (ok) {
             vscode.env.openExternal(vscode.Uri.file(outPath));
             return;
@@ -696,6 +697,7 @@ async function insertRuby() {
   const editor = vscode.window.activeTextEditor;
   if (!isManuscript(editor?.document)) return;
   const { document, selection } = editor;
+  /** @type {vscode.Range} */
   let range = selection;
   if (selection.isEmpty) {
     const { line, character } = selection.active;
@@ -734,6 +736,7 @@ async function insertEmphasis() {
   }
 }
 
+/** @type {vscode.EventEmitter<void>} */
 const outlineChanged = new vscode.EventEmitter();
 let outlineView;
 /** 目次を出している作品のファイル（原稿から離れても、最後に見ていた作品の目次を残す） */
@@ -762,6 +765,7 @@ const outlineProvider = {
     return chapters.map((ch) => {
       const single = ch.files.length === 1;
       const label = ch.title ? `${ch.label}${language === 'en' ? '. ' : '　'}${ch.title}` : ch.label;
+      /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
       const item = new vscode.TreeItem(
         label,
         single ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Expanded,

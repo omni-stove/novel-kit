@@ -1,0 +1,17 @@
+// webview の中で動く preview.js 用。Node の型が混ざると setTimeout などが Node のものになるので、ルートの tsconfig.json と分ける
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": true,
+    // ルートの tsconfig.json と同じく、型注釈の無い JS を見るため
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["vscode-webview"]
+  },
+  "include": ["*.js"]
+}

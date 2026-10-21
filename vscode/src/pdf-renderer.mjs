@@ -304,7 +304,8 @@ export async function renderPdf(htmlPath, outputPath, { viewerDir }) {
     const pageSizes = await page.evaluate(() =>
       [
         ...document.querySelectorAll('#vivliostyle-viewer-viewport > div > div > div[data-vivliostyle-page-container]'),
-      ].map((container) => {
+      ].map((/** @type {HTMLElement} */ container) => {
+        /** @type {HTMLElement | null} */
         const bleedBox = container.querySelector('div[data-vivliostyle-bleed-box]');
         return {
           mediaWidth: parseFloat(container.style.width) * 0.75,

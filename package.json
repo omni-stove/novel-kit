@@ -19,6 +19,8 @@
     "node": ">=24"
   },
   "scripts": {
+    "lint": "biome check .",
+    "typecheck": "tsc -p . && tsc -p vscode/media",
     "test": "vitest run",
     "test-watch": "vitest",
     "release": "pnpm test && pnpm pack --out dist/%s-%v.tgz && gh release create \"cli-v$npm_package_version\" \"dist/novel-kit-$npm_package_version.tgz\" --repo omni-stove/novel-kit --title \"novel CLI $npm_package_version\" --generate-notes"
@@ -29,7 +31,11 @@
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
-    "vitest": "^4.1.9"
+    "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "4.1.12",
+    "knip": "^6.42.1",
+    "typescript": "^7.0.2",
+    "vitest": "4.1.12"
   },
   "packageManager": "pnpm@12.4.2"
 }

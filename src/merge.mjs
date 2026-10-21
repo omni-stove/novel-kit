@@ -229,7 +229,7 @@ if (import.meta.vitest) {
   });
 
   describe('main', () => {
-    const run = (files, args = () => []) => {
+    const run = (files, args = (_dir) => []) => {
       const dir = mkdtempSync(join(tmpdir(), 'merge-main-'));
       const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       try {

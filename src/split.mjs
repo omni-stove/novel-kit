@@ -89,6 +89,27 @@ function collectLines(filePaths, markerNums, sceneBreak) {
   return allLines;
 }
 
+/** 見出し（と直後のエピグラフ）と本文の間に、--splits なしの章ファイルと同じく空行を1つ置く */
+function blankAfterHeadings(lines) {
+  const out = [];
+  let inHeading = false;
+  for (const line of lines) {
+    if (isViewpointLine(line)) {
+      out.push(line);
+      inHeading = true;
+      continue;
+    }
+    if (inHeading && isEpigraphLine(line)) {
+      out.push(line);
+      continue;
+    }
+    if (inHeading && line.trim() !== '') out.push('');
+    out.push(line);
+    inHeading = false;
+  }
+  return out;
+}
+
 function splitByGroups(allLines) {
   const groups = new Map();
   for (const item of allLines) {
@@ -98,10 +119,7 @@ function splitByGroups(allLines) {
   return [...groups.values()].map((items) => ({
     header: null,
     epigraphs: [],
-    lines: moveEpigraphsAfterHeading(
-      items.map((it) => it.text),
-      { blankAfter: true },
-    ),
+    lines: blankAfterHeadings(moveEpigraphsAfterHeading(items.map((it) => it.text))),
     sources: new Set(items.filter((it) => it.source && it.text.trim() !== '').map((it) => it.source)),
   }));
 }
@@ -283,7 +301,10 @@ if (import.meta.vitest) {
     };
     test('指定番号以降のファイルを次の章にまとめ、視点行は「部-節」で採番し直す', () => {
       expect(split(files, [30])).toEqual([
-        { lines: ['【1-1】', 'Epigraph: 一', '', '本文一', '', '【1-2】', '本文二'], sources: ['010.txt', '020.txt'] },
+        {
+          lines: ['【1-1】', 'Epigraph: 一', '', '本文一', '', '【1-2】', '', '本文二'],
+          sources: ['010.txt', '020.txt'],
+        },
         { lines: ['【2-1】', 'Epigraph: 三', '', '本文三', '', '◇◇◇', '', '続き'], sources: ['030.txt', '040.txt'] },
       ]);
     });
@@ -377,7 +398,7 @@ if (import.meta.vitest) {
         '--splits=120',
       ]);
       expect(Object.keys(out)).toEqual(['chapter-001.txt', 'chapter-002.txt']);
-      expect(out['chapter-002.txt']).toBe('【2-1】\n三\n');
+      expect(out['chapter-002.txt']).toBe('【2-1】\n\n三\n');
     });
   });
 }

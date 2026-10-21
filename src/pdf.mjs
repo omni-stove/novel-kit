@@ -11,9 +11,9 @@
  *   -o, --output <file>  出力ファイル名（--count-only 以外では必須）
  *   --title <text>       タイトル（表紙ページに表示）
  *   --author <text>      著者名（タイトルとともに表示）
- *   --no-page-break      ファイル間のページブレークを無効化
  *   --no-chapter-break   章（視点切替）ごとの改ページを無効化。章境界は空行1つで連結し、
  *                        同一章内のファイル境界には区切り字「◇◇◇」を挟む（--part 非指定時のみ有効）
+ *   --no-page-break      --no-chapter-break と同じ（ファイル間の改ページは章境界でしか起きないため）
  *   --horizontal         横書きモード
  *   --size WxH           1ページの文字数（例: --size 40x40 → 40字×40行）
  *   --chars N            1行の字数だけを指定し、行数は行送りの既定（字送りの1.125倍）に任せる（--size があればそちらが優先）
@@ -43,7 +43,7 @@
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { inflateSync } from 'node:zlib';
-import { PDFDocument, PDFName, rgb } from 'pdf-lib';
+import { PDFDocument, PDFName, ReadingDirection, rgb } from 'pdf-lib';
 import { ARG, buildPdfFromHtml, fail, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
 import { AOZORA_CSS, googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
 import {
@@ -127,8 +127,7 @@ export function parseArgs(argv) {
       ARG.output,
       ARG.title,
       ARG.author,
-      { key: 'pageBreak', flags: ['--no-page-break'], value: false },
-      { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
+      { key: 'chapterBreak', flags: ['--no-chapter-break', '--no-page-break'], value: false },
       { key: 'vertical', flags: ['--horizontal'], value: false },
       ARG.size,
       { key: 'chars', flags: ['--chars'], takesValue: true, parse: (v) => parseInt(v, 10) },
@@ -144,7 +143,7 @@ export function parseArgs(argv) {
       { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
       ARG.sceneBreak,
     ],
-    { pageBreak: true, chapterBreak: true, vertical: true, chars: null, lines: null },
+    { chapterBreak: true, vertical: true, chars: null, lines: null },
   );
   if (args.size) {
     args.chars = args.size.cols;
@@ -641,7 +640,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (args.vertical) {
     const viewerPrefs = pdfDoc.catalog.getOrCreateViewerPreferences();
-    viewerPrefs.setReadingDirection('R2L');
+    viewerPrefs.setReadingDirection(ReadingDirection.R2L);
   }
 
   const finalPdf = await pdfDoc.save();
@@ -943,15 +942,19 @@ if (import.meta.vitest) {
   });
 
   describe('parseArgs', () => {
-    test('既定では改ページ・章ごとの改ページ・縦書きが有効', () => {
+    test('既定では章ごとの改ページ・縦書きが有効', () => {
       const args = parseArgs(['a.txt']);
-      expect(args).toMatchObject({ pageBreak: true, chapterBreak: true, vertical: true, chars: null, lines: null });
+      expect(args).toMatchObject({ chapterBreak: true, vertical: true, chars: null, lines: null });
       expect(args.files).toEqual(['a.txt']);
     });
 
-    test('--no-page-break / --no-chapter-break / --horizontal で無効化する', () => {
-      const args = parseArgs(['--no-page-break', '--no-chapter-break', '--horizontal']);
-      expect(args).toMatchObject({ pageBreak: false, chapterBreak: false, vertical: false });
+    test('--no-chapter-break / --horizontal で無効化する', () => {
+      const args = parseArgs(['--no-chapter-break', '--horizontal']);
+      expect(args).toMatchObject({ chapterBreak: false, vertical: false });
+    });
+
+    test('--no-page-break は --no-chapter-break と同じ', () => {
+      expect(parseArgs(['--no-page-break'])).toMatchObject({ chapterBreak: false });
     });
 
     test('--size WxH は1行の字数と行数になる', () => {

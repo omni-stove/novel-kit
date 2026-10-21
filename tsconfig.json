@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    // pdf-renderer.mjs の page.evaluate に渡す関数は Chrome の中で動く
+    "lib": ["ES2023", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": true,
+    // JS に型注釈をほとんど書いていないので、strict にすると暗黙の any がすべてエラーになる
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "types": ["node", "vitest/importMeta"]
+  },
+  "include": ["bin", "src", "vscode/src", "vitest.config.mjs"]
+}

@@ -33,7 +33,7 @@
  *
  * format（novel <format> と同じコマンドで作る）と、それぞれの項目:
  *   pdf        縦書き（横書き）の PDF。coverless, chapterBreak（false で章ごとに改ページしない）,
- *              pageBreak（false でファイル間で改ページしない）, synopsis（false で梗概を入れない）,
+ *              pageBreak（chapterBreak と同じ）, synopsis（false で梗概を入れない）,
  *              synopsisOnTitle, blankAfterHeading, review
  *   pdf-en     英語のペーパーバック風 PDF。recto, smartQuotes（false でカーリー引用符にしない）。判型は英語のレイアウトの用紙から選ぶ
  *   novel-pdf  文庫本見開きの縦書き PDF。size（"a6" / "b6" / "a5"）, dark, blankAfterHeading
@@ -241,7 +241,7 @@ export function outputPath(output, root, { outDir = null, pages = null } = {}) {
 }
 
 /** 1つの出力（normalizeOutputs でそろえたもの）を、その format のコマンドに渡す引数にする */
-export function outputArgv(name, output, config, root, extra = {}, warn = () => {}) {
+export function outputArgv(name, output, config, root, extra = {}, warn = (_message) => {}) {
   const format = FORMATS[output.format];
   const out = cwdRelative(outputPath(output, root, extra));
   if (format.argv) return format.argv(output, config, out, extra);

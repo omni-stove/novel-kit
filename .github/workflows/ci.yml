@@ -1,0 +1,177 @@
+name: CI
+
+# 共通 ci.yml の lint ジョブは依存の install を伴うが、Biome は standalone バイナリで動くので、lint は
+# 依存を install しない自前ジョブにする (run-lint: false)。typecheck と knip は node_modules が要るので
+# typecheck ジョブに置く。ci-gate.yml を呼ぶジョブ名は、必須チェック名 "ci / CI Gate" を保つため ci にする。
+# 必須チェックを毎回報告させるため、変更のない PR を on.paths で外さず、changes の結果で各ジョブを
+# skipped にする（CI Gate は skipped を失敗にしない）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: omni-stove/.github/.github/workflows/ci.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    with:
+      run-lint: false
+      run-test: false
+      gate: false
+      run-review: true
+      review-provider: "claude"
+    secrets: inherit
+
+  # push では前回の push との差分を取る手間に見合わないので、全部走らせる
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      lint: ${{ github.event_name != 'pull_request' || steps.exclude.outputs.lint == 'true' }}
+      typecheck: ${{ github.event_name != 'pull_request' || steps.exclude.outputs.typecheck == 'true' }}
+      test: ${{ github.event_name != 'pull_request' || steps.exclude.outputs.test == 'true' || steps.include.outputs.workflow == 'true' }}
+    steps:
+      # predicate-quantifier は step 内の全フィルターに効くので、除外で書くものと列挙で書くものを分ける
+      - uses: dorny/paths-filter@v3
+        id: exclude
+        if: github.event_name == 'pull_request'
+        with:
+          # 否定パターンを除外として効かせるため、ファイルが全パターンに合うときだけ数える
+          predicate-quantifier: every
+          # lint: Biome が扱わない拡張子
+          # typecheck: tsc も knip も読まないファイル（knip は .github/workflows の run: からバイナリを拾う）
+          # test: typecheck の除外に加え、vitest が読まない .github/
+          filters: |
+            lint:
+              - "!**/*.md"
+              - "!**/*.toml"
+              - "!**/*.png"
+              - "!Makefile"
+              - "!pnpm-lock.yaml"
+            typecheck: &typecheck
+              - "!**/*.md"
+              - "!**/*.png"
+              - "!.claude/**"
+              - "!.agents/**"
+              - "!.mise/**"
+              - "!mise.toml"
+              - "!Makefile"
+            test:
+              - *typecheck
+              - "!.github/**"
+
+      - uses: dorny/paths-filter@v3
+        id: include
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            workflow:
+              - ".github/workflows/ci.yml"
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Lint
+        env:
+          BIOME_VERSION: "2.5.15"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/biome" "https://github.com/biomejs/biome/releases/download/@biomejs/biome@${BIOME_VERSION}/biome-linux-x64"
+          chmod +x "$RUNNER_TEMP/biome"
+          "$RUNNER_TEMP/biome" ci .
+
+      # ubuntu-latest の shellcheck も使い、run: のシェルまで見る
+      - name: Actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
+
+  typecheck:
+    needs: changes
+    if: needs.changes.outputs.typecheck == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm & Node.js
+        uses: omni-stove/.github/actions/setup-pnpm-node@main
+        with:
+          node-version: "26"
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Knip
+        run: pnpm --silent knip
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.test == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm & Node.js
+        uses: omni-stove/.github/actions/setup-pnpm-node@main
+        with:
+          node-version: "26"
+
+      - name: Test
+        run: pnpm exec vitest run --coverage
+
+      - name: Upload coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+
+  ci:
+    needs: [checks, changes, lint, typecheck, test]
+    if: always()
+    uses: omni-stove/.github/.github/workflows/ci-gate.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    with:
+      results: ${{ toJSON(needs) }}
+      conflicted: ${{ needs.checks.outputs.conflicted }}
+      review-comments: ${{ needs.checks.outputs.review-comments }}
+      review-result: ${{ needs.checks.outputs.review-result }}
+      run-fix: true
+      fix-provider: "claude"
+      regen-command: 'pnpm install --lockfile-only --no-frozen-lockfile'
+      node-version: "26"
+    secrets: inherit

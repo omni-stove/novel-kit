@@ -444,7 +444,11 @@ function epigraphsToHtml(epigraphs, escapeOpts, chars = null) {
     .join('\n');
 }
 
-/** 青空文庫の字下げ（行頭と範囲の合計）・地付き・地から上げを段落の style 属性にする */
+/**
+ * 青空文庫の字下げ（行頭と範囲の合計）・地付き・地から上げを段落の style 属性にする
+ * @param {{ indent?: number, alignEnd?: boolean, raise?: number }} line
+ * @param {number} blockIndent
+ */
 function aozoraStyle({ indent, alignEnd, raise }, blockIndent) {
   const styles = [];
   if (blockIndent + indent > 0) styles.push(`margin-inline-start: ${blockIndent + indent}em`);

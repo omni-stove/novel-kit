@@ -1,5 +1,6 @@
 // @ts-check
 (() => {
+  /** @type {import('vscode-webview').WebviewApi<{ scrollPages: number }>} */
   const vscode = acquireVsCodeApi();
   const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
@@ -545,7 +546,9 @@
 
     $('language-note').textContent = english ? '英語の原稿（横書き固定。設定は english に保存）' : '';
     $('writing-mode-fields').hidden = english;
-    for (const radio of document.querySelectorAll('input[name="writing-mode"]')) {
+    for (const radio of /** @type {NodeListOf<HTMLInputElement>} */ (
+      document.querySelectorAll('input[name="writing-mode"]')
+    )) {
       radio.checked = radio.value === (layout.writingMode ?? 'horizontal');
     }
     $('paper').value = layout.paper;
@@ -562,7 +565,7 @@
       : '設定ファイル: なし（変更すると原稿と同じ場所に novel.json を作ります）';
     $('delete-preset').disabled = !userPresetNames.includes(presetName);
 
-    for (const button of document.querySelectorAll('#scope button')) {
+    for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('#scope button'))) {
       button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
       if (button.dataset.scope === 'work') button.disabled = !canShowWork;
     }
@@ -571,7 +574,8 @@
   /** ページ設定の欄の値（レイアウト） */
   function readForm() {
     return {
-      writingMode: document.querySelector('input[name="writing-mode"]:checked')?.value,
+      writingMode: /** @type {HTMLInputElement | null} */ (document.querySelector('input[name="writing-mode"]:checked'))
+        ?.value,
       paper: $('paper').value,
       orientation: $('orientation').value,
       margin: {
