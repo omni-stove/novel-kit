@@ -1,13 +1,15 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { mkdirSync, statSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import * as vscode from 'vscode';
+import { findProjectRoot, formatTraits, normalizeOutputs, outputPath } from '../../src/build.mjs';
 import {
   CONFIG_FILENAME,
   DEFAULT_VIEW,
   findConfigFile,
   readSettingsFile,
+  readWorkConfig,
   writeSettingsFile,
 } from '../../src/config.mjs';
 import {
@@ -21,6 +23,7 @@ import {
   normalizeLayout,
 } from '../../src/layout.mjs';
 import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
+import { parsePageSpec } from '../../src/pdf.mjs';
 import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
 import { renderWebviewHtml } from './webview.mjs';
@@ -34,7 +37,7 @@ const EDITOR_VIEW_TYPE = 'novelPreview.editor';
 
 let context;
 let statusBar;
-let pdfOutput = null;
+let cliOutput = null;
 /** 開いているプレビュー（.txt のタブとして開いたものと、横に出したもの） */
 const sessions = new Set();
 /** テキストエディタの横に出す、アクティブなエディタに追従するプレビュー（1つだけ） */
@@ -599,9 +602,59 @@ async function selectLayout() {
 }
 
 /**
+ * 拡張に同梱した novel CLI（dist/novel-cli.cjs）を VS Code の Node で動かし、ログを出力チャンネルに出しながら進捗を通知する。
+ * 成功したら true、失敗したら「ログを見る」付きのエラー（failure）を出して false を返す
+ */
+function runNovelCli(args, { cwd, title, failure }) {
+  cliOutput ??= vscode.window.createOutputChannel('小説の出力');
+  cliOutput.clear();
+  return vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title },
+    (progress) =>
+      new Promise((resolve) => {
+        const child = spawn(process.execPath, [join(context.extensionPath, 'dist', 'novel-cli.cjs'), ...args], {
+          cwd,
+          // 作ったファイルは拡張が開く（shouldOpen）ので、CLI の --open では開かせない
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AUTO_OPEN: '0' },
+        });
+        // 初回は Chrome のダウンロードで時間がかかるので、CLI の最後の行を通知に出しておく
+        const log = (chunk) => {
+          const text = chunk.toString();
+          cliOutput.append(text);
+          const last = text
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .pop();
+          if (last) progress.report({ message: last });
+        };
+        child.stdout.on('data', log);
+        child.stderr.on('data', log);
+        // 起動できなかったときは close が来ないことがあるので、error でも終える（両方来ても1回だけ）
+        let finished = false;
+        const finish = async (ok) => {
+          if (finished) return;
+          finished = true;
+          resolve(ok);
+          if (ok) return;
+          const picked = await vscode.window.showErrorMessage(failure, 'ログを見る');
+          if (picked) cliOutput.show(true);
+        };
+        child.on('error', (err) => {
+          cliOutput.appendLine(err.message);
+          finish(false);
+        });
+        child.on('close', (code) => finish(code === 0));
+      }),
+  );
+}
+
+/** 作ったファイルを開くか。CLI の --open と同じく、環境変数 AUTO_OPEN=0 なら開かない */
+const shouldOpen = () => config().get('openAfterExport') !== false && process.env.AUTO_OPEN !== '0';
+
+/**
  * PDF出力（novel pdf / novel pdf-en）。session があればその表示範囲（このファイル / 作品全体）で、無ければ開いている原稿1ファイルを出力する。
- * 日本語は novel pdf、英語は novel pdf-en（判型は用紙から選ぶ）。出力先はワークスペース（無ければ原稿のディレクトリ）の out/preview/ で、終わったら開く。
- * CLI は拡張に同梱したもの（dist/novel-cli.cjs）を VS Code の Node で動かす
+ * 日本語は novel pdf、英語は novel pdf-en（判型は用紙から選ぶ）。出力先はワークスペース（無ければ原稿のディレクトリ）の out/preview/ で、終わったら開く（shouldOpen）
  */
 function exportPdf(session = activeSession()) {
   const doc = session?.doc ?? activeManuscript();
@@ -649,57 +702,157 @@ function exportPdf(session = activeSession()) {
   const outPath = join(root, 'out', 'preview', out);
   mkdirSync(dirname(outPath), { recursive: true });
 
-  pdfOutput ??= vscode.window.createOutputChannel('小説PDF出力');
-  pdfOutput.clear();
-  const args = [
-    join(context.extensionPath, 'dist', 'novel-cli.cjs'),
-    command,
-    ...options,
-    '-o',
-    outPath,
-    whole ? dir : filePath,
-  ];
-  vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `PDFを出力しています（${out}）` },
-    (progress) =>
-      new Promise((resolve) => {
-        const child = spawn(process.execPath, args, {
-          cwd: root,
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AUTO_OPEN: '0' },
-        });
-        // 初回は Chrome のダウンロードで時間がかかるので、CLI の最後の行を通知に出しておく
-        const log = (chunk) => {
-          const text = chunk.toString();
-          pdfOutput.append(text);
-          const last = text
-            .split('\n')
-            .map((line) => line.trim())
-            .filter(Boolean)
-            .pop();
-          if (last) progress.report({ message: last });
-        };
-        child.stdout.on('data', log);
-        child.stderr.on('data', log);
-        // 起動できなかったときは close が来ないことがあるので、error でも終える（両方来ても1回だけ）
-        let finished = false;
-        const finish = async (ok) => {
-          if (finished) return;
-          finished = true;
-          resolve(undefined);
-          if (ok) {
-            vscode.env.openExternal(vscode.Uri.file(outPath));
-            return;
-          }
-          const picked = await vscode.window.showErrorMessage('PDFを出力できませんでした。', 'ログを見る');
-          if (picked) pdfOutput.show(true);
-        };
-        child.on('error', (err) => {
-          pdfOutput.appendLine(err.message);
-          finish(false);
-        });
-        child.on('close', (code) => finish(code === 0));
-      }),
+  runNovelCli([command, ...options, '-o', outPath, whole ? dir : filePath], {
+    cwd: root,
+    title: `PDFを出力しています（${out}）`,
+    failure: 'PDFを出力できませんでした。',
+  }).then((ok) => ok && shouldOpen() && vscode.env.openExternal(vscode.Uri.file(outPath)));
+}
+
+/**
+ * 出力を作る novel.json のパス（選ばなかったときは null）。uri（エクスプローラー・タイトルバーから）か、アクティブな
+ * novel.json・原稿から一番近いもの。見つからなければワークスペースの novel.json から選ばせる
+ */
+async function workConfigFileFor(uri) {
+  const editorDoc = vscode.window.activeTextEditor?.document;
+  const target =
+    uri instanceof vscode.Uri
+      ? uri
+      : editorDoc && basename(editorDoc.uri.fsPath) === CONFIG_FILENAME
+        ? editorDoc.uri
+        : activeManuscript()?.uri;
+  if (target?.scheme === 'file') {
+    if (basename(target.fsPath) === CONFIG_FILENAME) return target.fsPath;
+    const dir = statSync(target.fsPath).isDirectory() ? target.fsPath : dirname(target.fsPath);
+    const found = findConfigFile(dir, vscode.workspace.getWorkspaceFolder(target)?.uri.fsPath ?? dir);
+    if (found) return found;
+  }
+  const files = await vscode.workspace.findFiles(`**/${CONFIG_FILENAME}`, '**/node_modules/**');
+  if (files.length <= 1) {
+    if (files.length === 0) vscode.window.showInformationMessage(`${CONFIG_FILENAME} が見つかりません。`);
+    return files[0]?.fsPath ?? null;
+  }
+  const picked = await vscode.window.showQuickPick(
+    files
+      .map((f) => ({ label: vscode.workspace.asRelativePath(dirname(f.fsPath)), file: f.fsPath }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    { title: '出力する作品' },
   );
+  return picked?.file ?? null;
+}
+
+/**
+ * その場の指定（novel build の --pages / --limit / --target / --ruby-parens）を、選んだ出力に効くものだけ聞く。
+ * 空欄なら付けない。取りやめたら null。返す値: { args: CLI に足す引数, pages }
+ */
+async function askBuildOptions(outputs, work) {
+  const keys = new Set(outputs.flatMap((o) => formatTraits(o.format).extra));
+  const args = [];
+  const ask = async (key, flag, options) => {
+    if (!keys.has(key)) return '';
+    const value = await vscode.window.showInputBox({ ignoreFocusOut: true, ...options });
+    if (value === undefined) return null;
+    if (value.trim()) args.push(flag, value.trim());
+    return value.trim();
+  };
+
+  const pages = await ask('pages', '--pages', {
+    title: '抜き出す本文ページ（pdf）',
+    prompt: '例: 42,50-53。空なら全ページ',
+    validateInput: (v) => (!v.trim() || parsePageSpec(v) ? null : '42 / 42-45 / 42,50,60-62 の形で書いてください'),
+  });
+  if (pages === null) return null;
+  const limit = await ask('limit', '--limit', {
+    title: '先頭から組むファイル数（pdf）',
+    prompt: '空ならすべて',
+    validateInput: (v) => (!v.trim() || /^[1-9]\d*$/.test(v.trim()) ? null : '1 以上の整数を書いてください'),
+  });
+  if (limit === null) return null;
+  const target = await ask('target', '--target', {
+    title: '想定読者（split / merge）',
+    prompt: work.target ? `空なら novel.json の「${work.target}」` : '空なら書かない',
+  });
+  if (target === null) return null;
+
+  if (keys.has('rubyParens') && outputs.some((o) => o.format === 'merge' && !o.rubyParens)) {
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: 'そのまま', parens: false },
+        { label: '括弧表記にする', description: '漢字（かんじ）', parens: true },
+      ],
+      { title: 'ルビ（merge）', ignoreFocusOut: true },
+    );
+    if (!picked) return null;
+    if (picked.parens) args.push('--ruby-parens');
+  }
+  return { args, pages: pages || null };
+}
+
+/**
+ * novel.json の outputs から選んだ出力を、novel build と同じ処理（同梱の CLI の build）で作る。
+ * 出力先は設定 novelPreview.outDir（ワークスペースのフォルダから。既定は out）。
+ * PDF・RTF は終わったら開き（shouldOpen）、それ以外は出力先を知らせる
+ */
+async function buildOutputs(uri) {
+  const file = await workConfigFileFor(uri);
+  if (!file) return;
+  const label = vscode.workspace.asRelativePath(file);
+  let work;
+  let outputs;
+  try {
+    work = readWorkConfig(file);
+    outputs = normalizeOutputs(work.outputs, work.id);
+  } catch (err) {
+    vscode.window.showErrorMessage(`${label} を読めません: ${err.message}`);
+    return;
+  }
+  const names = Object.keys(outputs);
+  if (names.length === 0) {
+    vscode.window.showInformationMessage(`${label} に outputs がありません。`);
+    return;
+  }
+
+  const describe = (name) =>
+    name === outputs[name].format ? outputs[name].out : `${outputs[name].format} → ${outputs[name].out}`;
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...names.map((name) => ({ label: name, description: describe(name), names: [name] })),
+      ...(names.length > 1
+        ? [
+            { label: '', kind: vscode.QuickPickItemKind.Separator, names: [] },
+            { label: 'すべての出力', description: names.join(', '), names },
+          ]
+        : []),
+    ],
+    { title: `出力（${label}）` },
+  );
+  if (!picked) return;
+  const selected = picked.names.map((name) => outputs[name]);
+  const options = await askBuildOptions(selected, work);
+  if (!options) return;
+
+  const base = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file))?.uri.fsPath ?? findProjectRoot(work.dir);
+  const outDir = resolve(base, config().get('outDir') || 'out');
+  const ok = await runNovelCli(['build', file, ...picked.names, '--out-dir', outDir, ...options.args], {
+    cwd: base,
+    title: `出力しています（${picked.names.join(', ')}）`,
+    failure: `${picked.names.join(', ')} を出力できませんでした。`,
+  });
+  if (!ok) return;
+
+  const paths = selected.map((o) => ({
+    path: outputPath(o, base, { outDir, pages: options.pages }),
+    ...formatTraits(o.format),
+  }));
+  const opened = shouldOpen() ? paths.filter((p) => p.open) : [];
+  for (const { path } of opened) vscode.env.openExternal(vscode.Uri.file(path));
+  const rest = paths.filter((p) => !opened.includes(p));
+  if (rest.length === 0) return;
+  const action = await vscode.window.showInformationMessage(
+    `出力しました: ${rest.map((p) => vscode.workspace.asRelativePath(p.path)).join(', ')}`,
+    'フォルダを開く',
+  );
+  if (action) vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(rest[0].path));
 }
 
 /** 選択範囲に |親《るび》 を振る。選択が無ければカーソルの前後に続く漢字に振る */
@@ -914,6 +1067,7 @@ export function activate(ctx) {
     vscode.commands.registerCommand('novelPreview.reopenAsPreview', replaceWithPreview),
     vscode.commands.registerCommand('novelPreview.selectLayout', selectLayout),
     vscode.commands.registerCommand('novelPreview.exportPdf', () => exportPdf()),
+    vscode.commands.registerCommand('novelPreview.build', buildOutputs),
     vscode.commands.registerCommand('novelPreview.insertRuby', insertRuby),
     vscode.commands.registerCommand('novelPreview.insertEmphasis', insertEmphasis),
     vscode.commands.registerCommand('novelPreview.openFromOutline', openFromOutline),

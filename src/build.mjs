@@ -49,11 +49,11 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { CONFIG_FILENAME, findConfigFile, readWorkConfig } from './config.mjs';
 import { computeMetrics, enPdfPageSize, matchesPdfScriptPage } from './layout.mjs';
-import { fail } from './lib/cli.mjs';
 
 const LAYOUT_OVERRIDES = ['writingMode', 'chars', 'lines'];
 
-function findProjectRoot(dir) {
+/** 設定ファイルのディレクトリから上へたどって最初に package.json があるディレクトリ（無ければ dir）。--out-dir の基準 */
+export function findProjectRoot(dir) {
   for (let d = dir; ; d = dirname(d)) {
     if (existsSync(join(d, 'package.json'))) return d;
     if (dirname(d) === d) return dir;
@@ -62,10 +62,10 @@ function findProjectRoot(dir) {
 
 function locateConfig(target) {
   const path = resolve(target);
-  if (!existsSync(path)) fail(`${target} が見つかりません`);
+  if (!existsSync(path)) throw new Error(`${target} が見つかりません`);
   if (statSync(path).isFile()) return path;
   const file = findConfigFile(path, findProjectRoot(path));
-  if (!file) fail(`${target} から上に ${CONFIG_FILENAME} が見つかりません`);
+  if (!file) throw new Error(`${target} から上に ${CONFIG_FILENAME} が見つかりません`);
   return file;
 }
 
@@ -161,7 +161,7 @@ const rtfArgs = (style) => (output, config) => [
 /** split / merge は <原稿のディレクトリ> <出力先> <作品名> <ジャンル> を順に受け取る */
 function textArgv(output, config, out, { target, rubyParens }, { merge }) {
   const input = workValue(output, config, 'input');
-  if (input?.length !== 1) fail(`${output.format} の input は原稿のディレクトリ1つにしてください`);
+  if (input?.length !== 1) throw new Error(`${output.format} の input は原稿のディレクトリ1つにしてください`);
   const parts = workValue(output, config, 'parts');
   return [
     cwdRelative(join(config.dir, input[0])),
@@ -178,10 +178,10 @@ function textArgv(output, config, out, { target, rubyParens }, { merge }) {
 /**
  * load: 実行するコマンドのモジュール。args: そのコマンドに渡すオプション（ファイルを作る形式）か、
  * argv: 引数全体（split / merge）。open: 作ったファイルを --open で開くか。
- * file: out を省いたときに id に付ける [接尾辞, 拡張子]
+ * file: out を省いたときに id に付ける [接尾辞, 拡張子]。extra: 効くその場の指定（passThroughArgs のキー）
  */
 const FORMATS = {
-  pdf: { load: () => import('./pdf.mjs'), args: pdfArgs, open: true, file: ['', '.pdf'] },
+  pdf: { load: () => import('./pdf.mjs'), args: pdfArgs, open: true, file: ['', '.pdf'], extra: ['pages', 'limit'] },
   'pdf-en': { load: () => import('./en-pdf.mjs'), args: enPdfArgs, open: true, file: ['-en', '.pdf'] },
   'novel-pdf': { load: () => import('./novel-pdf.mjs'), args: novelPdfArgs, open: true, file: ['-novel', '.pdf'] },
   epub: { load: () => import('./epub.mjs'), args: epubArgs, open: false, file: ['', '.epub'] },
@@ -191,9 +191,18 @@ const FORMATS = {
     load: () => import('./split.mjs'),
     argv: (...a) => textArgv(...a, { merge: false }),
     file: ['-chapters', ''],
+    extra: ['target'],
   },
-  merge: { load: () => import('./merge.mjs'), argv: (...a) => textArgv(...a, { merge: true }), file: ['-all', '.txt'] },
+  merge: {
+    load: () => import('./merge.mjs'),
+    argv: (...a) => textArgv(...a, { merge: true }),
+    file: ['-all', '.txt'],
+    extra: ['target', 'rubyParens'],
+  },
 };
+
+/** format の性質。open: 作ったファイルを開く形式か、extra: 効くその場の指定（pages / limit / target / rubyParens） */
+export const formatTraits = (format) => ({ open: !!FORMATS[format].open, extra: FORMATS[format].extra ?? [] });
 
 /**
  * 設定の "outputs"（出力名の配列か、出力名 → 項目。項目が無ければ true）を、出力名 → { format, out, ...項目 } にそろえる。
@@ -204,12 +213,15 @@ export function normalizeOutputs(outputs, id) {
   return Object.fromEntries(
     entries.map(([name, value]) => {
       const output = value === true ? {} : value;
-      if (!output || typeof output !== 'object') fail(`出力 "${name}" は項目のオブジェクトか true にしてください`);
+      if (!output || typeof output !== 'object')
+        throw new Error(`出力 "${name}" は項目のオブジェクトか true にしてください`);
       const format = output.format ?? name;
       if (!FORMATS[format])
-        fail(`出力 "${name}" の format "${format}" には対応していません（${Object.keys(FORMATS).join(' / ')}）`);
+        throw new Error(
+          `出力 "${name}" の format "${format}" には対応していません（${Object.keys(FORMATS).join(' / ')}）`,
+        );
       if (output.out != null) return [name, { ...output, format }];
-      if (!id) fail(`出力 "${name}" の out を決められません（out か、作品の id / title を書いてください）`);
+      if (!id) throw new Error(`出力 "${name}" の out を決められません（out か、作品の id / title を書いてください）`);
       const [suffix, ext] = FORMATS[format].file;
       return [name, { ...output, format, out: `${id}${name === format ? suffix : `-${name}`}${ext}` }];
     }),
@@ -224,7 +236,7 @@ function passThroughArgs(argv) {
     if (['--pages', '--limit', '--target'].includes(name)) parsed[name.slice(2)] = inline ?? argv[++i];
     else if (name === '--out-dir') parsed.outDir = inline ?? argv[++i];
     else if (name === '--ruby-parens') parsed.rubyParens = true;
-    else if (argv[i].startsWith('-')) fail(`不明なオプション: ${argv[i]}`);
+    else if (argv[i].startsWith('-')) throw new Error(`不明なオプション: ${argv[i]}`);
     else parsed.names.push(argv[i]);
   }
   return parsed;
@@ -259,7 +271,8 @@ export function outputArgv(name, output, config, root, extra = {}, warn = (_mess
 
 export async function main(argv = process.argv.slice(2)) {
   const [target, ...rest] = argv;
-  if (!target) fail('作品のディレクトリか novel.json を指定してください（例: novel build src/od/story pdf）');
+  if (!target)
+    throw new Error('作品のディレクトリか novel.json を指定してください（例: novel build src/od/story pdf）');
   const file = locateConfig(target);
   const config = readWorkConfig(file);
   const root = findProjectRoot(config.dir);
@@ -267,10 +280,12 @@ export async function main(argv = process.argv.slice(2)) {
   const outputs = normalizeOutputs(config.outputs, config.id);
 
   const available = Object.keys(outputs);
-  if (available.length === 0) fail(`${cwdRelative(file)} に outputs がありません`);
+  if (available.length === 0) throw new Error(`${cwdRelative(file)} に outputs がありません`);
   const missing = names.filter((n) => !available.includes(n));
   if (missing.length > 0)
-    fail(`${cwdRelative(file)} に出力 ${missing.join(', ')} がありません（あるのは ${available.join(', ')}）`);
+    throw new Error(
+      `${cwdRelative(file)} に出力 ${missing.join(', ')} がありません（あるのは ${available.join(', ')}）`,
+    );
 
   for (const name of names.length > 0 ? names : available) {
     const output = outputs[name];
@@ -282,7 +297,7 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 if (import.meta.vitest) {
-  const { describe, test, expect, vi } = import.meta.vitest;
+  const { describe, test, expect } = import.meta.vitest;
   const { DEFAULT_LAYOUT, DEFAULT_ENGLISH_LAYOUT } = await import('./layout.mjs');
 
   const config = (overrides = {}) => ({
@@ -515,18 +530,17 @@ if (import.meta.vitest) {
       expect(argvOf({ format: 'novel-pdf', out: 'a.pdf', blankAfterHeading: true })).toContain('--blank-after-heading');
     });
 
-    test('その場の指定は --pages / --limit は pdf、--target は split / merge にだけ渡す', () => {
+    test('その場の指定は formatTraits の extra にある format にだけ渡す（--pages / --limit は pdf、--target は split / merge）', () => {
       const extra = { pages: '3', limit: '2', target: '読者', rubyParens: true };
-      const pdf = argvOf({ format: 'pdf', out: 'a.pdf' }, config(), extra);
-      expect(pdf).toEqual(expect.arrayContaining(['--pages', '3', '--limit', '2']));
-      expect(pdf).not.toContain('--target');
-      for (const format of ['pdf-en', 'novel-pdf', 'epub', 'rtf', 'rtf-en']) {
+      const flags = { pages: '--pages', limit: '--limit', target: '--target', rubyParens: '--ruby-parens' };
+      for (const format of Object.keys(FORMATS)) {
         const argv = argvOf({ format, out: 'a' }, config(), extra);
-        expect(argv, format).not.toContain('--pages');
-        expect(argv, format).not.toContain('--limit');
-        expect(argv, format).not.toContain('--target');
-        expect(argv, format).not.toContain('--ruby-parens');
+        for (const [key, name] of Object.entries(flags))
+          expect(argv.includes(name), `${format} ${name}`).toBe(formatTraits(format).extra.includes(key));
       }
+      expect(argvOf({ format: 'pdf', out: 'a.pdf' }, config(), extra)).toEqual(
+        expect.arrayContaining(['--pages', '3', '--limit', '2']),
+      );
       expect(argvOf({ format: 'split', out: 'a' }, config(), extra)).toEqual(
         expect.arrayContaining(['--target', '読者']),
       );
@@ -571,18 +585,9 @@ if (import.meta.vitest) {
     });
 
     test('format が分からない・out を決められないときは例外', () => {
-      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
-        throw new Error('exit');
-      });
-      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-      try {
-        expect(() => normalizeOutputs({ review: { review: true } }, 'w')).toThrow('exit');
-        expect(() => normalizeOutputs(['pdf'], null)).toThrow('exit');
-        expect(normalizeOutputs({ pdf: { out: 'a.pdf' } }, null)).toEqual({ pdf: { format: 'pdf', out: 'a.pdf' } });
-      } finally {
-        exit.mockRestore();
-        error.mockRestore();
-      }
+      expect(() => normalizeOutputs({ review: { review: true } }, 'w')).toThrow('format "review"');
+      expect(() => normalizeOutputs(['pdf'], null)).toThrow('out を決められません');
+      expect(normalizeOutputs({ pdf: { out: 'a.pdf' } }, null)).toEqual({ pdf: { format: 'pdf', out: 'a.pdf' } });
     });
   });
 

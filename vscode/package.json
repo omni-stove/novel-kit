@@ -59,6 +59,12 @@
         "category": "小説"
       },
       {
+        "command": "novelPreview.build",
+        "title": "novel.json の出力を作る",
+        "category": "小説",
+        "icon": "$(package)"
+      },
+      {
         "command": "novelPreview.insertRuby",
         "title": "ルビを振る",
         "category": "小説"
@@ -97,6 +103,16 @@
           "command": "novelPreview.reopenAsPreview",
           "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor",
           "group": "navigation"
+        },
+        {
+          "command": "novelPreview.build",
+          "when": "resourceExtname == .txt || resourceFilename == novel.json",
+          "group": "2_novel@1"
+        },
+        {
+          "command": "novelPreview.exportPdf",
+          "when": "resourceExtname == .txt",
+          "group": "2_novel@2"
         }
       ],
       "editor/title/context": [
@@ -166,6 +182,13 @@
           "command": "novelPreview.nextFile",
           "when": "view == novelPreview.outline",
           "group": "navigation@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "novelPreview.build",
+          "when": "resourceFilename == novel.json",
+          "group": "navigation@90"
         }
       ]
     },
@@ -277,6 +300,16 @@
               }
             }
           }
+        },
+        "novelPreview.outDir": {
+          "type": "string",
+          "default": "out",
+          "markdownDescription": "「novel.json の出力を作る」の出力先。ワークスペースのフォルダから（絶対パスも可）。`novel build` の `--out-dir` と同じ"
+        },
+        "novelPreview.openAfterExport": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "出力した PDF・RTF を開く（「現在のレイアウトでPDFを出力」も同じ。EPUB と split / merge の txt は `novel build` と同じく開かない）。環境変数 `AUTO_OPEN=0` のときは開かない"
         }
       }
     },

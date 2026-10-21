@@ -22,6 +22,17 @@ PDF 出力に使う Chrome は、初回の PDF 出力のときにダウンロー
 
 レイアウトは作品の `novel.json` に保存される。
 
+## 出力
+
+「novel.json の出力を作る」（コマンドパレット・エディタのタイトルバーの「…」・エクスプローラーで `novel.json` を右クリック）で、`novel.json` の `"outputs"` に書いた出力を選んで作る。`novel build` と同じ処理で、出力ごとの設定もそのまま効く。形式は pdf / pdf-en / novel-pdf / epub / rtf / rtf-en / split / merge。
+
+- pdf はその場で抜き出すページ（`--pages`）と先頭から組むファイル数（`--limit`）、split / merge は想定読者（`--target`）、merge はルビの括弧表記（`--ruby-parens`）を聞く。空欄なら付けない
+- 出力先は設定 `novelPreview.outDir`（ワークスペースのフォルダから。既定は `out`）
+- PDF・RTF は出力後に開く。設定 `novelPreview.openAfterExport` を false にするか、環境変数 `AUTO_OPEN=0` で開かない
+- novel-pdf は Ghostscript（`gs`）、epub は `zip` を使う
+
+「現在のレイアウトでPDFを出力」は、プレビューで見ているレイアウトのまま確かめるための PDF を `out/preview/` に出す。
+
 ## PDF との差
 
 プレビューは Chromium の段組みでページを割る近似で、PDF とは数ページ単位でずれることがある。提出前の確認は「PDF出力」で行う。
