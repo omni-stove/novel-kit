@@ -132,6 +132,69 @@ button:disabled {
   border-radius: 0 3px 3px 0;
 }
 
+#export-wrap {
+  position: relative;
+}
+
+#export-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 16em;
+  padding: 4px;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.35)));
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+}
+
+#export-menu.align-right {
+  right: 0;
+  left: auto;
+}
+
+#export-menu[hidden] {
+  display: none;
+}
+
+#export-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+  white-space: nowrap;
+  color: inherit;
+  background: transparent;
+}
+
+#export-menu button:hover,
+#export-menu button:focus {
+  outline: none;
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+}
+
+#export-menu .description,
+#export-menu .note {
+  color: var(--vscode-descriptionForeground);
+}
+
+#export-menu .note {
+  padding: 2px 6px;
+  font-size: 0.9em;
+}
+
+#export-menu hr {
+  width: 100%;
+  margin: 4px 0;
+  border: none;
+  border-top: 1px solid var(--vscode-menu-separatorBackground, rgba(128, 128, 128, 0.35));
+}
+
 #stats {
   margin-left: auto;
   color: var(--vscode-descriptionForeground);

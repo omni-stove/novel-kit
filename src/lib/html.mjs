@@ -171,6 +171,38 @@ export const VERTICAL_GLYPH_CSS = `
     }
 `;
 
+/**
+ * 横書き本文で VERTICAL_GLYPH_CSS の後ろに足すスタイル。ルビと傍点を縦書きの右から字の上へ置き直す。
+ * pdf（横書き）と VS Code 拡張のスクロール表示が使う。
+ */
+export const HORIZONTAL_GLYPH_CSS = `
+    /* 縦書きと同じく、点とルビは行の箱を広げないよう絶対配置にし、
+       字の中心から 0.5em 上（点・ルビの 1em）に置く。 */
+    .emphasis-dot::after {
+      right: auto;
+      top: auto;
+      left: 50%;
+      bottom: 50%;
+      transform: translate(-50%, -1em);
+    }
+
+    rt {
+      right: auto;
+      top: auto;
+      left: 50%;
+      bottom: 50%;
+      line-height: 1;
+      text-indent: 0;
+      transform: translate(-50%, -1em);
+    }
+
+    ruby.fit > rt {
+      bottom: 50%;
+      inset-block-start: auto;
+      transform: translateY(-1em);
+    }
+`;
+
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
 

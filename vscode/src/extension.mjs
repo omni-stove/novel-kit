@@ -271,6 +271,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         presets,
         presetName: Object.keys(presets).find((name) => layoutsEqual(presets[name], layout, { english })) ?? null,
         layoutFile: layoutFile ? vscode.workspace.asRelativePath(layoutFile) : null,
+        outputs: menuOutputs(layoutFile),
         userPresetNames: Object.keys(userPresets(english)),
         scope: session.scope,
         view,
@@ -500,8 +501,11 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         return session.doc && savePreset(session.doc);
       case 'deletePreset':
         return deletePreset(msg.name);
-      case 'exportPdf':
-        return exportPdf(session);
+      case 'export':
+        if (!msg.names) return exportPdf(session);
+        return (
+          session.doc && buildOutputs(vscode.Uri.file(layoutFileFor(session.doc) ?? session.doc.uri.fsPath), msg.names)
+        );
       case 'workSettings':
         return onWorkFormMessage(msg.msg);
     }
@@ -857,6 +861,21 @@ async function askBuildOptions(outputs, work) {
   return { args, pages: pages || null };
 }
 
+/** 出力の説明（QuickPick・プレビューの「出力」のメニューに出す）。出力名が形式の名前なら出力先だけ */
+const describeOutput = (name, output) => (name === output.format ? output.out : `${output.format} → ${output.out}`);
+
+/** プレビューの「出力」のメニューに出す novel.json（file）の出力 [{ name, description }]。無い・読めなければ空 */
+function menuOutputs(file) {
+  if (!file) return [];
+  try {
+    const work = readWorkConfig(file);
+    const outputs = normalizeOutputs(work.outputs, work.id);
+    return Object.entries(outputs).map(([name, output]) => ({ name, description: describeOutput(name, output) }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * novel.json の outputs から選んだ出力を、novel build と同じ処理（同梱の CLI の build）で作る。
  * names: 作る出力名（null なら選ばせる）。
@@ -882,13 +901,18 @@ async function buildOutputs(uri, names = null) {
     return;
   }
 
-  const describe = (name) =>
-    name === outputs[name].format ? outputs[name].out : `${outputs[name].format} → ${outputs[name].out}`;
+  const missing = Array.isArray(names) ? names.filter((name) => !available.includes(name)) : [];
+  if (missing.length > 0)
+    vscode.window.showWarningMessage(`${label} の outputs に ${missing.join(', ')} がありません。`);
   const picked = Array.isArray(names)
     ? { names: names.filter((name) => available.includes(name)) }
     : await vscode.window.showQuickPick(
         [
-          ...available.map((name) => ({ label: name, description: describe(name), names: [name] })),
+          ...available.map((name) => ({
+            label: name,
+            description: describeOutput(name, outputs[name]),
+            names: [name],
+          })),
           ...(available.length > 1
             ? [
                 { label: '', kind: vscode.QuickPickItemKind.Separator, names: [] },

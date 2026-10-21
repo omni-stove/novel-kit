@@ -52,7 +52,10 @@ export function renderWebviewHtml({ cssUri, jsUri, formCssUri, formJsUri, cspSou
     </span>
     <label>表示<select id="zoom">${options(ZOOM_OPTIONS)}</select></label>
     <button id="work-settings" aria-pressed="false" title="novel.json の作品情報・部の境界・出力を、プレビューの横で編集する">作品設定</button>
-    <button id="export-pdf" title="日本語: novel pdf でこの字数×行数のPDFを出力&#10;English: novel pdf-en でこの判型のPDFを出力">PDF出力</button>
+    <span id="export-wrap">
+      <button id="export" aria-haspopup="menu" aria-expanded="false" title="作るものをメニューから選ぶ（現在のレイアウトでPDF・novel.json の出力）">出力 ▾</button>
+      <div id="export-menu" role="menu" hidden></div>
+    </span>
     <span id="stats"></span>
   </header>
   <section id="setup" hidden>
