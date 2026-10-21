@@ -30,6 +30,8 @@ jobs:
       gate: false
       run-review: true
       review-provider: "claude"
+      # 公開リポジトリでは外部 App の PR でもレビューが起動してしまうため
+      review-allowed-bots: ""
     secrets: inherit
 
   # push では前回の push との差分を取る手間に見合わないので、全部走らせる
