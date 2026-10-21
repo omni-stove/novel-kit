@@ -164,7 +164,7 @@ export function buildParagraphs(inputFiles, opts) {
   for (const file of inputFiles) {
     const sourceLines = readLines(file);
     const { lines } = getBodyLines(sourceLines, { keepEpigraphs: true, subheadsInViewpoint: !opts.shunn });
-    const subheads = sourceLines.filter(isSubheadLine).map(parseSubheadLine).filter(Boolean);
+    let subheads = sourceLines.filter(isSubheadLine).map(parseSubheadLine).filter(Boolean);
     trimBlankEdges(lines);
 
     for (const rawLine of lines) {
@@ -201,6 +201,8 @@ export function buildParagraphs(inputFiles, opts) {
         paragraphs.push(`${center}Chapter ${chapterNumberWord(chapterNumber)}\\par`);
         if (title) paragraphs.push(`${center}${formatInlineRtf(title, opts)}\\par`);
         for (const subhead of subheads) paragraphs.push(`${center}${formatInlineRtf(subhead, opts)}\\par`);
+        // --ja の foldSubheads と同じく、ファイルで最初の【】にだけ付ける
+        subheads = [];
         paragraphs.push('\\pard\\sl480\\slmult1\\par');
         if (rest) {
           totalWords += stripInlineMarkup(rest).split(/\s+/).filter(Boolean).length;
@@ -477,6 +479,17 @@ if (import.meta.vitest) {
         expect(paragraphs[2]).toContain('Nadia Solis');
         expect(paragraphs.filter((p) => p.includes('Subhead'))).toHaveLength(0);
         expect(totalWords).toBe(1);
+      } finally {
+        ul(tmp);
+      }
+    });
+
+    test('Subhead: はファイルで最初の章扉にだけ出す', () => {
+      const tmp = join(tmpdir(), `rtf-${process.pid}-sub2.txt`);
+      wf(tmp, 'Subhead: Nadia Solis\n【Alpha】\nBody.\n【Beta】\nMore.\n');
+      try {
+        const { paragraphs } = buildParagraphs([tmp], opts);
+        expect(paragraphs.filter((p) => p.includes('Nadia Solis'))).toHaveLength(1);
       } finally {
         ul(tmp);
       }
