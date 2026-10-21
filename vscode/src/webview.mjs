@@ -1,6 +1,6 @@
 /**
- * プレビュー webview の外枠（ツールバー・ページ設定・用紙を並べる領域）。
- * 本文とそのスタイルは render メッセージで後から差し込む（media/preview.js）。
+ * プレビュー webview の外枠（ツールバー・ページ設定・用紙を並べる領域・作品設定の欄）。
+ * 本文とそのスタイルは render メッセージで後から差し込む（media/preview.js）。作品設定の欄のフォームは media/settings.js
  */
 
 import { PAPER_SIZES } from '../../src/layout.mjs';
@@ -14,7 +14,7 @@ const marginInput = (side, label) =>
 
 const PAPER_LABELS = { '6x9in': '6×9in', '5x8in': '5×8in' };
 
-export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
+export function renderWebviewHtml({ cssUri, jsUri, formCssUri, formJsUri, cspSource, nonce }) {
   const csp = [
     "default-src 'none'",
     `style-src ${cspSource} 'unsafe-inline' https://fonts.googleapis.com`,
@@ -32,6 +32,7 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
   <style id="doc-style"></style>
   <link rel="stylesheet" href="${cssUri}">
+  <link rel="stylesheet" href="${formCssUri}">
 </head>
 <body>
   <header id="toolbar">
@@ -47,7 +48,7 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
     <button id="toggle-edit" aria-pressed="true" title="オン: 段落をクリックしてその場で編集（Cmd/Ctrl+クリックでエディタの該当行へ）&#10;オフ: ダブルクリックでエディタの該当行へ">編集</button>
     <button id="open-text" title="このタブをテキストエディタに切り替える（見ている位置の行で開く）">テキストで開く</button>
     <label>表示<select id="zoom">${options(ZOOM_OPTIONS)}</select></label>
-    <button id="work-settings" title="novel.json の作品情報・部の境界・出力を編集する">作品設定</button>
+    <button id="work-settings" aria-pressed="false" title="novel.json の作品情報・部の境界・出力を、プレビューの横で編集する">作品設定</button>
     <button id="export-pdf" title="日本語: novel pdf でこの字数×行数のPDFを出力&#10;English: novel pdf-en でこの判型のPDFを出力">PDF出力</button>
     <span id="stats"></span>
   </header>
@@ -82,13 +83,17 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
     <button id="save-preset">プリセットとして保存…</button>
     <button id="delete-preset">プリセットを削除</button>
   </section>
-  <main id="viewport">
-    <p id="message">原稿のテキストファイル（.txt）を開くとプレビューを表示します。</p>
-    <div id="stage" hidden>
-      <div id="sheets"></div>
-      <div id="flow"></div>
-    </div>
-  </main>
+  <div id="workspace">
+    <main id="viewport">
+      <p id="message">原稿のテキストファイル（.txt）を開くとプレビューを表示します。</p>
+      <div id="stage" hidden>
+        <div id="sheets"></div>
+        <div id="flow"></div>
+      </div>
+    </main>
+    <aside id="work-panel" hidden></aside>
+  </div>
+  <script nonce="${nonce}" src="${formJsUri}"></script>
   <script nonce="${nonce}" src="${jsUri}"></script>
 </body>
 </html>`;

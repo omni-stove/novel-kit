@@ -12,7 +12,7 @@
  *     "id": "work",                                    // 出力ファイル名のもと（省略時は title）
  *     "title": "作品名", "author": "著者名", "genre": "SF", "target": "想定読者",
  *     "input": ["."],                                  // 原稿のファイルかディレクトリ（並び順どおりに連結）
- *     "parts": ["070", "085"],                         // 部の境界になるファイル名の先頭の番号
+ *     "parts": ["070", "085"],                         // 部の境界になるファイル名の先頭の番号（省略時は部に分けない）
  *     "chars": 40, "lines": 40, ...                    // 日本語のレイアウト（プレビューと共通）
  *     "english": { "title": "Title", "paper": "6x9in", ... },  // 英語の出力の作品の項目と、英語のレイアウト
  *     "outputs": {
@@ -25,7 +25,7 @@
  * "outputs" は出力名の配列（["pdf", "epub"]）でも書ける。
  * out を省くと id と format（format と違う出力名ならその名前）から決める。
  * プロジェクトのルートは、設定ファイルから上へたどって最初に package.json があるディレクトリ。
- * 作品の項目（title / author / genre / target / input / parts）は出力ごとに上書きでき、null を書けばその出力では使わない。
+ * 作品の項目（title / author / genre / target / input）は出力ごとに上書きでき、null を書けばその出力では使わない。
  * 英語の出力（pdf-en / rtf-en）の title / author / input は "english" に書いたものを先に使う（input の既定は ["en"]）。
  * レイアウトの "writingMode" / "chars" / "lines" も出力ごとに上書きできる。
  * 場面区切り（原稿の * の行）の記号は "sceneBreak"（日本語の出力）/ "english": { "sceneBreak" }（pdf-en）に書き、
@@ -42,7 +42,7 @@
  *   rtf-en     英語投稿用（Shunn 形式）の RTF。rubyParens, chapterBreak, contact
  *   split      章ごとの txt（out はディレクトリ）。input はディレクトリ1つ
  *   merge      1つにまとめた txt。input はディレクトリ1つ。rubyParens
- * parts を使うのは pdf / pdf-en / split / merge。
+ * parts は作品で1つだけ書き、pdf / pdf-en / split / merge のすべてに効く（出力ごとには変えない）。
  */
 
 import { existsSync, mkdirSync, statSync } from 'node:fs';
@@ -115,7 +115,7 @@ function pdfArgs(output, config, { warn, pages, limit }) {
     ...flag(output.synopsisOnTitle, '--synopsis-on-title'),
     ...flag(output.blankAfterHeading, '--blank-after-heading'),
     ...flag(output.review, '--review'),
-    ...option(workValue(output, config, 'parts')?.join(','), '--part'),
+    ...option(config.parts?.join(','), '--part'),
     ...sceneBreakArgs(output, config.sceneBreak?.ja),
     ...option(pages, '--pages'),
     ...option(limit, '--limit'),
@@ -132,7 +132,7 @@ function enPdfArgs(output, config, { warn }) {
     `--${pageSize ?? '6x9'}`,
     ...flag(output.recto, '--recto'),
     ...flag(output.smartQuotes === false, '--no-smart-quotes'),
-    ...option(workValue(output, config, 'parts')?.join(','), '--part'),
+    ...option(config.parts?.join(','), '--part'),
     ...sceneBreakArgs(output, config.sceneBreak?.en),
   ];
 }
@@ -162,7 +162,7 @@ const rtfArgs = (style) => (output, config) => [
 function textArgv(output, config, out, { target, rubyParens }, { merge }) {
   const input = workValue(output, config, 'input');
   if (input?.length !== 1) throw new Error(`${output.format} の input は原稿のディレクトリ1つにしてください`);
-  const parts = workValue(output, config, 'parts');
+  const { parts } = config;
   return [
     cwdRelative(join(config.dir, input[0])),
     out,
@@ -202,12 +202,11 @@ const FORMATS = {
 };
 
 const WORK_KEYS = ['format', 'out', 'title', 'author', 'input', 'sceneBreak'];
-const TEXT_KEYS = ['format', 'out', 'title', 'input', 'parts', 'genre', 'target', 'sceneBreak'];
+const TEXT_KEYS = ['format', 'out', 'title', 'input', 'genre', 'target', 'sceneBreak'];
 /** format ごとに、出力の項目として読むもの（スキーマの definitions.output のうち、その format に効くもの） */
 const KEYS_BY_FORMAT = {
   pdf: [
     ...WORK_KEYS,
-    'parts',
     'writingMode',
     'chars',
     'lines',
@@ -219,7 +218,7 @@ const KEYS_BY_FORMAT = {
     'blankAfterHeading',
     'review',
   ],
-  'pdf-en': [...WORK_KEYS, 'parts', 'recto', 'smartQuotes'],
+  'pdf-en': [...WORK_KEYS, 'recto', 'smartQuotes'],
   'novel-pdf': [...WORK_KEYS, 'size', 'dark', 'blankAfterHeading'],
   epub: [...WORK_KEYS, 'writingMode', 'chars', 'lines'],
   rtf: [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
@@ -379,7 +378,6 @@ if (import.meta.vitest) {
         chapterBreak: false,
         synopsis: false,
         blankAfterHeading: true,
-        parts: ['070', '085'],
         review: true,
       });
       expect(argv).toEqual(
@@ -389,8 +387,6 @@ if (import.meta.vitest) {
           '--no-synopsis',
           '--blank-after-heading',
           '--review',
-          '--part',
-          '070,085',
         ]),
       );
       expect(argv).not.toContain('--no-page-break');
@@ -420,7 +416,8 @@ if (import.meta.vitest) {
       expect(argvOf({ format: 'pdf', out: 'a.pdf' }, config({ parts: ['050'] }))).toEqual(
         expect.arrayContaining(['--part', '050']),
       );
-      expect(argvOf({ format: 'pdf', out: 'a.pdf', parts: null }, config({ parts: ['050'] }))).not.toContain('--part');
+      expect(argvOf({ format: 'pdf', out: 'a.pdf' })).not.toContain('--part');
+      expect(argvOf({ format: 'pdf', out: 'a.pdf', parts: ['070'] })).not.toContain('--part');
     });
 
     test('pdf-en の判型は英語のレイアウトの用紙から選ぶ', () => {

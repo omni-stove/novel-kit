@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { findProjectRoot, formatTraits, normalizeOutputs, outputPath } from '../../src/build.mjs';
@@ -26,7 +26,7 @@ import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../
 import { parsePageSpec } from '../../src/pdf.mjs';
 import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
-import { createSettingsEditorProvider, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
+import { createSettingsEditorProvider, createWorkSettingsController, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
 import { renderWebviewHtml } from './webview.mjs';
 
 const RENDER_DELAY_MS = 250;
@@ -280,6 +280,64 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     } catch (err) {
       panel.webview.postMessage({ type: 'message', text: `プレビューを作れませんでした: ${err.message}` });
     }
+    if (workForm) syncWorkForm();
+  }
+
+  /**
+   * 作品設定の欄（開いている間だけ）。{ file: 原稿から一番近い novel.json（無ければ null）, controller }。
+   * 横のプレビューが別の作品の原稿に移ったり novel.json ができたりしたら、描画のたびに syncWorkForm で付け替える
+   */
+  let workForm = null;
+  const postWorkForm = (state) => panel.webview.postMessage({ type: 'workSettings', state });
+
+  async function syncWorkForm() {
+    const file = session.doc ? layoutFileFor(session.doc) : null;
+    if (workForm?.file === file) return;
+    workForm?.controller?.dispose();
+    const current = { file, controller: null };
+    workForm = current;
+    if (!file) {
+      postWorkForm({
+        file: null,
+        missing: session.doc ? vscode.workspace.asRelativePath(dirname(session.doc.uri.fsPath)) : '原稿のディレクトリ',
+      });
+      return;
+    }
+    const document = await vscode.workspace.openTextDocument(file);
+    // 待つ間に閉じられたり付け替えられたりしていれば、もう要らない
+    if (workForm !== current) return;
+    current.controller = createWorkSettingsController(document, {
+      post: postWorkForm,
+      build: buildOutputs,
+      linesOf,
+      openText: () => vscode.commands.executeCommand('vscode.openWith', document.uri, 'default'),
+      // novel.json はタブに無いことが多く、保存しないと見えないところに未保存の変更が残る。
+      // プレビューも設定ファイルをディスクから読むので、保存して初めて部の境界などが表示に効く
+      save: true,
+    });
+    current.controller.render();
+  }
+
+  function closeWorkForm() {
+    workForm?.controller?.dispose();
+    workForm = null;
+  }
+
+  /** 作品設定の欄のフォームからのメッセージ。ready で開き、close で閉じ、create で novel.json を作る */
+  function onWorkFormMessage(msg) {
+    switch (msg.type) {
+      case 'ready':
+        closeWorkForm();
+        return syncWorkForm();
+      case 'close':
+        return closeWorkForm();
+      case 'create':
+        if (session.doc && !layoutFileFor(session.doc))
+          writeFileSync(join(dirname(session.doc.uri.fsPath), CONFIG_FILENAME), '{}\n');
+        return syncWorkForm();
+      default:
+        return workForm?.controller?.onMessage(msg);
+    }
   }
 
   /**
@@ -439,8 +497,8 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         return deletePreset(msg.name);
       case 'exportPdf':
         return exportPdf(session);
-      case 'openWorkSettings':
-        return openWorkSettings(session.doc?.uri);
+      case 'workSettings':
+        return onWorkFormMessage(msg.msg);
     }
   }
 
@@ -448,6 +506,8 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   panel.webview.html = renderWebviewHtml({
     cssUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'preview.css')),
     jsUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'preview.js')),
+    formCssUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'work-settings.css')),
+    formJsUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'settings.js')),
     cspSource: panel.webview.cspSource,
     nonce: randomBytes(16).toString('hex'),
   });
@@ -455,6 +515,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   panel.onDidChangeViewState(updateStatusBar);
   panel.onDidDispose(() => {
     clearTimeout(renderTimer);
+    closeWorkForm();
     sessions.delete(session);
     if (sidePreview === session) sidePreview = null;
     updateStatusBar();
@@ -762,19 +823,18 @@ async function askBuildOptions(outputs, work) {
 
   const pages = await ask('pages', '--pages', {
     title: '抜き出す本文ページ（pdf）',
-    prompt: '例: 42,50-53。空なら全ページ',
+    prompt: '例: 42,50-53',
     validateInput: (v) => (!v.trim() || parsePageSpec(v) ? null : '42 / 42-45 / 42,50,60-62 の形で書いてください'),
   });
   if (pages === null) return null;
   const limit = await ask('limit', '--limit', {
     title: '先頭から組むファイル数（pdf）',
-    prompt: '空ならすべて',
     validateInput: (v) => (!v.trim() || /^[1-9]\d*$/.test(v.trim()) ? null : '1 以上の整数を書いてください'),
   });
   if (limit === null) return null;
   const target = await ask('target', '--target', {
     title: '想定読者（split / merge）',
-    prompt: work.target ? `空なら novel.json の「${work.target}」` : '空なら書かない',
+    placeHolder: work.target ?? undefined,
   });
   if (target === null) return null;
 
@@ -1064,11 +1124,48 @@ function updateStatusBar() {
   statusBar.show();
 }
 
+/**
+ * 拡張の開発中（Extension Development Host）だけ、ビルドした拡張（dist）か webview の media が書き換わったら
+ * ウィンドウを再読み込みする。開いている原稿のプレビューは最新のソースで開き直る
+ */
+function reloadOnRebuild(ctx) {
+  if (ctx.extensionMode !== vscode.ExtensionMode.Development) return;
+  const digest = (file) => {
+    try {
+      return createHash('sha1').update(readFileSync(file)).digest('hex');
+    } catch {
+      return null;
+    }
+  };
+  let timer;
+  for (const dir of ['dist', 'media']) {
+    const root = join(ctx.extensionPath, dir);
+    const watched = (name) => (dir === 'dist' ? name.endsWith('.cjs') : true);
+    // 起動直後の watch の初回ビルドは同じ中身を書き直すだけなので、中身が変わったときだけ再読み込みする
+    const digests = new Map(
+      readdirSync(root)
+        .filter(watched)
+        .map((name) => [name, digest(join(root, name))]),
+    );
+    const watcher = watch(root, (_event, name) => {
+      if (!name || !watched(name)) return;
+      const next = digest(join(root, name));
+      if (next === digests.get(name)) return;
+      digests.set(name, next);
+      // esbuild は出力ファイルを1つずつ書くので、書き終わるまで待ってから1回だけ再読み込みする
+      clearTimeout(timer);
+      timer = setTimeout(() => vscode.commands.executeCommand('workbench.action.reloadWindow'), 300);
+    });
+    ctx.subscriptions.push({ dispose: () => watcher.close() });
+  }
+}
+
 export function activate(ctx) {
   context = ctx;
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 200);
   statusBar.command = 'novelPreview.selectLayout';
   outlineView = vscode.window.createTreeView('novelPreview.outline', { treeDataProvider: outlineProvider });
+  reloadOnRebuild(ctx);
 
   // 設定ファイルを手で書き換えたとき・置き場所を変えたときにも追従する
   const layoutWatcher = vscode.workspace.createFileSystemWatcher(`**/${CONFIG_FILENAME}`);

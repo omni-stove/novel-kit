@@ -53,3 +53,11 @@ run = "pnpm exec vitest run --coverage"
 [format]
 description = "Apply Biome's safe fixes and formatting"
 run = "biome check --write ."
+
+[ext-dev]
+description = "Open the sample work in an Extension Development Host window and rebuild the extension on save; the window reloads itself"
+depends = ["ext-build"]
+run = [
+  'code --new-window --extensionDevelopmentPath="$PWD/vscode" vscode/sample',
+  "pnpm --dir vscode run watch",
+]

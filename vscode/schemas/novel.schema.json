@@ -38,7 +38,7 @@
       "items": {
         "type": "string"
       },
-      "description": "部の境界になるファイル名の先頭の番号（例: [\"070\", \"085\"]）。pdf / pdf-en / split / merge が使う"
+      "description": "部の境界になるファイル名の先頭の番号（例: [\"070\", \"085\"]）。省略時は部に分けない。pdf / pdf-en / split / merge のすべてが使う"
     },
     "outputs": {
       "description": "novel build で作る出力。出力名の配列か、出力名 → 項目（項目が無ければ true）。出力名が format の名前なら format は省ける",
@@ -241,13 +241,6 @@
             "type": "string"
           },
           "description": "この出力だけの原稿（省略時は作品の（pdf-en / rtf-en は english の、無ければ作品の） input）"
-        },
-        "parts": {
-          "type": ["array", "null"],
-          "items": {
-            "type": "string"
-          },
-          "description": "この出力だけの部の境界（省略時は作品の parts、null で部に分けない）"
         },
         "writingMode": {
           "enum": ["vertical", "horizontal"],

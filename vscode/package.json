@@ -360,7 +360,9 @@
     }
   },
   "scripts": {
-    "build": "esbuild src/extension.mjs src/novel-cli.mjs src/pdf-renderer.mjs --bundle --platform=node --format=cjs --target=node20 --external:vscode --define:import.meta.vitest=undefined --log-override:empty-import-meta=silent --outdir=dist --out-extension:.js=.cjs && node -e \"const fs = require('fs'), path = require('path'); fs.rmSync('dist/viewer', { recursive: true, force: true }); fs.cpSync(path.join(path.dirname(require.resolve('@vivliostyle/viewer/package.json')), 'lib'), 'dist/viewer', { recursive: true })\"",
+    "bundle": "esbuild src/extension.mjs src/novel-cli.mjs src/pdf-renderer.mjs --bundle --platform=node --format=cjs --target=node20 --external:vscode --define:import.meta.vitest=undefined --log-override:empty-import-meta=silent --outdir=dist --out-extension:.js=.cjs",
+    "build": "pnpm run bundle && node -e \"const fs = require('fs'), path = require('path'); fs.rmSync('dist/viewer', { recursive: true, force: true }); fs.cpSync(path.join(path.dirname(require.resolve('@vivliostyle/viewer/package.json')), 'lib'), 'dist/viewer', { recursive: true })\"",
+    "watch": "pnpm run bundle --watch=forever",
     "package": "pnpm run build && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license -o dist/novel-preview.vsix",
     "install-extension": "pnpm run package && code --install-extension dist/novel-preview.vsix --force",
     "release": "pnpm --dir .. test && pnpm run package && gh release create \"vscode-v$npm_package_version\" dist/novel-preview.vsix --repo omni-stove/novel-kit --title \"小説プレビュー $npm_package_version\" --generate-notes",

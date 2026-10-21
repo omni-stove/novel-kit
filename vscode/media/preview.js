@@ -512,6 +512,11 @@
       if (key !== 'z' && key !== 'y') return;
       e.preventDefault();
       e.stopPropagation();
+      // 作品設定の欄の入力欄では、その欄の打ち間違いを戻す（原稿の取り消しにはしない）
+      if (/** @type {HTMLElement} */ (e.target).closest?.('#work-panel')) {
+        document.execCommand(key === 'y' || e.shiftKey ? 'redo' : 'undo');
+        return;
+      }
       vscode.postMessage({ type: key === 'y' || e.shiftKey ? 'redo' : 'undo' });
     },
     true,
@@ -633,7 +638,19 @@
     vscode.postMessage({ type: 'deletePreset', name: $('preset').value }),
   );
   $('export-pdf').addEventListener('click', () => vscode.postMessage({ type: 'exportPdf' }));
-  $('work-settings').addEventListener('click', () => vscode.postMessage({ type: 'openWorkSettings' }));
+
+  /** 作品設定の欄のフォーム（settings.js）。初めて開いたときに作る */
+  let workForm = null;
+  const postWorkSettings = (msg) => vscode.postMessage({ type: 'workSettings', msg });
+  $('work-settings').addEventListener('click', () => {
+    const panel = $('work-panel');
+    panel.hidden = !panel.hidden;
+    $('work-settings').setAttribute('aria-pressed', String(!panel.hidden));
+    // 閉じている間は novel.json と原稿を見張らなくてよいので、拡張にも開け閉めを伝える
+    if (panel.hidden) return postWorkSettings({ type: 'close' });
+    workForm ??= createWorkSettingsForm(panel, postWorkSettings, { scroller: panel });
+    postWorkSettings({ type: 'ready' });
+  });
 
   // PDF 用 CSS の hanging-punctuation: allow-end last は Chromium では効かないので、Vivliostyle と同じ方法で再現する。
   // 句読点を文字送り 0（letter-spacing: -1em）にし、直後に 1 字ぶんの隠しスペースを置く（preview.css の .hang）。
@@ -729,6 +746,8 @@
         // プレビュー側で作業している間は、エディタのカーソル位置へ引き戻さない
         reveal(data.reveal ?? lastReveal);
       }
+    } else if (data.type === 'workSettings') {
+      workForm?.render(data.state);
     } else if (data.type === 'reveal') {
       reveal(data.target);
     } else if (data.type === 'message') {
@@ -861,7 +880,7 @@
   window.addEventListener('keydown', (e) => {
     if (!geometry || editing || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
     const target = /** @type {HTMLElement} */ (e.target);
-    if (target.isContentEditable || target.closest('input, select, textarea, #setup')) return;
+    if (target.isContentEditable || target.closest('input, select, textarea, #setup, #work-panel')) return;
     if (e.key === 'Home' || e.key === 'End') {
       e.preventDefault();
       scrollToPage(e.key === 'Home' ? 1 : geometry.pages);

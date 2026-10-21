@@ -146,12 +146,31 @@ button:disabled {
   align-self: center;
 }
 
+#workspace {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
 #viewport {
   flex: 1;
+  min-width: 0;
   overflow: auto;
   scrollbar-gutter: stable;
   padding: 0 24px;
   background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.15));
+}
+
+#work-panel {
+  flex: 0 0 auto;
+  width: min(480px, 50%);
+  overflow: auto;
+  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  background: var(--vscode-editor-background);
+}
+
+#work-panel[hidden] {
+  display: none;
 }
 
 #viewport.fit {

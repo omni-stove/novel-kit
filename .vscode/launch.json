@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "小説プレビュー（見本の作品）",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode", "${workspaceFolder}/vscode/sample"],
+      "outFiles": ["${workspaceFolder}/vscode/dist/**/*.cjs"],
+      "preLaunchTask": "ext-watch"
+    }
+  ]
+}
