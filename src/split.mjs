@@ -37,6 +37,7 @@ import {
   SCENE_BREAK_MARK,
   separatorMark,
   trimBlankEdges,
+  unfoldSources,
 } from './lib/text-parser.mjs';
 
 export function parseArgs(argv) {
@@ -195,7 +196,7 @@ export function chapterFileLines(chapter, leadLines = []) {
   if (chapter.header) headerLines.push(chapter.header);
   headerLines.push(...chapter.epigraphs);
   const bodyLines = trimBlankEdges(chapter.lines);
-  return headerLines.length > 0 ? [...headerLines, '', ...bodyLines] : bodyLines;
+  return (headerLines.length > 0 ? [...headerLines, '', ...bodyLines] : bodyLines).flatMap(unfoldSources);
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -279,10 +280,11 @@ if (import.meta.vitest) {
         { lines: ['【1】', '', '本文一', '', '◇◇◇', '', '続き'], sources: ['010.txt', '020.txt'] },
       ]);
     });
-    test('エピグラフは見出しの下にまとめる', () => {
-      expect(split({ '010.txt': 'Epigraph: 引用——出典\n【】\n本文\n' })[0].lines).toEqual([
+    test('エピグラフは出典の Source: 行とともに見出しの下にまとめる', () => {
+      expect(split({ '010.txt': 'Lead: 引用\nSource: 出典\n【】\n本文\n' })[0].lines).toEqual([
         '【1】',
-        'Epigraph: 引用——出典',
+        'Lead: 引用',
+        'Source: 出典',
         '',
         '本文',
       ]);
@@ -294,18 +296,18 @@ if (import.meta.vitest) {
 
   describe('ファイル番号で分ける（--splits）', () => {
     const files = {
-      '010.txt': 'Epigraph: 一\n【】\n本文一\n',
+      '010.txt': 'Lead: 一\n【】\n本文一\n',
       '020.txt': '【】\n本文二\n',
-      '030.txt': 'Epigraph: 三\n【】\n本文三\n',
+      '030.txt': 'Lead: 三\n【】\n本文三\n',
       '040.txt': '続き\n',
     };
     test('指定番号以降のファイルを次の章にまとめ、視点行は「部-節」で採番し直す', () => {
       expect(split(files, [30])).toEqual([
         {
-          lines: ['【1-1】', 'Epigraph: 一', '', '本文一', '', '【1-2】', '', '本文二'],
+          lines: ['【1-1】', 'Lead: 一', '', '本文一', '', '【1-2】', '', '本文二'],
           sources: ['010.txt', '020.txt'],
         },
-        { lines: ['【2-1】', 'Epigraph: 三', '', '本文三', '', '◇◇◇', '', '続き'], sources: ['030.txt', '040.txt'] },
+        { lines: ['【2-1】', 'Lead: 三', '', '本文三', '', '◇◇◇', '', '続き'], sources: ['030.txt', '040.txt'] },
       ]);
     });
   });

@@ -23,11 +23,14 @@
  *   --open               生成後にプレビューを開く
  *   --scene-break <記号> 場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: * * *）
  *
- * 章が1つしかなく章題も無い場合は、章ヘッダ（章番号）を出力しない。
+ * 章が1つしかなく章題も Subhead: も無い場合は、章ヘッダ（章番号）を出力しない。
  *
  * 原稿の記法:
  *   【title】        章の開始（titleは章題、空なら番号のみ）。【】で始まらないファイルは前の章の続き
- *   Epigraph: ...    章扉のエピグラフ
+ *   Lead: ...        章扉のエピグラフ
+ *   Source: ...      直前の Lead: の出典
+ *   Subhead: ...     章ヘッダで章題の下に出す行（視点人物名など。複数行可）。章を始めるファイルに書く。
+ *                    日本語の出力では【】の見出しの後ろに続く
  *   Memo: ...        出力しない
  *   *text*           イタリック
  *   《《text》》     傍点（文字上に点を打つ強調）
@@ -51,7 +54,9 @@ import {
   isEpigraphLine,
   isSceneBreak,
   isSeparator,
+  isSubheadLine,
   parseEpigraphLine,
+  parseSubheadLine,
   parseViewpointLine,
   readLines,
 } from './lib/text-parser.mjs';
@@ -139,7 +144,7 @@ export function parseEnglishFile(filePath) {
 }
 
 /**
- * 英語原稿の行列を解釈し、本文ブロック・章題・エピグラフを返す。
+ * 英語原稿の行列を解釈し、本文ブロック・章題・エピグラフ・サブヘッド（Subhead: の行。{ text, line }）を返す。
  * 罫線（---）・Memo:・青空文庫の行の単位の注記（改ページ・字下げなど）は組まない。
  * 各ブロックの line は元テキストの行番号（0始まり）。
  * ファイルを介さないのは、未保存のエディタ内容をプレビューする VS Code 拡張から使うため。
@@ -149,9 +154,13 @@ export function parseEnglishLines(sourceLines) {
   const kept = sourceLines.map((text, line) => ({ text, line })).filter((e) => !isRuleLine(e.text));
   const { lines, indices, hasViewpointStart } = getBodyLines(
     kept.map((e) => e.text),
-    { keepEpigraphs: true },
+    { keepEpigraphs: true, subheadsInViewpoint: false },
   );
   const epigraphs = lines.filter((l) => isEpigraphLine(l)).map((l) => parseEpigraphLine(l));
+  const subheads = kept
+    .filter((e) => isSubheadLine(e.text))
+    .map((e) => ({ text: parseSubheadLine(e.text), line: e.line }))
+    .filter((e) => e.text);
   const bodyLines = lines
     .map((text, i) => ({ aozora: parseAozoraLine(text), line: kept[indices[i]].line }))
     .filter((e) => e.aozora.kind === 'text')
@@ -181,7 +190,7 @@ export function parseEnglishLines(sourceLines) {
   while (blocks.length > 0 && blocks[0].type !== 'para') blocks.shift();
   while (blocks.length > 0 && blocks[blocks.length - 1].type !== 'para') blocks.pop();
 
-  return { blocks, chapterTitle, titleLine, epigraphs, hasViewpointStart };
+  return { blocks, chapterTitle, titleLine, epigraphs, subheads, hasViewpointStart };
 }
 
 /**
@@ -189,6 +198,7 @@ export function parseEnglishLines(sourceLines) {
  * partFirstIndices（先頭の 0 を含む。第1部にも部扉を付けるため）を渡すと、章番号を部ごとに振り直し、
  * 部に章が1つしかない章に soleInPart を付ける。
  * 各ブロックと章題には由来のファイル番号（parsedFiles の添字）を file として付ける。
+ * サブヘッドは章を始めるファイルのものだけを使う（続きのファイルには出す章ヘッダが無いため）。
  */
 export function buildChapters(parsedFiles, partFirstIndices = null) {
   const partSet = partFirstIndices ? new Set(partFirstIndices) : null;
@@ -212,6 +222,7 @@ export function buildChapters(parsedFiles, partFirstIndices = null) {
         startsPart,
         title: f.chapterTitle,
         titleLine: f.titleLine ?? null,
+        subheads: f.subheads ?? [],
         file: i,
         epigraphs: [...f.epigraphs],
         blocks,
@@ -235,7 +246,7 @@ export function buildChapters(parsedFiles, partFirstIndices = null) {
 
 /**
  * 1章分の HTML を組む（部の先頭なら部扉を前に付ける）。
- * opts: smartQuotes / sceneBreak / bareChapterHead（章題が無ければ章ヘッダを出さない）/
+ * opts: smartQuotes / sceneBreak / bareChapterHead（章題もサブヘッドも無ければ章ヘッダを出さない）/
  *   lineNumbers（段落・区切り・章題に data-file: ファイル番号 / data-line: 0始まりの行番号 を付ける）。
  * 章頭・場面区切り直後の段落は字下げしない。記号だけの区切り行は書いた記号のまま各記号の間に en スペースを挟み、
  * 場面区切りは sceneBreak（既定 ENGLISH_SCENE_BREAK）を空白を en スペースにして組む。
@@ -246,12 +257,15 @@ export function chapterHtml(ch, opts) {
   const lineAttr = (file, line) => (opts.lineNumbers && line != null ? ` data-file="${file}" data-line="${line}"` : '');
 
   // 柱の string-set を担うため、章ヘッダを出さないときも要素自体は空で残す
-  const bareHead = opts.bareChapterHead && !ch.title;
+  const bareHead = opts.bareChapterHead && !ch.title && !ch.subheads?.length;
   parts.push(`<header class="chapter-head${bareHead ? ' chapter-head-bare' : ''}">`);
   if (!bareHead) {
     if (!ch.soleInPart) parts.push(`<p class="chapter-number">${chapterNumberWord(ch.number)}</p>`);
     if (ch.title) parts.push(`<h2 class="chapter-title"${lineAttr(ch.file, ch.titleLine)}>${inline(ch.title)}</h2>`);
     else parts.push(`<h2 class="chapter-title chapter-title-hidden">Chapter ${chapterNumberWord(ch.number)}</h2>`);
+    for (const { text, line } of ch.subheads ?? []) {
+      parts.push(`<p class="chapter-subhead"${lineAttr(ch.file, line)}>${inline(text)}</p>`);
+    }
   }
   parts.push('</header>');
 
@@ -291,7 +305,7 @@ export function chapterHtml(ch, opts) {
 /**
  * 全章を組んだ印刷用 HTML を返す。size: PAGE_SIZES の1つ（または同じ形のオブジェクト）。
  * opts: title / author / recto / smartQuotes / sceneBreak / lineNumbers。
- * 章が1つしかない作品では、章題が無ければ章ヘッダを出さない。
+ * 章が1つしかない作品では、章題もサブヘッドも無ければ章ヘッダを出さない。
  */
 export function generateHtml(chapters, size, opts) {
   const m = size.margin;
@@ -464,6 +478,19 @@ ${googleFontsLinks('EB+Garamond:ital,wght@0,400;0,500;0,600;1,400')}
 
     .chapter-title-hidden {
       display: none;
+    }
+
+    .chapter-subhead {
+      text-align: center;
+      text-indent: 0;
+      font-size: 10pt;
+      letter-spacing: 0.1em;
+      color: #555;
+      margin: 0.8em 0 0;
+    }
+
+    .chapter-title-hidden + .chapter-subhead {
+      margin-top: 0;
     }
 
     .chapter-head-bare {
@@ -693,6 +720,15 @@ if (import.meta.vitest) {
       expect(html).toContain('chapter-head-bare');
       expect(html).not.toContain('chapter-number');
     });
+    test('サブヘッドは章題の下に出し、bareChapterHeadでも章題が無くてもヘッダを出す', () => {
+      const subheads = [{ text: 'Nadia *Solis*', line: 0 }];
+      expect(chapterHtml({ ...ch, title: 'One', subheads }, { smartQuotes: true })).toMatch(
+        /<h2 class="chapter-title">One<\/h2>\n<p class="chapter-subhead">Nadia <em>Solis<\/em><\/p>/,
+      );
+      const html = chapterHtml({ ...ch, subheads }, { smartQuotes: true, bareChapterHead: true });
+      expect(html).not.toContain('chapter-head-bare');
+      expect(html).toContain('chapter-subhead');
+    });
     test('bareChapterHeadでも章題があればヘッダを出す', () => {
       const html = chapterHtml({ ...ch, title: 'One' }, { smartQuotes: true, bareChapterHead: true });
       expect(html).not.toContain('chapter-head-bare');
@@ -874,14 +910,23 @@ if (import.meta.vitest) {
   });
 
   describe('parseEnglishLines', () => {
-    test('Epigraph: 行は本文から外して epigraphs に入れる', () => {
-      const parsed = parseEnglishLines(['【One】', 'Epigraph: To be.——Hamlet', 'Body.']);
+    test('Lead: 行は本文から外して epigraphs に入れる', () => {
+      const parsed = parseEnglishLines(['【One】', 'Lead: To be.', 'Source: Hamlet', 'Body.']);
       expect(parsed.epigraphs).toEqual([{ quote: 'To be.', source: 'Hamlet' }]);
-      expect(parsed.blocks).toEqual([{ type: 'para', text: 'Body.', line: 2 }]);
+      expect(parsed.blocks).toEqual([{ type: 'para', text: 'Body.', line: 3 }]);
     });
     test('青空文庫の行の単位の注記（改ページなど）は組まない', () => {
       const parsed = parseEnglishLines(['【One】', 'Body A.', '［＃改ページ］', 'Body B.']);
       expect(parsed.blocks.map((b) => b.text)).toEqual(['Body A.', 'Body B.']);
+    });
+    test('Subhead: 行は本文から外して subheads に入れ、【】より前に書いても章を始める', () => {
+      const parsed = parseEnglishLines(['Subhead: Nadia Solis', 'Subhead: *-21Y*', '【One】', 'Body.']);
+      expect(parsed.hasViewpointStart).toBe(true);
+      expect(parsed.subheads).toEqual([
+        { text: 'Nadia Solis', line: 0 },
+        { text: '*-21Y*', line: 1 },
+      ]);
+      expect(parsed.blocks).toEqual([{ type: 'para', text: 'Body.', line: 3 }]);
     });
     test('【】で始まらない行列は章を始めない', () => {
       const parsed = parseEnglishLines(['Body.']);

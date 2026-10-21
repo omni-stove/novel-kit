@@ -261,7 +261,7 @@ if (import.meta.vitest) {
     });
 
     test('detectLanguageOfLines はメタ行を数えない', () => {
-      expect(detectLanguageOfLines(['Memo: Nadia Solis', 'Epigraph: The Sirens', '私は海を見た。'])).toBe('ja');
+      expect(detectLanguageOfLines(['Memo: Nadia Solis', 'Lead: The Sirens', '私は海を見た。'])).toBe('ja');
       expect(detectLanguageOfLines(['Memo: オーティ', 'I saw the sea.'])).toBe('en');
     });
   });

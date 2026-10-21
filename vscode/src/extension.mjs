@@ -512,13 +512,23 @@ async function replaceWithTextEditor(session, filePath, line) {
   if (!filePath) return;
   if (session.follow) return openInTextEditor(filePath, line, session.panel);
 
-  const doc = await vscode.workspace.openTextDocument(filePath);
-  const editor = await vscode.window.showTextDocument(doc, { viewColumn: session.panel.viewColumn });
-  const pos = new vscode.Position(Math.min(line, doc.lineCount - 1), 0);
+  let editor;
+  if (filePath === session.doc?.uri.fsPath) {
+    // 同じグループでプレビューとして開いているファイルは、showTextDocument しても既存のプレビューのタブが前に出るだけで
+    // テキストエディタにならない。「エディターを再度開く」でタブをその場で置き換える
+    session.panel.reveal();
+    await vscode.commands.executeCommand('reopenActiveEditorWith', 'default');
+    editor = vscode.window.activeTextEditor;
+    if (editor?.document.uri.fsPath !== filePath) return;
+  } else {
+    const doc = await vscode.workspace.openTextDocument(filePath);
+    editor = await vscode.window.showTextDocument(doc, { viewColumn: session.panel.viewColumn });
+    // 文書はテキストエディタが引き継ぐので、未保存の変更があってもプレビューのタブを閉じて失うものはない
+    session.panel.dispose();
+  }
+  const pos = new vscode.Position(Math.min(line, editor.document.lineCount - 1), 0);
   editor.selection = new vscode.Selection(pos, pos);
   editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.AtTop);
-  // 文書はテキストエディタが引き継ぐので、未保存の変更があってもプレビューのタブを閉じて失うものはない
-  session.panel.dispose();
 }
 
 /** 「プレビューに切り替える」。テキストエディタのタブを、同じ場所で小説プレビューに入れ替える（「テキストで開く」の逆） */

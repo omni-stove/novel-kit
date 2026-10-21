@@ -440,9 +440,8 @@
     if (e.metaKey || e.ctrlKey) return jumpToEditor(el);
     if (!editEnabled || el === editing?.el) return;
 
-    // 見出しは表示（章番号つき・【】なし）と元テキストが一致しないので、行末にカーソルを置く
-    const heading =
-      el.classList.contains('viewpoint') || el.classList.contains('empty') || el.classList.contains('chapter-title');
+    // 見出しは表示（章番号つき・【】や Subhead: なし）と元テキストが一致しないので、行末にカーソルを置く
+    const heading = ['viewpoint', 'empty', 'chapter-title', 'chapter-subhead'].some((c) => el.classList.contains(c));
     const visible = heading ? null : visibleOffsetAt(el, e.clientX, e.clientY);
     const raw = model.sources[sectionIndexOf(el)]?.[Number(el.dataset.line)] ?? '';
     // 変更ずみで元テキストのまま表示している段落は、表示位置がそのまま元テキストの位置

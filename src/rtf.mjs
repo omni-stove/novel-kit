@@ -33,7 +33,8 @@
  *   Memo: ...        出力しない
  *   【title】        章見出し。Shunn形式では改ページ後に中央寄せの「Chapter <数詞>」
  *                    ＋章題の章扉、--jaでは太字見出し＋改ページ
- *   Epigraph: ...    右寄せで出力
+ *   Lead: ...        右寄せで出力（直後の Source: 行が出典）
+ *   Subhead: ...     Shunn形式では章扉の章題の下に中央寄せ、--jaでは【】の見出しの後ろに全角空白で続けて出力
  *   |親《るび》      ルビ（WordのEQフィールド。--ruby-parensで括弧表記）
  *   《《text》》     傍点（\accdot）
  *   *text*           イタリック（英語原稿用）
@@ -51,12 +52,15 @@ import { requireInputFiles } from './lib/manuscript.mjs';
 import {
   countTextChars,
   epigraphDisplayLines,
-  getFilteredLines,
+  getBodyLines,
   isEpigraphLine,
   isSeparator,
+  isSubheadLine,
   isViewpointLine,
   parseEpigraphLine,
+  parseSubheadLine,
   parseViewpointLine,
+  readLines,
   SCENE_BREAK_MARK,
   separatorMark,
   stripInlineMarkup,
@@ -158,7 +162,9 @@ export function buildParagraphs(inputFiles, opts) {
   let chapterNumber = 0;
 
   for (const file of inputFiles) {
-    const { lines } = getFilteredLines(file, { keepEpigraphs: true });
+    const sourceLines = readLines(file);
+    const { lines } = getBodyLines(sourceLines, { keepEpigraphs: true, subheadsInViewpoint: !opts.shunn });
+    let subheads = sourceLines.filter(isSubheadLine).map(parseSubheadLine).filter(Boolean);
     trimBlankEdges(lines);
 
     for (const rawLine of lines) {
@@ -194,6 +200,9 @@ export function buildParagraphs(inputFiles, opts) {
         }
         paragraphs.push(`${center}Chapter ${chapterNumberWord(chapterNumber)}\\par`);
         if (title) paragraphs.push(`${center}${formatInlineRtf(title, opts)}\\par`);
+        for (const subhead of subheads) paragraphs.push(`${center}${formatInlineRtf(subhead, opts)}\\par`);
+        // --ja の foldSubheads と同じく、ファイルで最初の【】にだけ付ける
+        subheads = [];
         paragraphs.push('\\pard\\sl480\\slmult1\\par');
         if (rest) {
           totalWords += stripInlineMarkup(rest).split(/\s+/).filter(Boolean).length;
@@ -412,7 +421,7 @@ if (import.meta.vitest) {
 
     test('Epigraphは右寄せで引用と出典に分かれる', () => {
       const tmp = join(tmpdir(), `rtf-${process.pid}-e.txt`);
-      wf(tmp, 'Epigraph: 我思う——デカルト\n【】\n本文。\n');
+      wf(tmp, 'Lead: 我思う\nSource: デカルト\n【】\n本文。\n');
       try {
         const { paragraphs } = buildParagraphs([tmp], opts);
         const qr = paragraphs.filter((p) => p.includes('\\qr'));
@@ -457,6 +466,32 @@ if (import.meta.vitest) {
       } finally {
         ul(a);
         ul(b);
+      }
+    });
+
+    test('Subhead: は章扉の章題の下に中央寄せで出し、本文には出さない', () => {
+      const tmp = join(tmpdir(), `rtf-${process.pid}-sub.txt`);
+      wf(tmp, 'Subhead: Nadia Solis\n【Alpha】\nBody.\n');
+      try {
+        const { paragraphs, totalWords } = buildParagraphs([tmp], opts);
+        expect(paragraphs[1]).toContain('Alpha');
+        expect(paragraphs[2]).toContain('\\qc');
+        expect(paragraphs[2]).toContain('Nadia Solis');
+        expect(paragraphs.filter((p) => p.includes('Subhead'))).toHaveLength(0);
+        expect(totalWords).toBe(1);
+      } finally {
+        ul(tmp);
+      }
+    });
+
+    test('Subhead: はファイルで最初の章扉にだけ出す', () => {
+      const tmp = join(tmpdir(), `rtf-${process.pid}-sub2.txt`);
+      wf(tmp, 'Subhead: Nadia Solis\n【Alpha】\nBody.\n【Beta】\nMore.\n');
+      try {
+        const { paragraphs } = buildParagraphs([tmp], opts);
+        expect(paragraphs.filter((p) => p.includes('Nadia Solis'))).toHaveLength(1);
+      } finally {
+        ul(tmp);
       }
     });
 

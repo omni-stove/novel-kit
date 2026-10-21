@@ -12,6 +12,7 @@ import { countWrappedRows } from './grid.mjs';
 import {
   countChars,
   fileHasViewpointStart,
+  foldSubheads,
   getFilteredLines,
   isEpigraphLine,
   isMetaLine,
@@ -38,7 +39,7 @@ export function startsNewChapter(files, i) {
 }
 
 /**
- * 原稿では Epigraph: 行が【】より前に書かれるが、紙面では章見出しの後ろに置くため並べ替える。
+ * 原稿では Lead: 行が【】より前に書かれるが、紙面では章見出しの後ろに置くため並べ替える。
  * 見出しが来ないまま本文が始まるファイルでは本文の前に置く。
  * blankAfter: 見出しの後ろへ移したエピグラフの直後に、続く行が空行でなければ空行を1つ補う。
  */
@@ -182,7 +183,7 @@ export function parseWithSectionNumbering(filePaths, parseFn, options = {}) {
 
 /**
  * 原稿用紙換算（cols字詰めで何行・何字か）を { rows, chars } で返す。
- * メタ行、前後の余白行、場面区切りの行は数えない。視点行【】は章タイトルとして1行と数え、【】内は字数に含めない。
+ * メタ行、前後の余白行、場面区切りの行は数えない。視点行【】は章タイトルとして1行と数え、【】内は字数に含めない（後ろに足した Subhead: は含める）。
  * 青空文庫の改ページ・字下げ範囲の注記行は数えず、行内の注記は除いて数える。
  * 印刷時の改ページや挿入行は含めない連続換算で、出力実態に合わせた枚数は check-manuscript-format が数える。
  */
@@ -190,7 +191,7 @@ export function countGenkoRows(lines, cols) {
   let rows = 0;
   let chars = 0;
 
-  const bodyLines = trimBlankEdges(lines.filter((l) => !isMetaLine(l)))
+  const bodyLines = trimBlankEdges(foldSubheads(lines).filter((l) => !isMetaLine(l)))
     .map(aozoraBodyText)
     .filter((l) => l !== null);
   for (const rawLine of bodyLines) {
@@ -233,7 +234,7 @@ export function logSections(sections, inputFiles) {
 /**
  * 複数の原稿ファイルを1本の行配列にマージする。【】の見出しは通し番号【1】【2】…に置き換え、
  * 見出しで始まらない継続ファイルの前には fileSeparatorLines(sceneBreak) を挟む。エピグラフは見出しの後ろへ移す。
- * keepEpigraphs: Epigraph: 行を残す（既定は除く）。
+ * keepEpigraphs: Lead: 行を残す（既定は除く）。
  * blankAfterHeading: 視点行（章見出し）の直後に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）。
  */
 export function mergeManuscriptLines(
@@ -415,6 +416,7 @@ if (import.meta.vitest) {
     });
     test('視点行は長さによらず1行で、【】の中は字数に入れない', () => {
       expect(countGenkoRows([`【${'あ'.repeat(30)}】`, '本文'], 20)).toEqual({ rows: 2, chars: 2 });
+      expect(countGenkoRows(['Subhead: 花子', '【】', '本文'], 20)).toEqual({ rows: 2, chars: 5 });
     });
     test('ルビ・傍点の記法を外し、ぶら下げを効かせて折り返す', () => {
       expect(countGenkoRows([`|漢字《かんじ》${'あ'.repeat(18)}。`], 20)).toEqual({ rows: 1, chars: 21 });
@@ -446,49 +448,49 @@ if (import.meta.vitest) {
 
   describe('moveEpigraphsAfterHeading', () => {
     test('【】より前に書かれたエピグラフを見出しの直後へ移す', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', 'Epigraph: 二', '', '【】', '本文'])).toEqual([
+      expect(moveEpigraphsAfterHeading(['Lead: 一', 'Lead: 二', '', '【】', '本文'])).toEqual([
         '',
         '【】',
-        'Epigraph: 一',
-        'Epigraph: 二',
+        'Lead: 一',
+        'Lead: 二',
         '本文',
       ]);
     });
     test('見出しが来ないまま本文が始まるなら本文の前に置く', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '', '続き', '【】', '本文'])).toEqual([
+      expect(moveEpigraphsAfterHeading(['Lead: 一', '', '続き', '【】', '本文'])).toEqual([
         '',
-        'Epigraph: 一',
+        'Lead: 一',
         '続き',
         '【】',
         '本文',
       ]);
     });
     test('blankAfter: 見出しの直後へ移したエピグラフと本文の間に空行を補う（原稿側にあれば補わない）', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '本文'], { blankAfter: true })).toEqual([
+      expect(moveEpigraphsAfterHeading(['Lead: 一', '【】', '本文'], { blankAfter: true })).toEqual([
         '【】',
-        'Epigraph: 一',
+        'Lead: 一',
         '',
         '本文',
       ]);
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '', '本文'], { blankAfter: true })).toEqual([
+      expect(moveEpigraphsAfterHeading(['Lead: 一', '【】', '', '本文'], { blankAfter: true })).toEqual([
         '【】',
-        'Epigraph: 一',
+        'Lead: 一',
         '',
         '本文',
       ]);
     });
     test('複数の章を含む行列では、それぞれ直後の見出しへ移す', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', '【】', '本文', 'Epigraph: 二', '【】', '本文'])).toEqual([
+      expect(moveEpigraphsAfterHeading(['Lead: 一', '【】', '本文', 'Lead: 二', '【】', '本文'])).toEqual([
         '【】',
-        'Epigraph: 一',
+        'Lead: 一',
         '本文',
         '【】',
-        'Epigraph: 二',
+        'Lead: 二',
         '本文',
       ]);
     });
     test('本文のないファイルでもエピグラフは捨てない', () => {
-      expect(moveEpigraphsAfterHeading(['Epigraph: 一', ''])).toEqual(['', 'Epigraph: 一']);
+      expect(moveEpigraphsAfterHeading(['Lead: 一', ''])).toEqual(['', 'Lead: 一']);
     });
   });
 
@@ -513,15 +515,15 @@ if (import.meta.vitest) {
     });
 
     test('keepEpigraphs: エピグラフを章見出しの直後へ移し、見出しがなければ本文の前に置く', () => {
-      withTmpFiles(['Epigraph: 引用——出典\n【】\n本文\n', 'Epigraph: 二\n\n続き\n'], (paths) => {
+      withTmpFiles(['Lead: 引用\nSource: 出典\n【】\n本文\n', 'Lead: 二\n\n続き\n'], (paths) => {
         expect(mergeManuscriptLines(paths, { keepEpigraphs: true })).toEqual([
           '【1】',
-          'Epigraph: 引用——出典',
+          'Lead: 引用\uF120出典',
           '本文',
           '',
           '◇◇◇',
           '',
-          'Epigraph: 二',
+          'Lead: 二',
           '続き',
         ]);
         expect(mergeManuscriptLines(paths)).toEqual(['【1】', '本文', '', '◇◇◇', '', '続き']);
