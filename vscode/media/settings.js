@@ -480,6 +480,15 @@
     );
   }
 
+  // 打ちかけ（input 済みで change 前）の欄。確定済みの値を、外から変わった状態の上に戻さないために持つ
+  let uncommittedField = null;
+  form.addEventListener('input', (e) => {
+    uncommittedField = /** @type {HTMLElement} */ (e.target).dataset?.field ?? null;
+  });
+  form.addEventListener('change', () => {
+    uncommittedField = null;
+  });
+
   /**
    * 状態から画面を作り直す。フォーカスのある欄は data-field で同じ欄に戻し、入力中の値と位置も戻す
    * （入力欄は change で書くので、打ちかけの値はまだ状態に入っていない）
@@ -487,7 +496,7 @@
   function render() {
     const active = /** @type {HTMLInputElement | null} */ (document.activeElement);
     const focusId = active?.dataset?.field;
-    const typed = focusId && active.type !== 'checkbox' ? active.value : null;
+    const typed = focusId && focusId === uncommittedField && active.type !== 'checkbox' ? active.value : null;
     const selection = focusId && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
     const scroll = window.scrollY;
 
