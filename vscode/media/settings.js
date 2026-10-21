@@ -464,7 +464,13 @@
       h('option', { value: '', textContent: '出力を追加…' }),
       formats.map((f) => h('option', { value: f.format, textContent: formatLabel(f) })),
     );
-    addSelect.addEventListener('change', () => addSelect.value && addOutput(addSelect.value));
+    addSelect.addEventListener('change', () => {
+      const format = addSelect.value;
+      if (!format) return;
+      // render() がフォーカス中の欄の値を復元するため、追加前に選択を戻す
+      addSelect.value = '';
+      addOutput(format);
+    });
     return section(
       '出力',
       '「出力を作る」や novel build で作るもの。項目の「既定」は書かない（コマンドの既定や作品の項目を使う）',
