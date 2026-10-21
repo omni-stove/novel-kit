@@ -279,9 +279,19 @@ export function layoutRuby(n, m, capBefore = 0, capAfter = 0) {
 }
 
 // 生成済みの span を1単位にするのは、縦中横などの1字分の箱を割って点を打ち分けないため
-const EMPHASIS_UNIT_RE = /\uE002[\uE010-\uEFFF]\uE002|<span[^>]*>[^<]*<\/span>|&[^;]+;|./gsu;
+const EMPHASIS_UNIT_RE = /\uE002[\uE010-\uEFFF]\uE002|<span[^>]*>[^<]*<\/span>|&[^;]+;|.\p{M}*/gsu;
 // text-emphasis と同じく約物・空白には点を打たない。私用領域は太字の目印
 const NO_EMPHASIS_RE = /^[\p{P}\p{Z}\p{Cc}\p{Co}]+$/u;
+
+const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const unitText = (unit) =>
+  unit
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(?:#x([0-9a-f]+)|#(\d+)|(\w+));/gi, (m, hex, dec, name) => {
+      if (name) return HTML_ENTITIES[name.toLowerCase()] ?? m;
+      const cp = hex ? parseInt(hex, 16) : Number(dec);
+      return cp <= 0x10ffff ? String.fromCodePoint(cp) : m;
+    });
 
 const cssNum = (v) => String(Math.round(v * 1000) / 1000);
 
@@ -460,7 +470,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     // text-emphasis の圏点は Chromium が行の箱に含めて行送りを広げ、字詰めの版面が崩れるため、
     // 1字ずつの箱にレイアウトに影響しない点を CSS（lib/html.mjs の .emphasis-dot）で描く
     return html.replace(EMPHASIS_UNIT_RE, (unit) =>
-      !unit.startsWith('\uE002') && NO_EMPHASIS_RE.test(unit.replace(/<[^>]+>/g, ''))
+      !unit.startsWith('\uE002') && NO_EMPHASIS_RE.test(unitText(unit))
         ? unit
         : `<span class="emphasis-dot">${unit}</span>`,
     );
