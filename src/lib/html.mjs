@@ -113,6 +113,26 @@ export const VERTICAL_GLYPH_CSS = `
       text-emphasis-position: over right;
     }
 
+    /* span の箱はフォントの ascent/descent ぶん字面（1em）より太く、その端に揃えると
+       点が隣の行へ食い込むため、字の中心から 0.5em（点の 1em）外に置く。
+       rt と同じく、点の箱を段の端より外に置くと段組みのプレビューで内側へ押し戻されるため、
+       箱は字の中に置いて transform で見かけだけ右へ出す。
+       text-indent は絶対配置の箱にも継承され、字下げした段落で点がずれるため打ち消す。 */
+    .emphasis-dot {
+      position: relative;
+    }
+
+    .emphasis-dot::after {
+      content: "\\FE45";
+      position: absolute;
+      right: 50%;
+      top: 50%;
+      font-size: 0.5em;
+      line-height: 1;
+      text-indent: 0;
+      transform: translate(calc(100% + 1em), -50%);
+    }
+
     ruby {
       ruby-align: center;
       position: relative;

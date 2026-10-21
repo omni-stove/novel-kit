@@ -293,3 +293,45 @@ button:disabled {
   break-inside: auto;
   white-space: pre-wrap;
 }
+
+/* スクロール表示（preview.js の layoutScroll）。用紙を置かず、本文の段をページで割らずに縦に流す */
+#viewport.scroll {
+  background: var(--sheet-bg);
+}
+
+/* 最後の段落も表示領域の上のほうまで送って読めるようにする */
+#viewport.scroll #stage {
+  margin-bottom: 40vh;
+}
+
+#viewport.scroll #flow {
+  position: static;
+  column-count: auto;
+}
+
+/* 改ページの位置（章・部の頭）は、前との間を空けて区切りを見せる */
+#viewport.scroll #flow .section.page-break:not(:first-child),
+#viewport.scroll #flow .page-break-marker,
+#viewport.scroll #flow .chapter:not(:first-child),
+#viewport.scroll #flow .part-page:not(:first-child) {
+  margin-block-start: 4em;
+}
+
+#viewport.scroll #flow .title-page,
+#viewport.scroll #flow .synopsis-page,
+#viewport.scroll #flow .characters-page {
+  margin-block-end: 4em;
+}
+
+/* PDF 用スタイルが扉・エピグラフに与えている1ページぶんの高さと上の余白は、ページが無いので外す */
+#viewport.scroll #flow .title-page,
+#viewport.scroll #flow .part-page,
+#viewport.scroll #flow .epigraph-page .epigraph-source,
+#viewport.scroll #flow .epigraph-page .epigraph-line {
+  height: auto;
+}
+
+#viewport.scroll #flow .title-page,
+#viewport.scroll #flow .part-page {
+  padding-top: 0;
+}

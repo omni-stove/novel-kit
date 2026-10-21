@@ -211,6 +211,10 @@
         "edit": {
           "type": "boolean",
           "description": "プレビュー上で段落をクリックして編集する"
+        },
+        "mode": {
+          "enum": ["page", "scroll"],
+          "description": "表示の形（page: 用紙に組んでページで見せる / scroll: カクヨム・小説家になろうのように横書きでページを区切らず縦に流す）"
         }
       }
     }
