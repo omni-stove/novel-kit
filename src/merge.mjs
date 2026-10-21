@@ -37,6 +37,7 @@ import {
   isEpigraphLine,
   isSeparator,
   isViewpointLine,
+  parseEpigraphLine,
   SCENE_BREAK_MARK,
   separatorMark,
   stripInlineMarkup,
@@ -74,8 +75,9 @@ export function mergeLines(filePaths, partFirstIndices = null, { sceneBreak = SC
 
     for (const line of moveEpigraphsAfterHeading(trimBlankEdges(lines), { blankAfter: true })) {
       if (isEpigraphLine(line)) {
-        // 出力は最終成果物なので Epigraph: プレフィックスは外す
-        allLines.push(line.replace(/^Epigraph:\s*/, ''));
+        // 出力は最終成果物なので Lead: / Source: の記法は外し、紙面と同じく——で出典を続ける
+        const { quote, source } = parseEpigraphLine(line, { aozora: false });
+        allLines.push(source === null ? quote : `${quote}——${source}`);
       } else if (isViewpointLine(line)) {
         const label = partBoundarySet ? `${partNumber}-${sectionNumber}` : sectionNumber;
         allLines.push(applyViewpointLabel(line, label));
@@ -172,7 +174,7 @@ if (import.meta.vitest) {
       expect(merge(['【】\n本文一\n\n\n', '\n続き\n'])).toEqual(['【1】', '本文一', '', '◇◇◇', '', '続き']);
     });
     test('エピグラフはプレフィックスを外して見出しの直後に置き、本文との間を1行空ける', () => {
-      expect(merge(['Epigraph: 引用——出典\n【】\n本文\n'])).toEqual(['【1】', '引用——出典', '', '本文']);
+      expect(merge(['Lead: 引用\nSource: 出典\n【】\n本文\n'])).toEqual(['【1】', '引用——出典', '', '本文']);
     });
     test('部境界を渡すと「部-節」で採番し直し、部の頭には◇◇◇を挟まない', () => {
       expect(merge(['【】\n一\n', '【】\n二\n', '三\n'], [2])).toEqual([

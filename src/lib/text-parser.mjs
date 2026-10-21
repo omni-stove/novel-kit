@@ -37,18 +37,67 @@ export function isMemoLine(line) {
   return line.startsWith('Memo:');
 }
 
+/**
+ * 章頭に本文と別に組む文の行か（Lead: 文。エピグラフなど）。
+ * 直後（空行を挟んでもよい）の Source: 行がその出典になる（foldSources で1行にまとめてから読む）。
+ */
 export function isEpigraphLine(line) {
-  return line.startsWith('Epigraph:');
+  return line.startsWith('Lead:');
 }
 
-export function parseEpigraphLine(line) {
-  const text = normalizeAozoraInline(line.replace(/^Epigraph:\s*/, ''));
-  // 引用本文の中にもダッシュ（——）が使われうるため、最後の——を引用元との区切りとする
-  const idx = text.lastIndexOf('——');
-  if (idx === -1) return { quote: text.trim(), source: null };
-  const source = text.slice(idx + 2).trim();
-  if (!source) return { quote: text.trim(), source: null };
-  return { quote: text.slice(0, idx).trim(), source };
+export function isSourceLine(line) {
+  return line.startsWith('Source:');
+}
+
+/** foldSources が Lead: の行の後ろに出典を足すときの区切り。原稿には現れない私用領域の文字 */
+const SOURCE_MARK = '\uF120';
+
+/**
+ * Source: の行の中身を、その前の Lead: の行（間は空行だけ）の後ろに SOURCE_MARK で区切って足した行列を返す。
+ * 行数は変えないので、返した行列の添字は元の行番号のまま使える。Source: の行そのものは残る（メタ行として落とす側に任せる）。
+ * 前が Lead: でない Source: の行は使わない。
+ */
+export function foldSources(lines) {
+  const out = [...lines];
+  let lead = -1;
+  lines.forEach((line, i) => {
+    if (isEpigraphLine(line)) lead = i;
+    else if (isSourceLine(line) && lead !== -1) {
+      const source = line.replace(/^Source:\s*/, '').trim();
+      if (source) out[lead] = `${out[lead].trimEnd()}${SOURCE_MARK}${source}`;
+      lead = -1;
+    } else if (line.trim() !== '') lead = -1;
+  });
+  return out;
+}
+
+/**
+ * foldSources を通した Lead: の行を本文と出典に分ける。aozora: false なら青空文庫の注記を読み替えない（txt に書き出す split / merge）。
+ * 出典が無ければ source は null
+ */
+export function parseEpigraphLine(line, { aozora = true } = {}) {
+  const [quote, source] = line.replace(/^Lead:\s*/, '').split(SOURCE_MARK);
+  const read = (t) => (aozora ? normalizeAozoraInline(t) : t).trim();
+  return { quote: read(quote), source: source === undefined ? null : read(source) };
+}
+
+/** foldSources を通した Lead: の行を、原稿の Lead: / Source: の行に戻す（split の章ファイル用） */
+export function unfoldSources(line) {
+  if (!isEpigraphLine(line)) return [line];
+  const { quote, source } = parseEpigraphLine(line, { aozora: false });
+  return source === null ? [`Lead: ${quote}`] : [`Lead: ${quote}`, `Source: ${source}`];
+}
+
+/**
+ * 章見出しに添える行か（Subhead: 名前。視点人物名など、章ごとに添える短い文）。
+ * 日本語の出力では視点行【】の後ろに足し（foldSubheads）、英語の出力では章ヘッダの章題の下に組む。
+ */
+export function isSubheadLine(line) {
+  return line.startsWith('Subhead:');
+}
+
+export function parseSubheadLine(line) {
+  return normalizeAozoraInline(line.replace(/^Subhead:\s*/, '')).trim();
 }
 
 export function isViewpointLine(line) {
@@ -66,9 +115,23 @@ export function applyViewpointLabel(line, label) {
   return title ? line.replace(/^【.*】/, `【${label}　${title}】`) : line.replace(/^【】/, `【${label}】`);
 }
 
-/** 本文として組まない行か（Memo: は出力しないメモ、Epigraph: は章頭に別に組む） */
+/**
+ * Subhead: の行の中身を、最初の視点行【】の後ろに全角空白で区切って足した行列を返す（日本語の出力用）。
+ * 行数は変えないので、返した行列の添字は元の行番号のまま使える。Subhead: の行そのものは残る（メタ行として落とす側に任せる）。
+ */
+export function foldSubheads(lines) {
+  const subheads = lines
+    .filter(isSubheadLine)
+    .map((l) => l.replace(/^Subhead:\s*/, '').trim())
+    .filter(Boolean);
+  const target = lines.findIndex(isViewpointLine);
+  if (subheads.length === 0 || target === -1) return lines;
+  return lines.map((l, i) => (i === target ? [l.trimEnd(), ...subheads].join('　') : l));
+}
+
+/** 本文として組まない行か（Memo: は出力しないメモ、Lead:（と出典の Source:）と Subhead: は章頭に別に組む） */
 export function isMetaLine(line) {
-  return isMemoLine(line) || isEpigraphLine(line);
+  return isMemoLine(line) || isEpigraphLine(line) || isSourceLine(line) || isSubheadLine(line);
 }
 
 function analyzeLines(lines) {
@@ -79,11 +142,13 @@ function analyzeLines(lines) {
     hasViewpointStart,
     hasEmptyViewpointStart: hasViewpointStart && /^【】/.test(contentLines[0]),
     firstContentLine: contentLines.length > 0 ? contentLines[0] : null,
-    epigraphs: lines.filter((l) => isEpigraphLine(l)).map((l) => parseEpigraphLine(l)),
+    epigraphs: foldSources(lines)
+      .filter((l) => isEpigraphLine(l))
+      .map((l) => parseEpigraphLine(l)),
   };
 }
 
-/** 残す行の元の添字（0始まり）。メタ行を落とす（keepEpigraphs なら Epigraph: の行は残す）。selectBodyLines と同じ条件 */
+/** 残す行の元の添字（0始まり）。メタ行を落とす（keepEpigraphs なら Lead: の行は残す）。selectBodyLines と同じ条件 */
 function selectBodyLineIndices(lines, { keepEpigraphs = false } = {}) {
   const result = [];
   for (let i = 0; i < lines.length; i++) {
@@ -95,7 +160,8 @@ function selectBodyLineIndices(lines, { keepEpigraphs = false } = {}) {
 
 /** 本文の行を返す。青空文庫の注記は行の中だけ読み替える（改ページ・字下げなど行の単位の注記は、組む側が parseAozoraLine で読む） */
 function selectBodyLines(lines, opts = {}) {
-  return selectBodyLineIndices(lines, opts).map((i) => normalizeAozoraInline(lines[i]));
+  const folded = foldSubheads(foldSources(lines));
+  return selectBodyLineIndices(lines, opts).map((i) => normalizeAozoraInline(folded[i]));
 }
 
 export function trimBlankEdges(lines) {
@@ -675,14 +741,17 @@ export function getBodyLinesFromContent(content, opts = {}) {
 /**
  * 本文として組む行（メタ行を除く）を返す。返り値は { lines, indices, hasViewpointStart }。
  *   indices: 返した各行の元の行番号（0始まり。プレビューで段落から元テキストの行を引くため）
- *   keepEpigraphs: Epigraph: の行も残す
+ *   keepEpigraphs: Lead: の行も残す（Source: の出典は foldSources で足してあるので parseEpigraphLine で読む）
  *   aozora: false なら青空文庫の注記を読み替えずに原稿のまま返す（txt に書き出す split / merge）
+ *   subheadsInViewpoint: false なら Subhead: の中身を視点行に足さない（章ヘッダに別に組む英語の出力）
  */
-export function getBodyLines(lines, { keepEpigraphs = false, aozora = true } = {}) {
+export function getBodyLines(lines, { keepEpigraphs = false, aozora = true, subheadsInViewpoint = true } = {}) {
   const { hasViewpointStart } = analyzeLines(lines);
   const indices = selectBodyLineIndices(lines, { keepEpigraphs });
+  const folded = foldSources(lines);
+  const source = subheadsInViewpoint ? foldSubheads(folded) : folded;
   return {
-    lines: indices.map((i) => (aozora ? normalizeAozoraInline(lines[i]) : lines[i])),
+    lines: indices.map((i) => (aozora ? normalizeAozoraInline(source[i]) : source[i])),
     indices,
     hasViewpointStart,
   };
@@ -862,14 +931,15 @@ if (import.meta.vitest) {
     });
   });
 
-  describe('isMemoLine / isEpigraphLine', () => {
+  describe('isMemoLine / isEpigraphLine / isSourceLine', () => {
     test('プレフィックス一致でtrue', () => {
       expect(isMemoLine('Memo: なにか')).toBe(true);
-      expect(isEpigraphLine('Epigraph: 引用')).toBe(true);
+      expect(isEpigraphLine('Lead: 引用')).toBe(true);
+      expect(isSourceLine('Source: 出典')).toBe(true);
     });
     test('プレフィックスがなければfalse', () => {
       expect(isMemoLine('memo: 小文字')).toBe(false);
-      expect(isEpigraphLine(' Epigraph: 先頭空白')).toBe(false);
+      expect(isEpigraphLine(' Lead: 先頭空白')).toBe(false);
     });
   });
 
@@ -883,38 +953,21 @@ if (import.meta.vitest) {
     });
   });
 
-  describe('parseEpigraphLine', () => {
-    test('\u5F15\u7528\u672C\u6587\u3068\u5F15\u7528\u5143\u3092 \u2014\u2014\u3067\u5206\u5272', () => {
-      expect(
-        parseEpigraphLine(
-          'Epigraph: \u6211\u601D\u3046\u3001\u3086\u3048\u306B\u6211\u3042\u308A\u2014\u2014\u30C7\u30AB\u30EB\u30C8',
-        ),
-      ).toEqual({
-        quote: '\u6211\u601D\u3046\u3001\u3086\u3048\u306B\u6211\u3042\u308A',
-        source: '\u30C7\u30AB\u30EB\u30C8',
-      });
+  describe('Lead: / Source:', () => {
+    test('Source: は前の Lead:（間は空行だけ）の出典になり、——で分けたりはしない', () => {
+      const lines = foldSources(['Lead: 「だとしたら——」', '', 'Source: ドストエフスキー', 'Lead: 引用のみ']);
+      expect(lines).toHaveLength(4);
+      expect(parseEpigraphLine(lines[0])).toEqual({ quote: '「だとしたら——」', source: 'ドストエフスキー' });
+      expect(parseEpigraphLine(lines[3])).toEqual({ quote: '引用のみ', source: null });
     });
-    test('\u5F15\u7528\u5143\u304C\u306A\u3051\u308C\u3070source\u306Fnull', () => {
-      expect(parseEpigraphLine('Epigraph: \u5F15\u7528\u306E\u307F')).toEqual({
-        quote: '\u5F15\u7528\u306E\u307F',
-        source: null,
-      });
+    test('前が Lead: でない Source: は使わない', () => {
+      expect(foldSources(['Lead: 一', '本文', 'Source: 出典'])).toEqual(['Lead: 一', '本文', 'Source: 出典']);
     });
-    test('\u2014\u2014\u304C\u8907\u6570\u3042\u308C\u3070\u6700\u5F8C\u306E\u2014\u2014\u3067\u5206\u5272\u3059\u308B\uFF08\u5F15\u7528\u672C\u6587\u4E2D\u306E\u30C0\u30C3\u30B7\u30E5\u3092\u4FDD\u3064\uFF09', () => {
-      expect(
-        parseEpigraphLine(
-          'Epigraph: \u300C\u3060\u3068\u3057\u305F\u3089\u2014\u2014\u300D\u2014\u2014\u30C9\u30B9\u30C8\u30A8\u30D5\u30B9\u30AD\u30FC',
-        ),
-      ).toEqual({
-        quote: '\u300C\u3060\u3068\u3057\u305F\u3089\u2014\u2014\u300D',
-        source: '\u30C9\u30B9\u30C8\u30A8\u30D5\u30B9\u30AD\u30FC',
-      });
-    });
-    test('\u672B\u5C3E\u306E\u2014\u2014\u306F\u5F15\u7528\u672C\u6587\u306E\u4E00\u90E8\u3068\u3057\u3066\u6B8B\u3057source\u306Fnull', () => {
-      expect(parseEpigraphLine('Epigraph: \u8A00\u3044\u304B\u3051\u3066\u2014\u2014')).toEqual({
-        quote: '\u8A00\u3044\u304B\u3051\u3066\u2014\u2014',
-        source: null,
-      });
+    test('unfoldSources は原稿の Lead: / Source: の行に戻す', () => {
+      const [lead] = foldSources(['Lead: 引用', 'Source: 出典']);
+      expect(unfoldSources(lead)).toEqual(['Lead: 引用', 'Source: 出典']);
+      expect(unfoldSources('Lead: 引用のみ')).toEqual(['Lead: 引用のみ']);
+      expect(unfoldSources('本文')).toEqual(['本文']);
     });
   });
 
@@ -1148,7 +1201,7 @@ if (import.meta.vitest) {
   describe('parseTextFile epigraph', () => {
     test('視点行＋エピグラフの直後には空行を1つ挟む', () => {
       const tmp = join(tmpdir(), `epi-vp-${Date.now()}.txt`);
-      writeFileSync(tmp, 'Epigraph: 引用——出典\n【】\n本文1行目\n');
+      writeFileSync(tmp, 'Lead: 引用\nSource: 出典\n【】\n本文1行目\n');
       try {
         const { html } = parseTextFile(tmp, { vertical: false });
         expect(html).toContain('epigraph-page');
@@ -1160,7 +1213,7 @@ if (import.meta.vitest) {
 
     test('視点行＋エピグラフの後に原稿側の空行があっても空行は二重にならない', () => {
       const tmp = join(tmpdir(), `epi-vp-blank-${Date.now()}.txt`);
-      writeFileSync(tmp, 'Epigraph: 引用——出典\n【】\n\n本文1行目\n');
+      writeFileSync(tmp, 'Lead: 引用\nSource: 出典\n【】\n\n本文1行目\n');
       try {
         const { html } = parseTextFile(tmp, { vertical: false });
         expect(html).toMatch(/<\/div>\n<p class="empty">&nbsp;<\/p>\n<p[^>]*>本文1行目<\/p>/);
@@ -1171,7 +1224,7 @@ if (import.meta.vitest) {
 
     test('本文＋引用元が1行に収まるエピグラフは1行にまとめる', () => {
       const tmp = join(tmpdir(), `epi-oneline-${Date.now()}.txt`);
-      writeFileSync(tmp, 'Epigraph: 引用文——出典\n【】\n本文1行目\n');
+      writeFileSync(tmp, 'Lead: 引用文\nSource: 出典\n【】\n本文1行目\n');
       try {
         const { html } = parseTextFile(tmp, { vertical: false, chars: 30 });
         expect(html).toContain('<p class="epigraph-line">引用文——出典</p>');
@@ -1183,7 +1236,7 @@ if (import.meta.vitest) {
 
     test('1行に収まらないエピグラフは従来どおり2行に分ける', () => {
       const tmp = join(tmpdir(), `epi-twoline-${Date.now()}.txt`);
-      writeFileSync(tmp, 'Epigraph: 引用文——出典\n【】\n本文1行目\n');
+      writeFileSync(tmp, 'Lead: 引用文\nSource: 出典\n【】\n本文1行目\n');
       try {
         const { html } = parseTextFile(tmp, { vertical: false, chars: 7 });
         expect(html).toContain('epigraph-quote');
@@ -1196,7 +1249,7 @@ if (import.meta.vitest) {
 
     test('視点行なしでもエピグラフの直後には空行を1つ挟む', () => {
       const tmp = join(tmpdir(), `epi-novp-${Date.now()}.txt`);
-      writeFileSync(tmp, 'Epigraph: 引用——出典\n本文1行目\n');
+      writeFileSync(tmp, 'Lead: 引用\nSource: 出典\n本文1行目\n');
       try {
         const { html } = parseTextFile(tmp, { vertical: false });
         expect(html).toMatch(
@@ -1253,23 +1306,48 @@ if (import.meta.vitest) {
   });
 
   describe('本文として組まない行', () => {
-    test('Memo: と Epigraph: はメタ行', () => {
+    test('Memo: と Lead: と Source: と Subhead: はメタ行', () => {
       expect(isMetaLine('Memo: x')).toBe(true);
-      expect(isMetaLine('Epigraph: x')).toBe(true);
+      expect(isMetaLine('Lead: x')).toBe(true);
+      expect(isMetaLine('Source: x')).toBe(true);
+      expect(isMetaLine('Subhead: x')).toBe(true);
       expect(isMetaLine('本文')).toBe(false);
+    });
+    test('foldSubheads は Subhead: の中身を最初の視点行の後ろに足し、行数は変えない', () => {
+      expect(foldSubheads(['Subhead: ナディア', 'Subhead: -21Y', '【】', '本文', '【】'])).toEqual([
+        'Subhead: ナディア',
+        'Subhead: -21Y',
+        '【】　ナディア　-21Y',
+        '本文',
+        '【】',
+      ]);
+      expect(foldSubheads(['【夜】　太郎 ', 'Subhead: 花子'])[0]).toBe('【夜】　太郎　花子');
+      expect(foldSubheads(['Subhead: 花子', '本文'])).toEqual(['Subhead: 花子', '本文']);
+    });
+    test('getBodyLines は Subhead: を視点行に足し、subheadsInViewpoint: false なら足さない', () => {
+      const lines = ['Subhead: 花子', '【】', '本文'];
+      expect(getBodyLines(lines).lines).toEqual(['【】　花子', '本文']);
+      expect(getBodyLines(lines, { subheadsInViewpoint: false }).lines).toEqual(['【】', '本文']);
+    });
+    test('parseTextLines は Subhead: を視点行の後ろに組む', () => {
+      expect(parseTextLines(['Subhead: 花子', '【】', '本文']).html).toContain('<p class="viewpoint">【】　花子</p>');
+    });
+    test('parseSubheadLine は Subhead: の後ろを前後の空白を除いて返す', () => {
+      expect(parseSubheadLine('Subhead:   Nadia Solis ')).toBe('Nadia Solis');
+      expect(parseSubheadLine('Subhead:')).toBe('');
     });
     test('stripInlineMarkup は行の単位の注記も数えない', () => {
       expect(stripInlineMarkup('［＃３字下げ］本文')).toBe('本文');
     });
     test('getBodyLines は元の行番号を返し、aozora: false なら注記を読み替えない', () => {
-      const content = 'Memo: x\nEpigraph: 引用\n本文［＃「本文」に傍点］';
+      const content = 'Memo: x\nLead: 引用\n本文［＃「本文」に傍点］';
       expect(getBodyLinesFromContent(content)).toEqual({
         lines: ['《《本文》》'],
         indices: [2],
         hasViewpointStart: false,
       });
       expect(getBodyLinesFromContent(content, { keepEpigraphs: true, aozora: false })).toEqual({
-        lines: ['Epigraph: 引用', '本文［＃「本文」に傍点］'],
+        lines: ['Lead: 引用', '本文［＃「本文」に傍点］'],
         indices: [1, 2],
         hasViewpointStart: false,
       });

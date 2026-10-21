@@ -371,7 +371,7 @@ if (import.meta.vitest) {
       expect(out.map((o) => o.pageBreakBefore)).toEqual([true, false]);
     });
     test('エピグラフは表示行に展開して渡し、直後に空行がなければ1行補う', () => {
-      const out = walk(['【1】', 'Epigraph: 引用——出典', '本文']);
+      const out = walk(['【1】', 'Lead: 引用\uF120出典', '本文']);
       expect(out[1].epigraph).toEqual(['引用——出典']);
       expect(out[2]).toEqual({ line: '', pageBreakBefore: false, epigraph: null });
       expect(out[3].line).toBe('本文');
@@ -390,10 +390,10 @@ if (import.meta.vitest) {
       expect(out.map((o) => o.pageBreakBefore)).toEqual([false, true, false, false]);
     });
     test('エピグラフの直後に空行があれば補わない', () => {
-      expect(walk(['Epigraph: 引用', '', '本文']).map((o) => o.line)).toEqual(['Epigraph: 引用', '', '本文']);
+      expect(walk(['Lead: 引用', '', '本文']).map((o) => o.line)).toEqual(['Lead: 引用', '', '本文']);
     });
     test('1行に収まらないエピグラフは引用行と出典行に分ける', () => {
-      const out = walk([`Epigraph: ${'あ'.repeat(10)}——出典`], { cols: 10 });
+      const out = walk([`Lead: ${'あ'.repeat(10)}\uF120出典`], { cols: 10 });
       expect(out[0].epigraph).toEqual(['あ'.repeat(10), '——出典']);
     });
   });
@@ -403,14 +403,14 @@ if (import.meta.vitest) {
       expect(countGridRows('|漢字《かんじ》12', 3)).toBe(1);
       expect(countGridRows('|漢字《かんじ》123', 3)).toBe(2);
     });
-    test('字数は空白・ふりがな・Epigraph: プレフィックスを含まない', () => {
-      expect(countBodyChars(['　|漢字《かんじ》', 'Epigraph: 引用——出典'])).toBe(8);
+    test('字数は空白・ふりがな・Lead: プレフィックスを含まない', () => {
+      expect(countBodyChars(['　|漢字《かんじ》', 'Lead: 引用\uF120出典'])).toBe(8);
     });
   });
 
   describe('buildBodyXml', () => {
     test('空行・区切り・エピグラフ・本文を段落にし、前後に扉と終了記号を置く', () => {
-      const xml = buildBodyXml(['【1】', 'Epigraph: 引用', '', '本文', '◇◇◇'], {
+      const xml = buildBodyXml(['【1】', 'Lead: 引用', '', '本文', '◇◇◇'], {
         cols: 40,
         headParagraphs: ['<HEAD/>'],
         tailParagraphs: ['<TAIL/>'],
