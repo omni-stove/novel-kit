@@ -99,8 +99,13 @@ export function requireInputFiles(paths, excludeFiles = undefined) {
   return files;
 }
 
-export function resolvePartIndices(tokens, filePaths) {
+/**
+ * 部の境界の指定（ファイル名の先頭の番号か、1始まりのファイル順）を filePaths の添字にする。
+ * 返す値: { indices: 昇順で重複のない添字, missing: どのファイルにも当たらなかった指定 }
+ */
+export function matchPartIndices(tokens, filePaths) {
   const resolved = [];
+  const missing = [];
   for (const tok of tokens) {
     const idxByPrefix = filePaths.findIndex((f) => basename(f).match(/^\d+/)?.[0] === tok);
     if (idxByPrefix >= 0) {
@@ -112,9 +117,16 @@ export function resolvePartIndices(tokens, filePaths) {
       resolved.push(asInt - 1);
       continue;
     }
-    fail(`部境界の値 "${tok}" に対応するファイルが見つかりません`);
+    missing.push(tok);
   }
-  return [...new Set(resolved)].sort((a, b) => a - b);
+  return { indices: [...new Set(resolved)].sort((a, b) => a - b), missing };
+}
+
+/** matchPartIndices の添字。当たらない指定があれば終了する */
+export function resolvePartIndices(tokens, filePaths) {
+  const { indices, missing } = matchPartIndices(tokens, filePaths);
+  if (missing.length > 0) fail(`部境界の値 "${missing[0]}" に対応するファイルが見つかりません`);
+  return indices;
 }
 
 export function findSidecarFile(inputFiles, inputPaths, filename) {
@@ -388,6 +400,10 @@ if (import.meta.vitest) {
     test('プレフィックスに一致しなければ1始まりのファイル順として解釈する', () => {
       const files = ['/x/a.txt', '/x/b.txt', '/x/c.txt'];
       expect(resolvePartIndices(['2'], files)).toEqual([1]);
+    });
+    test('matchPartIndices は当たらない指定を missing に返す', () => {
+      const files = ['/x/010.txt', '/x/020.txt'];
+      expect(matchPartIndices(['020', '099'], files)).toEqual({ indices: [1], missing: ['099'] });
     });
   });
 

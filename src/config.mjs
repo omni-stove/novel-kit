@@ -88,6 +88,12 @@ export function readSceneBreak(raw) {
   return { ja: mark(raw?.sceneBreak), en: mark(raw?.english?.sceneBreak) };
 }
 
+/** 部の境界（"parts"）。ファイル名の先頭の番号の配列で、書いていなければ（空でも）null */
+export function readParts(raw) {
+  const parts = Array.isArray(raw?.parts) ? raw.parts.map(String).filter((p) => p.trim()) : [];
+  return parts.length > 0 ? parts : null;
+}
+
 // 壊れたJSONは例外にする（黙って既定に戻すと、次の保存で中身を上書きしてしまうため）
 export function readSettingsFile(filePath) {
   const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
@@ -96,6 +102,7 @@ export function readSettingsFile(filePath) {
     english: normalizeLayout(raw?.english, { english: true }),
     view: normalizeView(raw?.view),
     sceneBreak: readSceneBreak(raw),
+    parts: readParts(raw),
   };
 }
 
@@ -162,6 +169,7 @@ if (import.meta.vitest) {
           english: DEFAULT_ENGLISH_LAYOUT,
           view: DEFAULT_VIEW,
           sceneBreak: { ja: null, en: null },
+          parts: null,
         });
         writeSettingsFile(file, {
           layout: { chars: 40, lines: 40 },
@@ -203,6 +211,11 @@ if (import.meta.vitest) {
         expect(readSettingsFile(file).sceneBreak).toEqual({ ja: '＊　＊　＊', en: '~ ~ ~' });
         expect(readSettingsFile(file).english.paper).toBe('A5');
       });
+    });
+    test('部の境界は文字列の配列で読み、無いか空なら null', () => {
+      expect(readParts({ parts: ['050', 100] })).toEqual(['050', '100']);
+      expect(readParts({ parts: [] })).toBeNull();
+      expect(readParts({})).toBeNull();
     });
     test('場面区切りの記号は前後の空白を除き、空なら null', () => {
       expect(readSceneBreak({ sceneBreak: '  ◆  ', english: { sceneBreak: ' ' } })).toEqual({ ja: '◆', en: null });

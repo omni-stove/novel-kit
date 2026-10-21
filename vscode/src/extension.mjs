@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, statSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { findProjectRoot, formatTraits, normalizeOutputs, outputPath } from '../../src/build.mjs';
@@ -26,6 +26,7 @@ import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../
 import { parsePageSpec } from '../../src/pdf.mjs';
 import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
+import { createSettingsEditorProvider, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
 import { renderWebviewHtml } from './webview.mjs';
 
 const RENDER_DELAY_MS = 250;
@@ -75,7 +76,7 @@ function layoutFileFor(doc) {
 let warnedLayoutFile = null;
 
 /**
- * 原稿に効いている設定 { layout, english, view, sceneBreak }（日本語・英語のレイアウトと表示設定、場面区切り）。
+ * 原稿に効いている設定 { layout, english, view, sceneBreak, parts }（日本語・英語のレイアウトと表示設定、場面区切り、部の境界）。
  * 設定ファイルが無い・読めないときは既定のプリセットと既定の表示設定（読めないときは1度だけ警告を出す）
  */
 function settingsFor(doc) {
@@ -99,6 +100,7 @@ function settingsFor(doc) {
     english: normalizeLayout(null, { english: true }),
     view: { ...DEFAULT_VIEW },
     sceneBreak: { ja: null, en: null },
+    parts: null,
   };
 }
 
@@ -107,12 +109,12 @@ const isEnglishManuscript = (doc) => detectLanguageOfLines(splitLines(doc.getTex
 
 /**
  * 原稿に効く設定。原稿の言語に応じて日本語か英語のレイアウトを返す。
- * 返す値: { layout, view, english: 英語の原稿か, sceneBreak: 場面区切りの記号（null なら既定） }
+ * 返す値: { layout, view, english: 英語の原稿か, sceneBreak: 場面区切りの記号（null なら既定）, parts: 部の境界（null なら分けない） }
  */
 function resolvedSettingsFor(doc) {
-  const { layout, english, view, sceneBreak } = settingsFor(doc);
+  const { layout, english, view, sceneBreak, parts } = settingsFor(doc);
   const en = isEnglishManuscript(doc);
-  return { layout: en ? english : layout, view, english: en, sceneBreak: en ? sceneBreak.en : sceneBreak.ja };
+  return { layout: en ? english : layout, view, english: en, sceneBreak: en ? sceneBreak.en : sceneBreak.ja, parts };
 }
 
 const layoutFor = (doc) => resolvedSettingsFor(doc).layout;
@@ -242,11 +244,11 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     }
 
     const filePath = session.doc.uri.fsPath;
-    const { layout, view, english, sceneBreak } = resolvedSettingsFor(session.doc);
+    const { layout, view, english, sceneBreak, parts } = resolvedSettingsFor(session.doc);
     session.scope = view.scope;
     const metrics = computeMetrics(layout, { english });
     try {
-      const built = buildDocument({ filePath, scope: session.scope, metrics, linesOf, sceneBreak });
+      const built = buildDocument({ filePath, scope: session.scope, metrics, linesOf, sceneBreak, parts });
       session.files = built.files;
       const presets = allPresets(english);
       const initialReveal = takeInitialReveal();
@@ -437,6 +439,8 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         return deletePreset(msg.name);
       case 'exportPdf':
         return exportPdf(session);
+      case 'openWorkSettings':
+        return openWorkSettings(session.doc?.uri);
     }
   }
 
@@ -790,10 +794,11 @@ async function askBuildOptions(outputs, work) {
 
 /**
  * novel.json の outputs から選んだ出力を、novel build と同じ処理（同梱の CLI の build）で作る。
+ * names: 作る出力名（null なら選ばせる）。
  * 出力先は設定 novelPreview.outDir（ワークスペースのフォルダから。既定は out）。
  * PDF・RTF は終わったら開き（shouldOpen）、それ以外は出力先を知らせる
  */
-async function buildOutputs(uri) {
+async function buildOutputs(uri, names = null) {
   const file = await workConfigFileFor(uri);
   if (!file) return;
   const label = vscode.workspace.asRelativePath(file);
@@ -806,27 +811,29 @@ async function buildOutputs(uri) {
     vscode.window.showErrorMessage(`${label} を読めません: ${err.message}`);
     return;
   }
-  const names = Object.keys(outputs);
-  if (names.length === 0) {
+  const available = Object.keys(outputs);
+  if (available.length === 0) {
     vscode.window.showInformationMessage(`${label} に outputs がありません。`);
     return;
   }
 
   const describe = (name) =>
     name === outputs[name].format ? outputs[name].out : `${outputs[name].format} → ${outputs[name].out}`;
-  const picked = await vscode.window.showQuickPick(
-    [
-      ...names.map((name) => ({ label: name, description: describe(name), names: [name] })),
-      ...(names.length > 1
-        ? [
-            { label: '', kind: vscode.QuickPickItemKind.Separator, names: [] },
-            { label: 'すべての出力', description: names.join(', '), names },
-          ]
-        : []),
-    ],
-    { title: `出力（${label}）` },
-  );
-  if (!picked) return;
+  const picked = Array.isArray(names)
+    ? { names: names.filter((name) => available.includes(name)) }
+    : await vscode.window.showQuickPick(
+        [
+          ...available.map((name) => ({ label: name, description: describe(name), names: [name] })),
+          ...(available.length > 1
+            ? [
+                { label: '', kind: vscode.QuickPickItemKind.Separator, names: [] },
+                { label: 'すべての出力', description: available.join(', '), names: available },
+              ]
+            : []),
+        ],
+        { title: `出力（${label}）` },
+      );
+  if (!picked?.names.length) return;
   const selected = picked.names.map((name) => outputs[name]);
   const options = await askBuildOptions(selected, work);
   if (!options) return;
@@ -853,6 +860,30 @@ async function buildOutputs(uri) {
     'フォルダを開く',
   );
   if (action) vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(rest[0].path));
+}
+
+/**
+ * 作品の設定（novel.json の画面）を開く。uri（エクスプローラー・プレビューから）か、アクティブな原稿から一番近い novel.json。
+ * 原稿から上に無ければ、原稿と同じディレクトリに作るか聞く
+ */
+async function openWorkSettings(uri) {
+  const target = uri instanceof vscode.Uri ? uri : activeManuscript()?.uri;
+  let file =
+    target && basename(target.fsPath) !== CONFIG_FILENAME && target.fsPath.endsWith('.txt')
+      ? layoutFileFor({ uri: target })
+      : null;
+  if (!file && target?.fsPath.endsWith('.txt')) {
+    const created = join(dirname(target.fsPath), CONFIG_FILENAME);
+    const picked = await vscode.window.showInformationMessage(
+      `${vscode.workspace.asRelativePath(dirname(target.fsPath))} から上に ${CONFIG_FILENAME} がありません。作りますか？`,
+      '作る',
+    );
+    if (!picked) return;
+    writeFileSync(created, '{}\n');
+    file = created;
+  }
+  file ??= await workConfigFileFor(uri);
+  if (file) await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(file), SETTINGS_VIEW_TYPE);
 }
 
 /** 選択範囲に |親《るび》 を振る。選択が無ければカーソルの前後に続く漢字に振る */
@@ -915,7 +946,8 @@ const outlineProvider = {
   getChildren(parent) {
     if (parent) return parent.children;
     if (!outlineFile) return [];
-    const { language, chapters } = buildOutline(outlineFile, { linesOf });
+    const { parts } = settingsFor({ uri: vscode.Uri.file(outlineFile) });
+    const { language, chapters } = buildOutline(outlineFile, { linesOf, parts });
     const current = activeManuscript()?.uri.fsPath;
     const fileItem = ({ file, count }) => {
       const item = new vscode.TreeItem(basename(file));
@@ -1067,7 +1099,12 @@ export function activate(ctx) {
     vscode.commands.registerCommand('novelPreview.reopenAsPreview', replaceWithPreview),
     vscode.commands.registerCommand('novelPreview.selectLayout', selectLayout),
     vscode.commands.registerCommand('novelPreview.exportPdf', () => exportPdf()),
-    vscode.commands.registerCommand('novelPreview.build', buildOutputs),
+    vscode.window.registerCustomEditorProvider(
+      SETTINGS_VIEW_TYPE,
+      createSettingsEditorProvider(ctx, { build: buildOutputs, linesOf }),
+    ),
+    vscode.commands.registerCommand('novelPreview.build', (uri) => buildOutputs(uri)),
+    vscode.commands.registerCommand('novelPreview.openWorkSettings', openWorkSettings),
     vscode.commands.registerCommand('novelPreview.insertRuby', insertRuby),
     vscode.commands.registerCommand('novelPreview.insertEmphasis', insertEmphasis),
     vscode.commands.registerCommand('novelPreview.openFromOutline', openFromOutline),

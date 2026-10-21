@@ -4,7 +4,7 @@
  * 英語は src/en-pdf.mjs の generateHtml を使う。
  */
 
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import { buildChapters, generateHtml as generateEnglishHtml, parseEnglishLines } from '../../src/en-pdf.mjs';
 import { detectLanguage } from '../../src/layout.mjs';
 import {
@@ -12,6 +12,7 @@ import {
   computeSectionLabels,
   countGenkoRows,
   getTextFilesFromDir,
+  matchPartIndices,
   SYNOPSIS_FILENAME,
   startsNewChapter,
 } from '../../src/lib/manuscript.mjs';
@@ -34,6 +35,18 @@ export function listWorkFiles(filePath) {
   } catch {
     return [];
   }
+}
+
+/**
+ * 部の境界（novel.json の parts）を作品のファイル（workFiles）の添字にする。PDF 出力と同じく、日本語は novel pdf、
+ * 英語は novel pdf-en の解釈（英語は、まだ訳していないファイルの番号を飛ばす）。
+ * 返す値: 新しい部が始まるファイルの添字（先頭のファイルは含めない）。parts が無ければ null
+ */
+function partStartIndices(workFiles, parts, language) {
+  if (!parts) return null;
+  const tokens =
+    language === 'en' ? parts.filter((tok) => workFiles.some((f) => basename(f).match(/^\d+/)?.[0] === tok)) : parts;
+  return matchPartIndices(tokens, workFiles).indices.filter((i) => i > 0);
 }
 
 /** CSS から @page ブロックを取り除く（名前付き・マージンボックスの入れ子も含む） */
@@ -108,10 +121,16 @@ export function computeStats(fileLines, metrics) {
   };
 }
 
-/** 英語組版（en-pdf.mjs）の HTML。ファイルは章にまとめられるので、段落は data-file でファイルを指す */
-function buildEnglishHtml(fileLines, metrics, sceneBreak) {
+/**
+ * 英語組版（en-pdf.mjs）の HTML。ファイルは章にまとめられるので、段落は data-file でファイルを指す。
+ * partStarts: 新しい部が始まるファイルの添字（null なら部に分けない）
+ */
+function buildEnglishHtml(fileLines, metrics, sceneBreak, partStarts) {
   const m = metrics.layout.margin;
-  const chapters = buildChapters(fileLines.map((lines) => parseEnglishLines(lines)));
+  const chapters = buildChapters(
+    fileLines.map((lines) => parseEnglishLines(lines)),
+    partStarts && [0, ...partStarts],
+  );
   return generateEnglishHtml(
     chapters,
     {
@@ -130,20 +149,23 @@ function buildEnglishHtml(fileLines, metrics, sceneBreak) {
  * scope: 'file' は filePath だけ、'work' は同じディレクトリの本文ファイルすべてを連結する。
  * linesOf: ファイルの行列を返す関数（エディタで開いているファイルは未保存の内容を返すために差し替える）
  * sceneBreak: 場面区切り（* の行）に組む記号（null なら PDF 出力と同じ既定）
+ * parts: 部の境界（novel.json の parts。null なら部に分けない）。章番号を PDF と同じ「部-章」にし、作品全体の表示では部の頭で改ページする
  * 返す値: { files, language, sources: ファイルごとの行列（プレビューで段落を編集するときの元テキスト）, css, body, stats }
  */
-export function buildDocument({ filePath, scope, metrics, linesOf = readLines, sceneBreak = null }) {
+export function buildDocument({ filePath, scope, metrics, linesOf = readLines, sceneBreak = null, parts = null }) {
   const workFiles = listWorkFiles(filePath);
   const inWork = workFiles.includes(filePath);
-  const files = scope === 'work' && inWork ? workFiles : [filePath];
+  const whole = scope === 'work' && inWork;
+  const files = whole ? workFiles : [filePath];
+  const partStarts = inWork ? partStartIndices(workFiles, parts, metrics.language) : null;
   // 単独表示でも章番号は作品全体での通し番号に揃える
-  const labels = inWork ? computeSectionLabels(workFiles) : [];
+  const labels = inWork ? computeSectionLabels(workFiles, partStarts) : [];
   const labelOf = (f) => (inWork ? labels[workFiles.indexOf(f)] : null);
 
   const fileLines = files.map((f) => linesOf(f));
   const html =
     metrics.language === 'en'
-      ? buildEnglishHtml(fileLines, metrics, sceneBreak ?? undefined)
+      ? buildEnglishHtml(fileLines, metrics, sceneBreak ?? undefined, whole ? partStarts : null)
       : generateHtml(
           fileLines.map((lines, i) =>
             parseTextLines(lines, {
@@ -160,6 +182,8 @@ export function buildDocument({ filePath, scope, metrics, linesOf = readLines, s
             lines: metrics.lines,
             chapterBreak: true,
             sceneBreak: sceneBreak ?? undefined,
+            // generateHtml は1始まりのファイル順で受け取る
+            parts: whole && partStarts?.length ? partStarts.map((i) => i + 1) : null,
           },
         );
 
@@ -172,21 +196,24 @@ export function buildDocument({ filePath, scope, metrics, linesOf = readLines, s
   };
 }
 
+/** ファイルの行列が【】の見出しで始まれば、その見出し（【】の中。空なら ''）。始まらなければ null */
+export function headingOf(lines) {
+  const first = lines.find((l) => l.trim() !== '' && !isMetaLine(l));
+  return first && isViewpointLine(first) ? parseViewpointLine(first).title : null;
+}
+
 /**
  * 作品の目次。filePath と同じディレクトリの本文ファイルを、PDF出力と同じ規則で章にまとめる
- * （【】の見出しで始まるファイルから新しい章。番号はプレビューと同じ通し番号）。
+ * （【】の見出しで始まるファイルから新しい章。番号はプレビューと同じで、parts を渡せば「部-章」）。
  * 返す値: { language, chapters }。章: { label, title, file: 先頭のファイル, count, files: [{ file, count }] }。count は日本語は文字数、英語は語数
  */
-export function buildOutline(filePath, { linesOf = readLines } = {}) {
+export function buildOutline(filePath, { linesOf = readLines, parts = null } = {}) {
   const workFiles = listWorkFiles(filePath);
   if (!workFiles.includes(filePath)) return { language: 'ja', chapters: [] };
   const fileLines = workFiles.map((f) => linesOf(f));
   const language = detectLanguageOfLines(fileLines.flat());
-  const labels = computeSectionLabels(workFiles);
-  const heads = fileLines.map((lines) => {
-    const first = lines.find((l) => l.trim() !== '' && !isMetaLine(l));
-    return first && isViewpointLine(first) ? parseViewpointLine(first).title : null;
-  });
+  const labels = computeSectionLabels(workFiles, partStartIndices(workFiles, parts, language));
+  const heads = fileLines.map(headingOf);
   const sections = heads.map((title) => ({ hasViewpointStart: title !== null }));
   const countOf = (lines) => {
     const stats = computeStats([lines], { language, chars: 20, lines: 20 });
@@ -260,6 +287,14 @@ if (import.meta.vitest) {
       });
     });
 
+    test('parts を渡すと部扉を入れて章番号を部ごとに振り直し、まだ無いファイルの番号は飛ばす', () => {
+      withWork({ '010.txt': '【One】\nA.\n', '020.txt': '【Two】\nB.\n', '050.txt': '【Three】\nC.\n' }, (dir) => {
+        const doc = buildDocument({ filePath: join(dir, '010.txt'), scope: 'work', metrics, parts: ['050', '099'] });
+        expect((doc.body.match(/class="part-page"/g) || []).length).toBe(2);
+        expect(doc.body).toContain('Part Two');
+      });
+    });
+
     test('detectLanguageOfLines はメタ行を数えない', () => {
       expect(detectLanguageOfLines(['Memo: Nadia Solis', 'Lead: The Sirens', '私は海を見た。'])).toBe('ja');
       expect(detectLanguageOfLines(['Memo: オーティ', 'I saw the sea.'])).toBe('en');
@@ -311,6 +346,12 @@ if (import.meta.vitest) {
         expect(chapters[0].count).toBe(3);
       });
     });
+    test('parts を渡すと PDF と同じ「部-章」で採番する', () => {
+      withWork({ '010.txt': '【】\n一\n', '020.txt': '【】\n二\n', '050.txt': '【】\n三\n' }, (dir) => {
+        const { chapters } = buildOutline(join(dir, '010.txt'), { parts: ['050'] });
+        expect(chapters.map((ch) => ch.label)).toEqual(['1-1', '1-2', '2']);
+      });
+    });
     test('作品の外のファイル（梗概など）は空', () => {
       withWork({ '010.txt': '【】\n一\n', 'synopsis.txt': '梗概\n' }, (dir) => {
         expect(buildOutline(join(dir, 'synopsis.txt')).chapters).toEqual([]);
@@ -328,6 +369,19 @@ if (import.meta.vitest) {
         expect(doc.body).toContain('【<span class="tcy">2</span>】');
         expect(doc.body).toMatch(/<p class="paragraph-short" data-line="2">/);
         expect(doc.stats.chars).toBe(1);
+      });
+    });
+
+    test('parts を渡すと単独表示でも「部-章」で採番し、作品全体では章ごとでなく部の頭で改ページする', () => {
+      withWork({ '010.txt': '【】\n一\n', '020.txt': '【】\n二\n', '050.txt': '【】\n三\n' }, (dir) => {
+        const single = buildDocument({ filePath: join(dir, '020.txt'), scope: 'file', metrics, parts: ['050'] });
+        expect(single.body).toContain(
+          '【<span class="tcy">1</span><span class="hyphen">－</span><span class="tcy">2</span>】',
+        );
+        const whole = buildDocument({ filePath: join(dir, '010.txt'), scope: 'work', metrics, parts: ['050'] });
+        expect(whole.body).toContain('【<span class="tcy">2</span>】');
+        expect((whole.body.match(/class="section page-break part-section"/g) || []).length).toBe(2);
+        expect(whole.body).not.toContain('class="section page-break"');
       });
     });
 
