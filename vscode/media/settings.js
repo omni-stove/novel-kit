@@ -525,7 +525,15 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
     const variants = languageVariants(family);
     const format = [variants.ja, variants.en].find((f) => f && !used.has(f));
     commit((r) => {
-      outputsObject(r)[format] = true;
+      const outputs = outputsObject(r);
+      if (!(format in outputs)) {
+        outputs[format] = true;
+        return;
+      }
+      // 同じ名前の出力が別の形式で既にあるので、上書きせず別名で足す
+      let n = 2;
+      while (`${format}-${n}` in outputs) n++;
+      outputs[`${format}-${n}`] = { format };
     });
   }
 
