@@ -1,12 +1,44 @@
 // @ts-check
-(() => {
-  const vscode = acquireVsCodeApi();
-  const $ = (id) => /** @type {any} */ (document.getElementById(id));
-  const form = $('form');
+
+/**
+ * 作品の設定（novel.json）のフォームを root に作る。作品の設定の画面（settings-page.js）と、プレビューの中の作品設定の欄で使う。
+ * post(msg): 拡張へメッセージ（update / build / openFile / openText / create）を送る。
+ * scroller: 作り直したあとにスクロール位置を戻す要素（既定は文書全体）。
+ * 返す値の render(state) で、拡張から届いた状態を画面にする
+ */
+// biome-ignore lint/correctness/noUnusedVariables: 別の script（settings-page.js / preview.js）から呼ぶ
+function createWorkSettingsForm(root, post, { scroller = document.scrollingElement } = {}) {
+  root.classList.add('work-settings');
+  const fileLabel = h('span', { className: 'work-file' });
+  const buildButton = h('button', {
+    textContent: '出力を作る…',
+    title: 'novel.json の outputs から選んで出力を作る（novel build と同じ）',
+    onclick: () => post({ type: 'build' }),
+  });
+  const openTextButton = h('button', {
+    textContent: 'テキストで開く',
+    title: 'novel.json をテキストエディタで開く',
+    onclick: () => post({ type: 'openText' }),
+  });
+  const errorBox = h('p', { className: 'work-error', hidden: true });
+  const form = h('div', { className: 'work-form' });
+  root.replaceChildren(
+    h(
+      'header',
+      { className: 'work-head' },
+      h('strong', { textContent: '作品の設定' }),
+      fileLabel,
+      buildButton,
+      openTextButton,
+    ),
+    errorBox,
+    form,
+  );
 
   /**
-   * 拡張から届いた状態。raw: novel.json の中身、fields: 入力欄の定義（work / english / output: format → 項目）、
-   * formats: [{ format, description }]、work: 原稿ファイルの並び（describeWorkFiles）、outputs: { defaultOut, error }
+   * 拡張から届いた状態。file: novel.json の表示名、error: 読めないときの理由、missing: novel.json が無いとき作る場所、
+   * raw: novel.json の中身、fields: 入力欄の定義（work / english / output: format → 項目）、
+   * formats: [{ format, description }]、work: 原稿ファイルの並び（describeWorkFiles）、dirs: 原稿の欄で選べるディレクトリ（manuscriptDirs）、outputs: { defaultOut, error }
    */
   let state = null;
 
@@ -17,7 +49,7 @@
     const raw = clone(state.raw);
     mutate(raw);
     state.raw = raw;
-    vscode.postMessage({ type: 'update', raw });
+    post({ type: 'update', raw });
   }
 
   /** obj の key に value を書く。undefined なら消す */
@@ -117,6 +149,21 @@
         const n = Number(input.value);
         write(input.value.trim() === '' || !Number.isFinite(n) ? undefined : n);
       });
+    } else if (field.key === 'input') {
+      // 複数やファイルを書いた原稿は選択肢に無いので、消さずにその値の選択肢として残す
+      const current = Array.isArray(value) && value.length > 0 ? value.join(', ') : null;
+      const custom = current !== null && !(value.length === 1 && state.dirs.includes(value[0]));
+      input = h(
+        'select',
+        { dataset, title, disabled: isNull },
+        h('option', { value: '', textContent: placeholder ? `既定（${placeholder}）` : '既定' }),
+        state.dirs.map((d) => h('option', { value: d, textContent: d })),
+        custom && h('option', { value: '\0', textContent: current }),
+      );
+      input.value = custom ? '\0' : (current ?? '');
+      input.addEventListener('change', () => {
+        if (input.value !== '\0') write(input.value ? [input.value] : undefined);
+      });
     } else if (field.kind === 'list') {
       input = h('textarea', {
         dataset,
@@ -201,7 +248,7 @@
     const placeholders = { title: raw.title ?? '', author: raw.author ?? '', input: 'en', sceneBreak: '* * *' };
     return section(
       '英語の出力',
-      'pdf-en / rtf-en に使う。空欄なら作品の項目を使う',
+      'pdf-en / rtf-en に使う',
       h(
         'div',
         { className: 'grid' },
@@ -235,12 +282,28 @@
       const tokens = new Set(partTokens(r));
       if (on) tokens.add(state.work.files[i].token);
       else for (const tok of tokens) if (indexOfPart(tok, state.work.files) === i) tokens.delete(tok);
-      assign(r, 'parts', tokens.size > 0 ? [...tokens].sort(byNumber) : undefined);
+      r.parts = [...tokens].sort(byNumber);
     });
   }
 
   function partsSection() {
     const { raw, work } = state;
+    // 境界をまだ選んでいなくても、"parts" があれば部に分ける指定をしたものとして表を出す
+    const enabled = Array.isArray(raw.parts);
+    const toggle = h(
+      'label',
+      {},
+      h('input', {
+        type: 'checkbox',
+        checked: enabled,
+        dataset: { field: 'parts#enabled' },
+        onchange: (e) => commit((r) => assign(r, 'parts', e.target.checked ? [] : undefined)),
+      }),
+      '部に分ける',
+    );
+    const description =
+      'チェックしたファイルから新しい部になり、章番号が「部-章」（部に章が1つなら「部」）になる。PDF・プレビュー・目次・split / merge で同じ番号を使う';
+    if (!enabled) return section('部の境界', null, toggle);
     const tokens = partTokens(raw);
     const rows = [];
     let part = 1;
@@ -278,7 +341,8 @@
 
     return section(
       '部の境界',
-      'チェックしたファイルから新しい部になり、章番号が「部-章」（部に章が1つなら「部」）になる。PDF・プレビュー・目次・split / merge で同じ番号を使う',
+      description,
+      toggle,
       work.error && h('p', { className: 'warning', textContent: `原稿を読めません: ${work.error}` }),
       work.missing.length > 0 &&
         h(
@@ -289,8 +353,7 @@
             textContent: '外す',
             onclick: () =>
               commit((r) => {
-                const left = partTokens(r).filter((t) => !work.missing.includes(t));
-                assign(r, 'parts', left.length > 0 ? left : undefined);
+                r.parts = partTokens(r).filter((t) => !work.missing.includes(t));
               }),
           }),
         ),
@@ -318,10 +381,37 @@
 
   function openFile(e, name) {
     e.preventDefault();
-    vscode.postMessage({ type: 'openFile', name });
+    post({ type: 'openFile', name });
   }
 
   const formatLabel = (f) => (f.description ? `${f.format}（${f.description}）` : f.format);
+
+  const LANGUAGES = [
+    ['ja', '日本語'],
+    ['en', '英語'],
+  ];
+
+  /** format の言語ごとの形式 { ja, en }（英語の形式 <format>-en が無ければ ja だけ） */
+  function languageVariants(format) {
+    const ja = format.replace(/-en$/, '');
+    const en = `${ja}-en`;
+    return state.formats.some((f) => f.format === en) ? { ja, en } : { ja };
+  }
+
+  /** 出力 name の言語を変える。出力名が形式の名前なら、出力名も新しい形式にする（並びは保つ） */
+  function setOutputLanguage(name, format, language) {
+    const next = languageVariants(format)[language];
+    commit((r) => {
+      if (name !== format) return assignOutput(r, name, 'format', next);
+      const entries = Object.entries(outputsObject(r)).map(([n, v]) => {
+        if (n !== name) return [n, v];
+        if (!v || typeof v !== 'object') return [next, v];
+        const { format: _, ...rest } = v;
+        return [next, Object.keys(rest).length > 0 ? rest : true];
+      });
+      r.outputs = Object.fromEntries(entries);
+    });
+  }
 
   /**
    * 出力 format の項目 key を書かなかったときに効く値（入力欄の placeholder にする）。
@@ -344,46 +434,33 @@
     return '';
   }
 
-  /** 出力名を変える（並びは保つ）。空や既にある名前なら変えない */
-  function renameOutput(from, to, input) {
-    const name = to.trim();
-    const outputs = outputsObject(clone(state.raw));
-    if (!name || name === from || name in outputs) {
-      input.value = from;
-      return;
-    }
-    commit((r) => {
-      // format を書いていない出力は名前が形式なので、名前を変える前に format として残す
-      const withFormat = (v) => {
-        if (v && typeof v === 'object') return v.format === undefined ? { format: from, ...v } : v;
-        return v === false || v === null ? v : { format: from };
-      };
-      const entries = Object.entries(outputsObject(r)).map(([n, v]) => (n === from ? [name, withFormat(v)] : [n, v]));
-      r.outputs = Object.fromEntries(entries);
-    });
-  }
-
   function outputCard(name, value) {
-    const { fields, formats, outputs } = state;
+    const { fields, outputs } = state;
     const output = value && typeof value === 'object' ? value : {};
     const format = output.format ?? name;
     const known = fields.output[format];
-    const nameInput = h('input', {
-      type: 'text',
+    const variants = known ? languageVariants(format) : { ja: format };
+    const language = variants.en === format ? 'en' : 'ja';
+    const family = variants.ja;
+    const nameLabel = h('span', {
       className: 'output-name',
-      value: name,
-      dataset: { field: `output.${name}.name` },
-      title: '出力名（novel build <作品> <出力名> で指定する名前）',
+      textContent: name === format ? family : `${name}（${family}）`,
+      title: known ? `novel build <作品> ${name} で作る` : `${format} は未対応の形式`,
     });
-    nameInput.addEventListener('change', () => renameOutput(name, nameInput.value, nameInput));
-    const formatSelect = h(
-      'select',
-      { dataset: { field: `output.${name}.format` }, title: '出力形式' },
-      formats.map((f) => h('option', { value: f.format, textContent: formatLabel(f) })),
-      !known && h('option', { value: format, textContent: `${format}（未対応）` }),
-    );
-    formatSelect.value = format;
-    formatSelect.addEventListener('change', () => commit((r) => assignOutput(r, name, 'format', formatSelect.value)));
+    const taken = (f) => f !== format && name === format && f in outputsObject(clone(state.raw));
+    const languageSelect =
+      variants.en &&
+      h(
+        'select',
+        { dataset: { field: `output.${name}.language` }, title: '言語' },
+        LANGUAGES.map(([lang, label]) =>
+          h('option', { value: lang, textContent: label, disabled: taken(variants[lang]) }),
+        ),
+      );
+    if (languageSelect) {
+      languageSelect.value = language;
+      languageSelect.addEventListener('change', () => setOutputLanguage(name, format, languageSelect.value));
+    }
 
     const outField = {
       key: 'out',
@@ -401,12 +478,12 @@
       h(
         'div',
         { className: 'output-head' },
-        nameInput,
-        formatSelect,
+        nameLabel,
+        languageSelect,
         h('button', {
           textContent: '作る',
           title: 'この出力を作る（novel build と同じ）',
-          onclick: () => vscode.postMessage({ type: 'build', names: [name] }),
+          onclick: () => post({ type: 'build', names: [name] }),
         }),
         h('button', {
           textContent: '削除',
@@ -443,13 +520,20 @@
     );
   }
 
-  /** 出力を足す。出力名は format の名前（既にあれば -2, -3 … を付ける） */
-  function addOutput(format) {
+  /** 出力を足す。出力名は形式の名前で、日本語の形式が既にあれば英語の形式にする */
+  function addOutput(family, used) {
+    const variants = languageVariants(family);
+    const format = [variants.ja, variants.en].find((f) => f && !used.has(f));
     commit((r) => {
       const outputs = outputsObject(r);
-      let name = format;
-      for (let n = 2; name in outputs; n++) name = `${format}-${n}`;
-      outputs[name] = name === format ? true : { format };
+      if (!(format in outputs)) {
+        outputs[format] = true;
+        return;
+      }
+      // 同じ名前の出力が別の形式で既にあるので、上書きせず別名で足す
+      let n = 2;
+      while (`${format}-${n}` in outputs) n++;
+      outputs[`${format}-${n}`] = { format };
     });
   }
 
@@ -458,22 +542,31 @@
     const entries = Array.isArray(raw.outputs)
       ? raw.outputs.map((name) => [name, true])
       : Object.entries(raw.outputs && typeof raw.outputs === 'object' ? raw.outputs : {});
+    const used = new Set(entries.map(([name, value]) => value?.format ?? name));
     const addSelect = h(
       'select',
       { dataset: { field: 'output.add' } },
       h('option', { value: '', textContent: '出力を追加…' }),
-      formats.map((f) => h('option', { value: f.format, textContent: formatLabel(f) })),
+      formats
+        .filter((f) => !f.format.endsWith('-en'))
+        .filter((f) => Object.values(languageVariants(f.format)).some((v) => !used.has(v)))
+        .map((f) =>
+          h('option', {
+            value: f.format,
+            textContent: languageVariants(f.format).en ? `${f.format}（日本語 / 英語）` : formatLabel(f),
+          }),
+        ),
     );
     addSelect.addEventListener('change', () => {
-      const format = addSelect.value;
-      if (!format) return;
+      const family = addSelect.value;
+      if (!family) return;
       // render() がフォーカス中の欄の値を復元するため、追加前に選択を戻す
       addSelect.value = '';
-      addOutput(format);
+      addOutput(family, used);
     });
     return section(
       '出力',
-      '「出力を作る」や novel build で作るもの。項目の「既定」は書かない（コマンドの既定や作品の項目を使う）',
+      '「出力を作る」や novel build で作るもの',
       outputs.error && h('p', { className: 'warning', textContent: outputs.error }),
       entries.map(([name, value]) => outputCard(name, value)),
       h('div', { className: 'output-add' }, addSelect),
@@ -489,24 +582,40 @@
     uncommittedField = null;
   });
 
+  /** novel.json が無いとき（プレビューの中の欄だけ）。dir: 作る場所 */
+  function missingSection(dir) {
+    return section(
+      'novel.json がありません',
+      `${dir} から上に novel.json が無いため、作品の設定はまだありません。`,
+      h('button', { textContent: `${dir} に novel.json を作る`, onclick: () => post({ type: 'create' }) }),
+    );
+  }
+
   /**
    * 状態から画面を作り直す。フォーカスのある欄は data-field で同じ欄に戻し、入力中の値と位置も戻す
    * （入力欄は change で書くので、打ちかけの値はまだ状態に入っていない）
    */
   function render() {
     const active = /** @type {HTMLInputElement | null} */ (document.activeElement);
-    const focusId = active?.dataset?.field;
+    const focusId = form.contains(active) ? active?.dataset?.field : undefined;
     const typed = focusId && focusId === uncommittedField && active.type !== 'checkbox' ? active.value : null;
     const selection = focusId && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
-    const scroll = window.scrollY;
+    const scroll = scroller.scrollTop;
 
-    $('file').textContent = state?.file ?? '';
-    $('error').hidden = !state?.error;
-    $('error').textContent = state?.error ?? '';
-    $('build').disabled = !!state?.error;
-    form.replaceChildren(...(state?.raw ? [workSection(), partsSection(), outputsSection(), englishSection()] : []));
+    fileLabel.textContent = state?.file ?? '';
+    errorBox.hidden = !state?.error;
+    errorBox.textContent = state?.error ?? '';
+    buildButton.disabled = !state?.raw;
+    openTextButton.disabled = !state?.file;
+    form.replaceChildren(
+      ...(state?.raw
+        ? [workSection(), partsSection(), outputsSection(), englishSection()]
+        : state?.missing
+          ? [missingSection(state.missing)]
+          : []),
+    );
 
-    window.scrollTo(0, scroll);
+    scroller.scrollTop = scroll;
     if (!focusId) return;
     const target = /** @type {HTMLInputElement | null} */ (form.querySelector(`[data-field="${CSS.escape(focusId)}"]`));
     if (!target) return;
@@ -519,14 +628,11 @@
     }
   }
 
-  $('open-text').addEventListener('click', () => vscode.postMessage({ type: 'openText' }));
-  $('build').addEventListener('click', () => vscode.postMessage({ type: 'build' }));
-
-  window.addEventListener('message', ({ data }) => {
-    if (data.type !== 'state') return;
-    state = data;
-    render();
-  });
-
-  vscode.postMessage({ type: 'ready' });
-})();
+  return {
+    /** 拡張から届いた状態を画面にする */
+    render(next) {
+      state = next;
+      render();
+    },
+  };
+}

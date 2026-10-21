@@ -3,7 +3,8 @@
  * 部の境界を選ぶための原稿ファイルの並びと章番号、出力の format ごとの項目、out を省いたときの出力先を作る。
  */
 
-import { relative, resolve } from 'node:path';
+import { readdirSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { normalizeOutputs, OUTPUT_FORMATS, outputKeys } from '../../src/build.mjs';
 import { readParts } from '../../src/config.mjs';
 import {
@@ -49,6 +50,28 @@ export function describeWorkFiles(configDir, raw, { linesOf = readLines } = {}) 
     };
   });
   return { files, missing: matched.missing, error: null };
+}
+
+/**
+ * 原稿の欄で選べるディレクトリ。configDir と、その下（3階層まで）で .txt を直に含むディレクトリを、
+ * configDir からのパス（configDir 自身は "."）で返す。. で始まるものと node_modules はたどらない
+ */
+export function manuscriptDirs(configDir, depth = 3) {
+  const dirs = [];
+  const walk = (dir, level) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    if (entries.some((e) => e.isFile() && e.name.endsWith('.txt'))) dirs.push(relative(configDir, dir) || '.');
+    if (level >= depth) return;
+    for (const e of entries)
+      if (e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules') walk(join(dir, e.name), level + 1);
+  };
+  walk(configDir, 0);
+  return dirs.sort((a, b) => (a === '.' ? -1 : b === '.' ? 1 : a.localeCompare(b)));
 }
 
 /** 項目名 → 画面に出す名前 */
@@ -163,14 +186,17 @@ export const serializeWork = (raw) => `${JSON.stringify(raw, null, 2)}\n`;
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
-  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { mkdirSync, mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
+  const { dirname, join } = await import('node:path');
 
   const withWork = (files, fn) => {
     const dir = mkdtempSync(join(tmpdir(), 'novel-settings-'));
     try {
-      for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+      for (const [name, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(dir, name)), { recursive: true });
+        writeFileSync(join(dir, name), content);
+      }
       return fn(dir);
     } finally {
       rmSync(dir, { recursive: true });
@@ -214,7 +240,7 @@ if (import.meta.vitest) {
       expect(Object.keys(fields)).toEqual(OUTPUT_FORMATS);
       const pdf = Object.fromEntries(fields.pdf.map((f) => [f.key, f]));
       expect(pdf.coverless.kind).toBe('boolean');
-      expect(pdf.parts).toMatchObject({ kind: 'list', nullable: true });
+      expect(pdf.parts).toBeUndefined();
       expect(pdf.writingMode).toMatchObject({ kind: 'enum', options: ['vertical', 'horizontal'] });
       expect(pdf.lines).toMatchObject({ kind: 'integer', nullable: true });
       expect(pdf.title).toMatchObject({ kind: 'string', nullable: true });
@@ -228,6 +254,25 @@ if (import.meta.vitest) {
     });
     test('format の説明をスキーマから取る', () => {
       expect(formatDescriptions()).toMatchObject({ pdf: '縦書き/横書き PDF', 'pdf-en': '英語のペーパーバック風 PDF' });
+    });
+  });
+
+  describe('manuscriptDirs', () => {
+    test('.txt を直に含むディレクトリを、設定ファイルのディレクトリからのパスで返す', () => {
+      withWork(
+        {
+          'note.txt': '',
+          'ja/010.txt': '',
+          'en/010.txt': '',
+          'story/part1/010.txt': '',
+          'out/a.pdf': '',
+          '.git/x.txt': '',
+          'node_modules/m/x.txt': '',
+        },
+        (dir) => {
+          expect(manuscriptDirs(dir)).toEqual(['.', 'en', 'ja', join('story', 'part1')]);
+        },
+      );
     });
   });
 

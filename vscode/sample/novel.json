@@ -1,0 +1,48 @@
+{
+  "$schema": "../schemas/novel.schema.json",
+  "id": "sample",
+  "title": "灯台守の手紙",
+  "author": "見本 太郎",
+  "genre": "ファンタジー",
+  "target": "一般",
+  "input": ["ja"],
+  "outputs": {
+    "pdf": true,
+    "pdf-en": true,
+    "epub": true,
+    "split": true
+  },
+  "writingMode": "vertical",
+  "paper": "A4",
+  "orientation": "landscape",
+  "chars": 40,
+  "lines": 40,
+  "english": {
+    "title": "The Lighthouse Keeper's Letters",
+    "author": "Taro Mihon",
+    "input": ["en"],
+    "paper": "6x9in",
+    "orientation": "portrait",
+    "margin": {
+      "top": 17.78,
+      "right": 15.24,
+      "bottom": 15.24,
+      "left": 20.32
+    },
+    "fontSize": 11,
+    "lineHeight": 1.4,
+    "fontFamily": ""
+  },
+  "margin": {
+    "top": 20,
+    "right": 20,
+    "bottom": 25,
+    "left": 20
+  },
+  "fontFamily": "",
+  "view": {
+    "scope": "work",
+    "zoom": "fit",
+    "edit": true
+  }
+}

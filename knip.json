@@ -3,7 +3,13 @@
   "ignoreBinaries": ["biome", "gs", "ditto"],
   "workspaces": {
     "vscode": {
-      "entry": ["src/novel-cli.mjs", "src/pdf-renderer.mjs", "media/preview.js", "media/settings.js"],
+      "entry": [
+        "src/novel-cli.mjs",
+        "src/pdf-renderer.mjs",
+        "media/preview.js",
+        "media/settings.js",
+        "media/settings-page.js"
+      ],
       "ignoreDependencies": ["@vivliostyle/viewer"]
     }
   }

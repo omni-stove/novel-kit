@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ext-build",
+      "type": "shell",
+      "command": "mise run ext-build",
+      "problemMatcher": []
+    },
+    {
+      "label": "ext-watch",
+      "type": "shell",
+      "command": "pnpm --dir vscode run watch",
+      "dependsOn": "ext-build",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "esbuild",
+        "pattern": { "regexp": "^✘ \\[ERROR\\] (.*)$", "message": 1 },
+        "background": {
+          "activesBegin": true,
+          "beginsPattern": "^\\[watch\\] build started",
+          "endsPattern": "^\\[watch\\] build finished"
+        }
+      }
+    }
+  ]
+}

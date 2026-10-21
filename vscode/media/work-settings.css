@@ -1,0 +1,198 @@
+/* 作品の設定のフォーム（settings.js）。プレビューの中にも置くので、プレビューの入力欄の見た目と混ざらないよう .work-settings の中に限る */
+.work-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.work-file {
+  color: var(--vscode-descriptionForeground);
+  margin-right: auto;
+  overflow-wrap: anywhere;
+}
+
+.work-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.work-settings .card {
+  padding: 4px 16px 14px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  border-radius: 6px;
+}
+
+.work-settings .card h2 {
+  margin: 10px 0 4px;
+  font-size: 1.1em;
+}
+
+.work-settings .note {
+  margin: 0 0 10px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.work-settings .warning,
+.work-error {
+  margin: 6px 0 10px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #c90);
+  background: var(--vscode-inputValidation-warningBackground, rgba(204, 153, 0, 0.12));
+}
+
+.work-error {
+  margin: 16px;
+  border-left-color: var(--vscode-editorError-foreground, #c33);
+}
+
+.work-error[hidden] {
+  display: none;
+}
+
+.work-settings .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px 16px;
+}
+
+.work-settings .field {
+  display: grid;
+  grid-template-columns: 9em 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.work-settings .field > span {
+  color: var(--vscode-descriptionForeground);
+}
+
+.work-settings .field > :is(input, select, textarea) {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.work-settings .null-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+
+.work-settings :is(input, select, textarea, button) {
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.4));
+  border-radius: 3px;
+  padding: 2px 6px;
+  min-width: 0;
+}
+
+.work-settings input[type="checkbox"] {
+  width: auto;
+}
+
+.work-settings textarea {
+  resize: vertical;
+}
+
+.work-settings :is(input, textarea):disabled {
+  opacity: 0.5;
+}
+
+.work-settings select {
+  color: var(--vscode-dropdown-foreground);
+  background: var(--vscode-dropdown-background);
+}
+
+.work-settings button {
+  cursor: pointer;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border-color: transparent;
+}
+
+.work-settings button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.work-settings button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.work-settings button.danger:hover {
+  color: var(--vscode-errorForeground);
+}
+
+.work-settings a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+}
+
+.work-settings a:hover {
+  text-decoration: underline;
+}
+
+.work-settings table.parts {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.work-settings table.parts th,
+.work-settings table.parts td {
+  padding: 3px 10px 3px 0;
+  text-align: left;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+}
+
+.work-settings table.parts th {
+  color: var(--vscode-descriptionForeground);
+  font-weight: normal;
+}
+
+.work-settings table.parts .part-row td {
+  padding-top: 10px;
+  font-weight: bold;
+}
+
+.work-settings table.parts .label {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.work-settings table.parts .heading {
+  color: var(--vscode-descriptionForeground);
+}
+
+.work-settings .output {
+  padding: 10px 0;
+  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+}
+
+.work-settings .output-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.work-settings .output-name {
+  font-weight: bold;
+  min-width: 10em;
+}
+
+.work-settings .output-add {
+  padding-top: 10px;
+}
