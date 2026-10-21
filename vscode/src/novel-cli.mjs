@@ -1,16 +1,23 @@
 /**
- * 拡張に同梱する novel CLI（PDF出力に使う pdf / pdf-en だけ）
+ * 拡張に同梱する novel CLI（bin/novel.mjs と同じコマンド）
  *
- *   node dist/novel-cli.cjs <pdf | pdf-en> [args...]
+ *   node dist/novel-cli.cjs <build | pdf | pdf-en | novel-pdf | epub | rtf | split | merge | count> [args...]
  *
  * 拡張から VS Code の Node で起動する。PDF にするところは、隣に置いた dist/pdf-renderer.cjs が行う。
  */
 
 import { join } from 'node:path';
+import { main as build } from '../../src/build.mjs';
+import { main as count } from '../../src/count.mjs';
 import { main as pdfEn } from '../../src/en-pdf.mjs';
+import { main as epub } from '../../src/epub.mjs';
+import { main as merge } from '../../src/merge.mjs';
+import { main as novelPdf } from '../../src/novel-pdf.mjs';
 import { main as pdf } from '../../src/pdf.mjs';
+import { main as rtf } from '../../src/rtf.mjs';
+import { main as split } from '../../src/split.mjs';
 
-const COMMANDS = { pdf, 'pdf-en': pdfEn };
+const COMMANDS = { build, pdf, 'pdf-en': pdfEn, 'novel-pdf': novelPdf, epub, rtf, split, merge, count };
 
 const [command, ...argv] = process.argv.slice(2);
 const run = COMMANDS[command];
