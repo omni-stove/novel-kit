@@ -221,12 +221,20 @@
   const partTokens = (raw) => (Array.isArray(raw.parts) ? raw.parts.map(String) : []);
   const byNumber = (a, b) => Number(a) - Number(b) || a.localeCompare(b);
 
-  /** token のファイルから新しい部にする / しない */
-  function togglePart(token, on) {
+  /** parts の指定が当たるファイルの添字（matchPartIndices と同じく、番号の一致を先に、無ければファイル順）。当たらなければ -1 */
+  function indexOfPart(tok, files) {
+    const byPrefix = files.findIndex((f) => f.token === tok);
+    if (byPrefix >= 0) return byPrefix;
+    const n = parseInt(tok, 10);
+    return Number.isNaN(n) || n < 1 || n > files.length ? -1 : n - 1;
+  }
+
+  /** i 番目のファイルから新しい部にする / しない */
+  function togglePart(i, on) {
     commit((r) => {
       const tokens = new Set(partTokens(r));
-      if (on) tokens.add(token);
-      else tokens.delete(token);
+      if (on) tokens.add(state.work.files[i].token);
+      else for (const tok of tokens) if (indexOfPart(tok, state.work.files) === i) tokens.delete(tok);
       assign(r, 'parts', tokens.size > 0 ? [...tokens].sort(byNumber) : undefined);
     });
   }
@@ -258,7 +266,7 @@
                     ? 'ファイル名が番号で始まらないため、境界にできません'
                     : 'このファイルから新しい部にする',
               dataset: { field: `part.${file.name}` },
-              onchange: (e) => togglePart(file.token, e.target.checked),
+              onchange: (e) => togglePart(i, e.target.checked),
             }),
           ),
           h('td', {}, h('a', { href: '#', textContent: file.name, onclick: (e) => openFile(e, file.name) })),
