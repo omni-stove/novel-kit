@@ -115,7 +115,10 @@ export function createSettingsEditorProvider(context, { build, linesOf }) {
               .catch((err) => vscode.window.showErrorMessage(`設定を書き込めませんでした: ${err.message}`));
             return editQueue;
           case 'build':
-            return editQueue.then(() => build(document.uri, msg.names ?? null));
+            // build はディスク上の novel.json を読むので、未保存の編集を先に保存する
+            return editQueue
+              .then(() => (document.isDirty ? document.save() : undefined))
+              .then(() => build(document.uri, msg.names ?? null));
           case 'openFile':
             return vscode.commands.executeCommand('vscode.open', vscode.Uri.file(join(configDir, msg.name)));
           case 'openText':

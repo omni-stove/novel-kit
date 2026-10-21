@@ -353,7 +353,12 @@
       return;
     }
     commit((r) => {
-      const entries = Object.entries(outputsObject(r)).map(([n, v]) => [n === from ? name : n, v]);
+      // format を書いていない出力は名前が形式なので、名前を変える前に format として残す
+      const withFormat = (v) => {
+        if (v && typeof v === 'object') return v.format === undefined ? { format: from, ...v } : v;
+        return v === false || v === null ? v : { format: from };
+      };
+      const entries = Object.entries(outputsObject(r)).map(([n, v]) => (n === from ? [name, withFormat(v)] : [n, v]));
       r.outputs = Object.fromEntries(entries);
     });
   }

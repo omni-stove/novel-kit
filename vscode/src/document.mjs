@@ -183,7 +183,7 @@ export function buildDocument({ filePath, scope, metrics, linesOf = readLines, s
             chapterBreak: true,
             sceneBreak: sceneBreak ?? undefined,
             // generateHtml は1始まりのファイル順で受け取る
-            parts: whole && partStarts?.length ? partStarts.map((i) => i + 1) : null,
+            parts: whole && partStarts ? [1, ...partStarts.map((i) => i + 1)] : null,
           },
         );
 
