@@ -30,8 +30,9 @@ jobs:
       gate: false
       run-review: true
       review-provider: "claude"
-      # 公開リポジトリでは外部 App の PR でもレビューが起動してしまうため
-      review-allowed-bots: ""
+      # 公開リポジトリでは外部 App の PR でもレビューが起動してしまうため、自前の bot だけを許す。
+      # 判定は PR の作成者ではなく run を起こした actor を見るので、"" だと人の PR でも自動修正の push で落ちる
+      review-allowed-bots: "omni-stove-agent"
     secrets: inherit
 
   # push では前回の push との差分を取る手間に見合わないので、全部走らせる
