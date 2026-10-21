@@ -285,13 +285,11 @@ const NO_EMPHASIS_RE = /^[\p{P}\p{Z}\p{Cc}\p{Co}]+$/u;
 
 const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const unitText = (unit) =>
-  unit
-    .replace(/<[^>]+>/g, '')
-    .replace(/&(?:#x([0-9a-f]+)|#(\d+)|(\w+));/gi, (m, hex, dec, name) => {
-      if (name) return HTML_ENTITIES[name.toLowerCase()] ?? m;
-      const cp = hex ? parseInt(hex, 16) : Number(dec);
-      return cp <= 0x10ffff ? String.fromCodePoint(cp) : m;
-    });
+  unit.replace(/<[^>]+>/g, '').replace(/&(?:#x([0-9a-f]+)|#(\d+)|(\w+));/gi, (m, hex, dec, name) => {
+    if (name) return HTML_ENTITIES[name.toLowerCase()] ?? m;
+    const cp = hex ? parseInt(hex, 16) : Number(dec);
+    return cp <= 0x10ffff ? String.fromCodePoint(cp) : m;
+  });
 
 const cssNum = (v) => String(Math.round(v * 1000) / 1000);
 
@@ -469,11 +467,10 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     if (!(vertical && rubyLayout)) return `<span class="emphasis">${html}</span>`;
     // text-emphasis の圏点は Chromium が行の箱に含めて行送りを広げ、字詰めの版面が崩れるため、
     // 1字ずつの箱にレイアウトに影響しない点を CSS（lib/html.mjs の .emphasis-dot）で描く
-    return html.replace(EMPHASIS_UNIT_RE, (unit) =>
-      !unit.startsWith('\uE002') && NO_EMPHASIS_RE.test(unitText(unit))
-        ? unit
-        : `<span class="emphasis-dot">${unit}</span>`,
-    );
+    return html.replace(EMPHASIS_UNIT_RE, (unit) => {
+      const markup = unit.startsWith('\uE002') ? spanPlaceholders[unit.charCodeAt(1) - 0xe010] : unit;
+      return NO_EMPHASIS_RE.test(unitText(markup)) ? unit : `<span class="emphasis-dot">${unit}</span>`;
+    });
   });
 
   result = result.replace(/\uE003([\uE010-\uEFFF])\uE003/g, (_, ch) => {
