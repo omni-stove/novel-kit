@@ -633,6 +633,7 @@
     vscode.postMessage({ type: 'deletePreset', name: $('preset').value }),
   );
   $('export-pdf').addEventListener('click', () => vscode.postMessage({ type: 'exportPdf' }));
+  $('work-settings').addEventListener('click', () => vscode.postMessage({ type: 'openWorkSettings' }));
 
   // PDF 用 CSS の hanging-punctuation: allow-end last は Chromium では効かないので、Vivliostyle と同じ方法で再現する。
   // 句読点を文字送り 0（letter-spacing: -1em）にし、直後に 1 字ぶんの隠しスペースを置く（preview.css の .hang）。

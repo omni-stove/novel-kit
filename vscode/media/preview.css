@@ -231,6 +231,11 @@ button:disabled {
   break-before: column;
 }
 
+/* 部に分けると先頭のファイルも部の頭として改ページの印が付くので、先頭では改ページしない（PDF 用スタイルと同じ） */
+#flow .section.page-break:first-child {
+  break-before: auto;
+}
+
 /* 青空文庫の［＃改ページ］も段の区切りにする */
 #flow .page-break-marker {
   break-before: column;

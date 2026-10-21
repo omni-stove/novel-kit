@@ -33,6 +33,16 @@
           }
         ],
         "priority": "option"
+      },
+      {
+        "viewType": "novelPreview.workSettings",
+        "displayName": "作品の設定",
+        "selector": [
+          {
+            "filenamePattern": "novel.json"
+          }
+        ],
+        "priority": "default"
       }
     ],
     "commands": [
@@ -57,6 +67,12 @@
         "command": "novelPreview.exportPdf",
         "title": "現在のレイアウトでPDFを出力",
         "category": "小説"
+      },
+      {
+        "command": "novelPreview.openWorkSettings",
+        "title": "作品の設定を開く",
+        "category": "小説",
+        "icon": "$(settings-gear)"
       },
       {
         "command": "novelPreview.build",
@@ -103,6 +119,16 @@
           "command": "novelPreview.reopenAsPreview",
           "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor",
           "group": "navigation"
+        },
+        {
+          "command": "novelPreview.openWorkSettings",
+          "when": "resourceFilename == novel.json && activeCustomEditorId != novelPreview.workSettings",
+          "group": "navigation"
+        },
+        {
+          "command": "novelPreview.openWorkSettings",
+          "when": "resourceExtname == .txt",
+          "group": "2_novel@0"
         },
         {
           "command": "novelPreview.build",
@@ -158,6 +184,10 @@
         {
           "command": "novelPreview.openFromOutline",
           "when": "false"
+        },
+        {
+          "command": "novelPreview.openWorkSettings",
+          "when": "resourceExtname == .txt || resourceFilename == novel.json || novelPreview.hasManuscript"
         }
       ],
       "editor/context": [
@@ -185,6 +215,11 @@
         }
       ],
       "explorer/context": [
+        {
+          "command": "novelPreview.openWorkSettings",
+          "when": "resourceFilename == novel.json",
+          "group": "navigation@89"
+        },
         {
           "command": "novelPreview.build",
           "when": "resourceFilename == novel.json",

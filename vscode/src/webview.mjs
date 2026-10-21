@@ -47,6 +47,7 @@ export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
     <button id="toggle-edit" aria-pressed="true" title="オン: 段落をクリックしてその場で編集（Cmd/Ctrl+クリックでエディタの該当行へ）&#10;オフ: ダブルクリックでエディタの該当行へ">編集</button>
     <button id="open-text" title="このタブをテキストエディタに切り替える（見ている位置の行で開く）">テキストで開く</button>
     <label>表示<select id="zoom">${options(ZOOM_OPTIONS)}</select></label>
+    <button id="work-settings" title="novel.json の作品情報・部の境界・出力を編集する">作品設定</button>
     <button id="export-pdf" title="日本語: novel pdf でこの字数×行数のPDFを出力&#10;English: novel pdf-en でこの判型のPDFを出力">PDF出力</button>
     <span id="stats"></span>
   </header>

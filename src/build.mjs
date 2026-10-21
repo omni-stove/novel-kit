@@ -201,6 +201,39 @@ const FORMATS = {
   },
 };
 
+const WORK_KEYS = ['format', 'out', 'title', 'author', 'input', 'sceneBreak'];
+const TEXT_KEYS = ['format', 'out', 'title', 'input', 'parts', 'genre', 'target', 'sceneBreak'];
+/** format ごとに、出力の項目として読むもの（スキーマの definitions.output のうち、その format に効くもの） */
+const KEYS_BY_FORMAT = {
+  pdf: [
+    ...WORK_KEYS,
+    'parts',
+    'writingMode',
+    'chars',
+    'lines',
+    'coverless',
+    'chapterBreak',
+    'pageBreak',
+    'synopsis',
+    'synopsisOnTitle',
+    'blankAfterHeading',
+    'review',
+  ],
+  'pdf-en': [...WORK_KEYS, 'parts', 'recto', 'smartQuotes'],
+  'novel-pdf': [...WORK_KEYS, 'size', 'dark', 'blankAfterHeading'],
+  epub: [...WORK_KEYS, 'writingMode', 'chars', 'lines'],
+  rtf: [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
+  'rtf-en': [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
+  split: TEXT_KEYS,
+  merge: [...TEXT_KEYS, 'rubyParens'],
+};
+
+/** 出力の形式（novel <format> のコマンド名）の一覧 */
+export const OUTPUT_FORMATS = Object.keys(KEYS_BY_FORMAT);
+
+/** format の出力に書ける項目の名前（format / out を含む） */
+export const outputKeys = (format) => KEYS_BY_FORMAT[format] ?? [];
+
 /** format の性質。open: 作ったファイルを開く形式か、extra: 効くその場の指定（pages / limit / target / rubyParens） */
 export const formatTraits = (format) => ({ open: !!FORMATS[format].open, extra: FORMATS[format].extra ?? [] });
 
@@ -459,32 +492,6 @@ if (import.meta.vitest) {
   });
 
   describe('出力の項目', () => {
-    const TEXT_KEYS = ['format', 'out', 'title', 'input', 'parts', 'genre', 'target', 'sceneBreak'];
-    const WORK_KEYS = ['format', 'out', 'title', 'author', 'input', 'sceneBreak'];
-    const KEYS_BY_FORMAT = {
-      pdf: [
-        ...WORK_KEYS,
-        'parts',
-        'writingMode',
-        'chars',
-        'lines',
-        'coverless',
-        'chapterBreak',
-        'pageBreak',
-        'synopsis',
-        'synopsisOnTitle',
-        'blankAfterHeading',
-        'review',
-      ],
-      'pdf-en': [...WORK_KEYS, 'parts', 'recto', 'smartQuotes'],
-      'novel-pdf': [...WORK_KEYS, 'size', 'dark', 'blankAfterHeading'],
-      epub: [...WORK_KEYS, 'writingMode', 'chars', 'lines'],
-      rtf: [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
-      'rtf-en': [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
-      split: TEXT_KEYS,
-      merge: [...TEXT_KEYS, 'rubyParens'],
-    };
-
     const keysRead = (format) => {
       const keys = new Set();
       const output = new Proxy(
@@ -505,9 +512,9 @@ if (import.meta.vitest) {
     };
 
     test('format ごとに読む項目', () => {
-      expect(Object.keys(KEYS_BY_FORMAT)).toEqual(Object.keys(FORMATS));
-      for (const [format, keys] of Object.entries(KEYS_BY_FORMAT))
-        expect([...keysRead(format)].sort(), format).toEqual([...new Set(keys)].sort());
+      expect(OUTPUT_FORMATS).toEqual(Object.keys(FORMATS));
+      for (const format of Object.keys(FORMATS))
+        expect([...keysRead(format)].sort(), format).toEqual([...outputKeys(format)].sort());
     });
 
     test('VS Code 拡張の JSON スキーマの出力の項目・format と一致する', async () => {
