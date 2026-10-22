@@ -596,11 +596,11 @@ if (import.meta.vitest) {
     };
 
     test('--ja では記号だけの行を書いた記号のまま中央寄せにし、* は --scene-break の記号にする', () => {
-      expect(paragraphsOf('一\n■■■\n二\n*\n三\n', { shunn: false, sceneBreak: '＊' })).toEqual([
+      expect(paragraphsOf('一\n■■■\n二\n*\n三\n', { shunn: false, sceneBreak: '◆◆◆' })).toEqual([
         `\\pard ${rtfEscapeText('一')}\\par`,
         `\\pard\\qc ${rtfEscapeText('■■■')}\\par`,
         `\\pard ${rtfEscapeText('二')}\\par`,
-        `\\pard\\qc ${rtfEscapeText('＊')}\\par`,
+        `\\pard\\qc ${rtfEscapeText('◆◆◆')}\\par`,
         `\\pard ${rtfEscapeText('三')}\\par`,
       ]);
     });

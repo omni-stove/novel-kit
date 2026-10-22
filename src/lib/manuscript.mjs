@@ -451,7 +451,7 @@ if (import.meta.vitest) {
   describe('fileSeparatorLines', () => {
     test('場面区切りの記号を空行で挟む', () => {
       expect(fileSeparatorLines()).toEqual(['', '＊', '']);
-      expect(fileSeparatorLines('＊')).toEqual(['', '＊', '']);
+      expect(fileSeparatorLines('◆◆◆')).toEqual(['', '◆◆◆', '']);
     });
   });
 
