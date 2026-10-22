@@ -90,6 +90,14 @@ export function readSceneBreak(raw) {
   return { ja: mark(raw?.sceneBreak), en: mark(raw?.english?.sceneBreak) };
 }
 
+/**
+ * 日本語の出力で区切りの行を行頭から何字下げて置くか（"sceneBreakIndent"）。0 以上の整数でなければ null（行の中央に置く）
+ */
+export function readSceneBreakIndent(raw) {
+  const n = raw?.sceneBreakIndent;
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 /** 部の境界（"parts"）。ファイル名の先頭の番号の配列で、書いていなければ（空でも）null */
 export function readParts(raw) {
   const parts = Array.isArray(raw?.parts) ? raw.parts.map(String).filter((p) => p.trim()) : [];
@@ -104,6 +112,7 @@ export function readSettingsFile(filePath) {
     english: normalizeLayout(raw?.english, { english: true }),
     view: normalizeView(raw?.view),
     sceneBreak: readSceneBreak(raw),
+    sceneBreakIndent: readSceneBreakIndent(raw),
     parts: readParts(raw),
   };
 }
@@ -171,6 +180,7 @@ if (import.meta.vitest) {
           english: DEFAULT_ENGLISH_LAYOUT,
           view: DEFAULT_VIEW,
           sceneBreak: { ja: null, en: null },
+          sceneBreakIndent: null,
           parts: null,
         });
         writeSettingsFile(file, {
@@ -222,6 +232,13 @@ if (import.meta.vitest) {
     test('場面区切りの記号は前後の空白を除き、空なら null', () => {
       expect(readSceneBreak({ sceneBreak: '  ◆  ', english: { sceneBreak: ' ' } })).toEqual({ ja: '◆', en: null });
       expect(readSceneBreak(null)).toEqual({ ja: null, en: null });
+    });
+    test('区切りの字下げは 0 以上の整数だけを読み、それ以外は null（中央）', () => {
+      expect(readSceneBreakIndent({ sceneBreakIndent: 19 })).toBe(19);
+      expect(readSceneBreakIndent({ sceneBreakIndent: 0 })).toBe(0);
+      expect(readSceneBreakIndent({ sceneBreakIndent: -1 })).toBeNull();
+      expect(readSceneBreakIndent({ sceneBreakIndent: 1.5 })).toBeNull();
+      expect(readSceneBreakIndent({})).toBeNull();
     });
     test('readWorkConfig は作品情報と出力の定義を読み、input の既定は設定ファイルのディレクトリ', () => {
       withTree(({ story }) => {

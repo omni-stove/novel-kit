@@ -17,6 +17,7 @@
  *   --ruby-parens: ルビ |漢字《かんじ》 を 漢字（かんじ） の括弧表記にし、傍点などの記法は外して中身だけ残す
  *                （GA文庫大賞など、ルビを全角括弧で書く指定の応募先向け）。
  *   --scene-break: 場面区切り（* の行）とファイルの継ぎ目に書く記号（既定: ＊）
+ *   --scene-break-indent: 区切りの行の前に全角空白を字数分入れて下げる（既定: 下げない）
  */
 
 import { writeFileSync } from 'node:fs';
@@ -34,6 +35,7 @@ import {
   applyViewpointLabel,
   countTextChars,
   getFilteredLines,
+  indentSeparator,
   isEpigraphLine,
   isSeparator,
   isViewpointLine,
@@ -52,12 +54,18 @@ export function parseArgs(argv) {
       { key: 'target', flags: ['--target', '--persona'], takesValue: true },
       { key: 'rubyParens', flags: ['--ruby-parens'] },
       ARG.sceneBreak,
+      ARG.sceneBreakIndent,
     ],
     { sceneBreak: SCENE_BREAK_MARK },
   );
 }
 
-export function mergeLines(filePaths, partFirstIndices = null, { sceneBreak = SCENE_BREAK_MARK } = {}) {
+export function mergeLines(
+  filePaths,
+  partFirstIndices = null,
+  { sceneBreak = SCENE_BREAK_MARK, sceneBreakIndent = null } = {},
+) {
+  const place = (mark) => indentSeparator(mark, sceneBreakIndent);
   const partBoundarySet = partFirstIndices ? new Set(partFirstIndices) : null;
   const allLines = [];
   let partNumber = 1;
@@ -71,7 +79,8 @@ export function mergeLines(filePaths, partFirstIndices = null, { sceneBreak = SC
       sectionNumber = 1;
     }
     // ファイル末尾の空行の数が継ぎ目の空きに持ち込まれないよう、ファイルごとに詰めてから1行だけ空ける
-    if (i > 0) allLines.push(...(startsPart || startsNewChapter(files, i) ? [''] : fileSeparatorLines(sceneBreak)));
+    if (i > 0)
+      allLines.push(...(startsPart || startsNewChapter(files, i) ? [''] : fileSeparatorLines(place(sceneBreak))));
 
     for (const line of moveEpigraphsAfterHeading(trimBlankEdges(lines), { blankAfter: true })) {
       if (isEpigraphLine(line)) {
@@ -83,7 +92,7 @@ export function mergeLines(filePaths, partFirstIndices = null, { sceneBreak = SC
         allLines.push(applyViewpointLabel(line, label));
         sectionNumber++;
       } else if (isSeparator(line)) {
-        allLines.push(separatorMark(line, sceneBreak));
+        allLines.push(place(separatorMark(line, sceneBreak)));
       } else {
         allLines.push(line);
       }
@@ -123,7 +132,10 @@ export function main(argv = process.argv.slice(2)) {
   if (genre) headerLines.push(`ジャンル: ${genre}`);
   if (target) headerLines.push(`ターゲット: ${target}`);
   if (headerLines.length > 0) headerLines.push('');
-  const bodyLines = mergeLines(filePaths, partFirstIndices, { sceneBreak: args.sceneBreak });
+  const bodyLines = mergeLines(filePaths, partFirstIndices, {
+    sceneBreak: args.sceneBreak,
+    sceneBreakIndent: args.sceneBreakIndent,
+  });
   const allLines = [
     ...headerLines,
     ...(args.rubyParens ? bodyLines.map((line) => stripInlineMarkup(line, { rubyParens: true })) : bodyLines),
@@ -140,7 +152,7 @@ if (import.meta.vitest) {
   const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
 
-  const merge = (contents, partFirstIndices = null) => {
+  const merge = (contents, partFirstIndices = null, opts = {}) => {
     const dir = mkdtempSync(join(tmpdir(), 'merge-txt-'));
     try {
       const paths = contents.map((content, i) => {
@@ -148,7 +160,7 @@ if (import.meta.vitest) {
         writeFileSync(path, content);
         return path;
       });
-      return mergeLines(paths, partFirstIndices);
+      return mergeLines(paths, partFirstIndices, opts);
     } finally {
       rmSync(dir, { recursive: true });
     }
@@ -169,6 +181,17 @@ if (import.meta.vitest) {
     });
     test('章の途中で切れたファイルの継ぎ目には空行・＊・空行を挟む', () => {
       expect(merge(['【】\n本文一\n', '続き\n'])).toEqual(['【1】', '本文一', '', '＊', '', '続き']);
+    });
+    test('sceneBreakIndent があれば、区切りの行と継ぎ目の記号の前に全角空白を入れる', () => {
+      expect(merge(['【】\n一\n■■■\n', '続き\n'], null, { sceneBreakIndent: 2 })).toEqual([
+        '【1】',
+        '一',
+        '　　■■■',
+        '',
+        '　　＊',
+        '',
+        '続き',
+      ]);
     });
     test('ファイル末尾の空行がいくつあっても継ぎ目の空きは1行', () => {
       expect(merge(['【】\n本文一\n\n\n', '\n続き\n'])).toEqual(['【1】', '本文一', '', '＊', '', '続き']);
@@ -216,6 +239,7 @@ if (import.meta.vitest) {
         target: null,
         rubyParens: false,
         sceneBreak: '＊',
+        sceneBreakIndent: null,
       });
     });
     test('--part・--parts は --splits と、--persona は --target と同じ', () => {

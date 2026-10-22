@@ -14,6 +14,7 @@
  *   --author <text>       著者名
  *   --horizontal          横書きモード（デフォルトは縦書き）
  *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
+ *   --scene-break-indent <字数>  区切りの行を中央でなく行頭から字数分下げて置く（既定: 中央）
  */
 
 import { execSync } from 'node:child_process';
@@ -22,18 +23,25 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { ARG, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
-import { AOZORA_CSS } from './lib/html.mjs';
+import { AOZORA_CSS, separatorPlacementCss } from './lib/html.mjs';
 import { logSections, parseWithSectionNumbering, requireInputFiles, startsNewChapter } from './lib/manuscript.mjs';
 import { escapeXml, parseTextFileForEpub, SCENE_BREAK_MARK } from './lib/text-parser.mjs';
 
 export function parseArgs(argv) {
   return parseCliArgs(
     argv,
-    [ARG.output, ARG.title, ARG.author, { key: 'vertical', flags: ['--horizontal'], value: false }, ARG.sceneBreak],
+    [
+      ARG.output,
+      ARG.title,
+      ARG.author,
+      { key: 'vertical', flags: ['--horizontal'], value: false },
+      ARG.sceneBreak,
+      ARG.sceneBreakIndent,
+    ],
     { vertical: true, sceneBreak: SCENE_BREAK_MARK },
   );
 }
-function generateStyleCss(vertical) {
+function generateStyleCss(vertical, sceneBreakIndent = null) {
   const writingMode = vertical ? 'vertical-rl' : 'horizontal-tb';
 
   return `@charset "UTF-8";
@@ -55,8 +63,7 @@ p {
 }
 
 p.separator {
-  text-align: center;
-  text-indent: 0;
+  ${separatorPlacementCss(sceneBreakIndent)}
   margin-block-start: 1.5em;
   margin-block-end: 1.5em;
 }
@@ -333,7 +340,7 @@ export async function main(argv = process.argv.slice(2)) {
 
     writeFileSync(join(tmpDir, 'mimetype'), 'application/epub+zip');
     writeFileSync(join(metaInfDir, 'container.xml'), generateContainerXml());
-    writeFileSync(join(oebpsDir, 'style.css'), generateStyleCss(args.vertical));
+    writeFileSync(join(oebpsDir, 'style.css'), generateStyleCss(args.vertical, args.sceneBreakIndent));
     writeFileSync(
       join(oebpsDir, 'content.opf'),
       generateContentOpf(bookId, title, args.author, chapters, hasTitle, args.vertical),
@@ -418,6 +425,7 @@ if (import.meta.vitest) {
         author: null,
         vertical: true,
         sceneBreak: '＊',
+        sceneBreakIndent: null,
       });
       expect(parseArgs(['--horizontal']).vertical).toBe(false);
     });

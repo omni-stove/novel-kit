@@ -22,7 +22,7 @@ export const SCENE_BREAK_MARK = '＊';
 
 /**
  * 区切りの行か。場面区切り（*）のほか、記号だけの行（◇◇◇・■■■・※・>>> など）は
- * 書いた記号のまま、どの出力でも中央に置く飾りの区切りになる。
+ * 書いた記号のまま、場面区切りと同じ位置（中央か、sceneBreakIndent の字下げ）に置く飾りの区切りになる。
  */
 export function isSeparator(line) {
   return isSceneBreak(line) || /^[◇◆□■○●◎※>＞]+$/.test(line.trim());
@@ -31,6 +31,14 @@ export function isSeparator(line) {
 /** 区切りの行を紙面に出す記号にする。sceneBreakMark は出力ごとの場面区切りの記号 */
 export function separatorMark(line, sceneBreakMark = SCENE_BREAK_MARK) {
   return isSceneBreak(line) ? sceneBreakMark : line.trim();
+}
+
+/**
+ * 区切りの記号を、行頭から indent 字下げた行にする（全角空白を前に足す）。indent が null なら記号のまま。
+ * 中央寄せのできないテキストの出力と、字下げをマス目どおりに揃えたい RTF・docx で使う
+ */
+export function indentSeparator(mark, indent = null) {
+  return indent == null ? mark : `${'　'.repeat(indent)}${mark}`;
 }
 
 export function isMemoLine(line) {
@@ -897,6 +905,14 @@ if (import.meta.vitest) {
     });
     test('字数の数え方では注記を数えない', () => {
       expect(stripInlineMarkup('東京《とうきょう》［＃「東京」に傍点］')).toBe('東京');
+    });
+  });
+
+  describe('indentSeparator', () => {
+    test('indent の字数だけ全角空白を前に足し、null なら記号のまま', () => {
+      expect(indentSeparator('＊', 3)).toBe('　　　＊');
+      expect(indentSeparator('＊', 0)).toBe('＊');
+      expect(indentSeparator('＊')).toBe('＊');
     });
   });
 
