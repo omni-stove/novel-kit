@@ -84,6 +84,7 @@ const FIELD_LABELS = {
   input: '原稿',
   parts: '部の境界',
   sceneBreak: '場面区切りの記号',
+  sceneBreakIndent: '区切りの字下げ（字数）',
   writingMode: '文字方向',
   chars: '1行の字数',
   lines: '1ページの行数',
@@ -103,7 +104,7 @@ const FIELD_LABELS = {
 };
 
 /** 作品の項目（トップレベル）と、英語の出力の項目（"english" の中）の名前 */
-const WORK_KEYS = ['id', 'title', 'author', 'genre', 'target', 'input', 'sceneBreak'];
+const WORK_KEYS = ['id', 'title', 'author', 'genre', 'target', 'input', 'sceneBreak', 'sceneBreakIndent'];
 const ENGLISH_KEYS = ['title', 'author', 'input', 'sceneBreak'];
 
 const typesOf = (prop) => (Array.isArray(prop.type) ? prop.type : prop.type ? [prop.type] : []);

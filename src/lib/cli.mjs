@@ -50,6 +50,12 @@ export function parseGridSize(value) {
   return { cols, rows };
 }
 
+export function parseSceneBreakIndent(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) fail('--scene-break-indent は 0 以上の整数（字数）で指定してください');
+  return n;
+}
+
 export const ARG = {
   output: { key: 'output', flags: ['-o', '--output'], takesValue: true },
   title: { key: 'title', flags: ['--title'], takesValue: true },
@@ -60,6 +66,13 @@ export const ARG = {
   parts: { key: 'parts', flags: ['--part', '--parts'], takesValue: true, parse: parseList },
   /** 場面区切り（原稿の * の行）と章の途中のファイルの継ぎ目に組む記号（省略時は出力ごとの既定） */
   sceneBreak: { key: 'sceneBreak', flags: ['--scene-break'], takesValue: true },
+  /** 区切りの行を中央ではなく行頭から何字下げて置くか（省略時は中央） */
+  sceneBreakIndent: {
+    key: 'sceneBreakIndent',
+    flags: ['--scene-break-indent'],
+    takesValue: true,
+    parse: parseSceneBreakIndent,
+  },
 };
 
 export function fail(message) {
@@ -175,6 +188,11 @@ if (import.meta.vitest) {
       const args = parseCliArgs(['--part', '070,085', '--scene-break', '＊　＊'], [ARG.parts, ARG.sceneBreak]);
       expect(args.parts).toEqual(['070', '085']);
       expect(args.sceneBreak).toBe('＊　＊');
+    });
+    test('--scene-break-indent は字数を整数で受け取る（0 は行頭）', () => {
+      expect(parseCliArgs(['--scene-break-indent', '19'], [ARG.sceneBreakIndent]).sceneBreakIndent).toBe(19);
+      expect(parseCliArgs(['--scene-break-indent', '0'], [ARG.sceneBreakIndent]).sceneBreakIndent).toBe(0);
+      expect(parseCliArgs([], [ARG.sceneBreakIndent]).sceneBreakIndent).toBeNull();
     });
   });
 

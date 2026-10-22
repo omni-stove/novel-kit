@@ -149,10 +149,19 @@ function buildEnglishHtml(fileLines, metrics, sceneBreak, partStarts) {
  * scope: 'file' は filePath だけ、'work' は同じディレクトリの本文ファイルすべてを連結する。
  * linesOf: ファイルの行列を返す関数（エディタで開いているファイルは未保存の内容を返すために差し替える）
  * sceneBreak: 場面区切り（* の行）に組む記号（null なら PDF 出力と同じ既定）
+ * sceneBreakIndent: 日本語の区切りの行を行頭から下げる字数（null なら中央）
  * parts: 部の境界（novel.json の parts。null なら部に分けない）。章番号を PDF と同じ「部-章」にし、作品全体の表示では部の頭で改ページする
  * 返す値: { files, language, sources: ファイルごとの行列（プレビューで段落を編集するときの元テキスト）, css, body, stats }
  */
-export function buildDocument({ filePath, scope, metrics, linesOf = readLines, sceneBreak = null, parts = null }) {
+export function buildDocument({
+  filePath,
+  scope,
+  metrics,
+  linesOf = readLines,
+  sceneBreak = null,
+  sceneBreakIndent = null,
+  parts = null,
+}) {
   const workFiles = listWorkFiles(filePath);
   const inWork = workFiles.includes(filePath);
   const whole = scope === 'work' && inWork;
@@ -182,6 +191,7 @@ export function buildDocument({ filePath, scope, metrics, linesOf = readLines, s
             lines: metrics.lines,
             chapterBreak: true,
             sceneBreak: sceneBreak ?? undefined,
+            sceneBreakIndent,
             // generateHtml は1始まりのファイル順で受け取る
             parts: whole && partStarts ? [1, ...partStarts.map((i) => i + 1)] : null,
           },

@@ -13,6 +13,14 @@ export function googleFontsLinks(family) {
 }
 
 /**
+ * 区切りの行（p.separator）の置き方の CSS 宣言。indent が null なら行の中央、数なら行頭から indent 字下げる。
+ * 中央は (字数 − 記号の字数) が奇数だとマス目から半字ずれるので、マス目に揃えたいときは字下げで指定する
+ */
+export function separatorPlacementCss(indent = null) {
+  return indent == null ? 'text-align: center; text-indent: 0;' : `text-align: start; text-indent: ${indent}em;`;
+}
+
+/**
  * 青空文庫の注記（改ページ・見出し・太字）から組んだ要素のスタイル。pdf / novel-pdf / epub が共有する。
  * 見出しは本文と同じ大きさのゴシック体の太字にする（章の見出し【】とは別の、本文中の見出し）
  */
@@ -211,6 +219,14 @@ if (import.meta.vitest) {
       expect(googleFontsLinks('Noto+Serif+JP:wght@400')).toContain(
         '<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400&display=swap" rel="stylesheet">',
       );
+    });
+  });
+
+  describe('separatorPlacementCss', () => {
+    test('indent が無ければ中央、あれば行頭から indent 字下げる', () => {
+      expect(separatorPlacementCss()).toBe('text-align: center; text-indent: 0;');
+      expect(separatorPlacementCss(19)).toBe('text-align: start; text-indent: 19em;');
+      expect(separatorPlacementCss(0)).toBe('text-align: start; text-indent: 0em;');
     });
   });
 }

@@ -16,6 +16,7 @@ import {
   countTextChars,
   epigraphDisplayLines,
   escapeXml,
+  indentSeparator,
   isEpigraphLine,
   isSeparator,
   isViewpointLine,
@@ -190,7 +191,14 @@ export function updateCoreProps(coreXml, title, author) {
 
 export function buildBodyXml(
   lines,
-  { cols, headParagraphs = [], tailParagraphs = [], pageBreakBeforeBody = false, sceneBreak = SCENE_BREAK_MARK },
+  {
+    cols,
+    headParagraphs = [],
+    tailParagraphs = [],
+    pageBreakBeforeBody = false,
+    sceneBreak = SCENE_BREAK_MARK,
+    sceneBreakIndent = null,
+  },
 ) {
   const paragraphs = [...headParagraphs];
 
@@ -205,7 +213,8 @@ export function buildBodyXml(
     } else if (line.trim() === '') {
       paragraphs.push(paragraphXml('', { pageBreakBefore }));
     } else if (isSeparator(line)) {
-      paragraphs.push(paragraphXml(textRunXml(separatorMark(line, sceneBreak)), { center: true, pageBreakBefore }));
+      const mark = indentSeparator(separatorMark(line, sceneBreak), sceneBreakIndent);
+      paragraphs.push(paragraphXml(textRunXml(mark), { center: sceneBreakIndent == null, pageBreakBefore }));
     } else {
       paragraphs.push(paragraphXml(lineToRunsXml(line), { pageBreakBefore }));
     }
@@ -422,6 +431,12 @@ if (import.meta.vitest) {
       expect(paragraphs[1]).toContain('<w:jc w:val="right"/>');
       expect(paragraphs[2]).toBe('<w:p></w:p>');
       expect(paragraphs[4]).toContain('<w:jc w:val="center"/>');
+    });
+    test('sceneBreakIndent があれば区切りを中央寄せにせず、全角空白で字下げする', () => {
+      const xml = buildBodyXml(['本文', '*'], { cols: 40, sceneBreakIndent: 2 });
+      const separator = xml.match(/<w:p>.*?<\/w:p>/g)[1];
+      expect(separator).not.toContain('<w:jc');
+      expect(separator).toContain('　　＊');
     });
   });
 

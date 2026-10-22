@@ -77,7 +77,7 @@ function layoutFileFor(doc) {
 let warnedLayoutFile = null;
 
 /**
- * 原稿に効いている設定 { layout, english, view, sceneBreak, parts }（日本語・英語のレイアウトと表示設定、場面区切り、部の境界）。
+ * 原稿に効いている設定 { layout, english, view, sceneBreak, sceneBreakIndent, parts }（日本語・英語のレイアウトと表示設定、場面区切りの記号と字下げ、部の境界）。
  * 設定ファイルが無い・読めないときは既定のプリセットと既定の表示設定（読めないときは1度だけ警告を出す）
  */
 function settingsFor(doc) {
@@ -101,6 +101,7 @@ function settingsFor(doc) {
     english: normalizeLayout(null, { english: true }),
     view: { ...DEFAULT_VIEW },
     sceneBreak: { ja: null, en: null },
+    sceneBreakIndent: null,
     parts: null,
   };
 }
@@ -110,12 +111,20 @@ const isEnglishManuscript = (doc) => detectLanguageOfLines(splitLines(doc.getTex
 
 /**
  * 原稿に効く設定。原稿の言語に応じて日本語か英語のレイアウトを返す。
- * 返す値: { layout, view, english: 英語の原稿か, sceneBreak: 場面区切りの記号（null なら既定）, parts: 部の境界（null なら分けない） }
+ * 返す値: { layout, view, english: 英語の原稿か, sceneBreak: 場面区切りの記号（null なら既定）,
+ *   sceneBreakIndent: 区切りの字下げ（null なら中央。英語の原稿は常に null）, parts: 部の境界（null なら分けない） }
  */
 function resolvedSettingsFor(doc) {
-  const { layout, english, view, sceneBreak, parts } = settingsFor(doc);
+  const { layout, english, view, sceneBreak, sceneBreakIndent, parts } = settingsFor(doc);
   const en = isEnglishManuscript(doc);
-  return { layout: en ? english : layout, view, english: en, sceneBreak: en ? sceneBreak.en : sceneBreak.ja, parts };
+  return {
+    layout: en ? english : layout,
+    view,
+    english: en,
+    sceneBreak: en ? sceneBreak.en : sceneBreak.ja,
+    sceneBreakIndent: en ? null : sceneBreakIndent,
+    parts,
+  };
 }
 
 const layoutFor = (doc) => resolvedSettingsFor(doc).layout;
@@ -245,7 +254,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     }
 
     const filePath = session.doc.uri.fsPath;
-    const { layout, view, english, sceneBreak, parts } = resolvedSettingsFor(session.doc);
+    const { layout, view, english, sceneBreak, sceneBreakIndent, parts } = resolvedSettingsFor(session.doc);
     session.scope = view.scope;
     const metrics = computeMetrics(layout, { english });
     // スクロール表示はウェブ小説の読み味を見るためのもので、縦書きのレイアウトでも横書きに組む
@@ -254,7 +263,15 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         ? computeMetrics({ ...layout, writingMode: 'horizontal' }, { english })
         : metrics;
     try {
-      const built = buildDocument({ filePath, scope: session.scope, metrics: flowMetrics, linesOf, sceneBreak, parts });
+      const built = buildDocument({
+        filePath,
+        scope: session.scope,
+        metrics: flowMetrics,
+        linesOf,
+        sceneBreak,
+        sceneBreakIndent,
+        parts,
+      });
       session.files = built.files;
       const presets = allPresets(english);
       const initialReveal = takeInitialReveal();
@@ -737,7 +754,7 @@ function exportPdf(session = activeSession()) {
   const filePath = doc.uri.fsPath;
   const dir = dirname(filePath);
   const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath ?? dir;
-  const { layout, english, sceneBreak } = resolvedSettingsFor(doc);
+  const { layout, english, sceneBreak, sceneBreakIndent } = resolvedSettingsFor(doc);
   const metrics = computeMetrics(layout, { english });
   const command = english ? 'pdf-en' : 'pdf';
 
@@ -774,6 +791,7 @@ function exportPdf(session = activeSession()) {
         : ['--size', size];
   }
   if (sceneBreak) options.push('--scene-break', sceneBreak);
+  if (sceneBreakIndent != null) options.push('--scene-break-indent', String(sceneBreakIndent));
   const outPath = join(root, 'out', 'preview', out);
   mkdirSync(dirname(outPath), { recursive: true });
 

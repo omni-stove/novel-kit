@@ -235,7 +235,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
             raw[f.key],
             (v) => commit((r) => assign(r, f.key, v)),
             `work.${f.key}`,
-            f.key === 'id' ? (raw.title ?? '') : f.key === 'input' ? '.' : f.key === 'sceneBreak' ? '＊' : '',
+            { id: raw.title ?? '', input: '.', sceneBreak: '＊', sceneBreakIndent: '中央' }[f.key] ?? '',
           ),
         ),
       ),
@@ -427,6 +427,12 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
         : format === 'pdf-en'
           ? (english.sceneBreak ?? '* * *')
           : (raw.sceneBreak ?? '＊');
+    if (key === 'sceneBreakIndent')
+      return typeof raw.sceneBreakIndent === 'number'
+        ? String(raw.sceneBreakIndent)
+        : ['split', 'merge'].includes(format)
+          ? '行頭'
+          : '中央';
     if (['title', 'author', 'input'].includes(key) && ['pdf-en', 'rtf-en'].includes(format))
       return shown(english[key] ?? (key === 'input' ? ['en'] : raw[key]));
     if (key === 'input') return shown(raw.input ?? ['.']);

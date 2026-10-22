@@ -28,6 +28,7 @@
  *   --no-chapter-break    章見出し（【】行）の前で改ページしない
  *   --open                生成後に開く
  *   --scene-break <記号>  場面区切りの記号（既定: Shunn形式は #、--jaは ＊）
+ *   --scene-break-indent <字数> --jaで区切りの行を中央でなく、前に全角空白を字数分入れて置く
  *
  * 原稿の記法:
  *   Memo: ...        出力しない
@@ -39,8 +40,8 @@
  *   《《text》》     傍点（\accdot）
  *   *text*           イタリック（英語原稿用）
  *   <<text>>         縦書き用の横倒し指定。RTFは横書きなので中身のみ出力
- *   * / * * *        場面区切り。Shunn形式では #、--jaでは ＊（中央寄せ。どちらも --scene-break で変えられる）
- *   ◇◇◇ など         記号だけの行。--jaでは書いた記号のまま中央寄せ（Shunn形式では # の場面区切り）
+ *   * / * * *        場面区切り。Shunn形式では #、--jaでは ＊（中央寄せか --scene-break-indent の字下げ。記号は --scene-break で変えられる）
+ *   ◇◇◇ など         記号だけの行。--jaでは書いた記号のまま場面区切りと同じ位置（Shunn形式では # の場面区切り）
  */
 
 import { statSync, writeFileSync } from 'node:fs';
@@ -53,6 +54,7 @@ import {
   countTextChars,
   epigraphDisplayLines,
   getBodyLines,
+  indentSeparator,
   isEpigraphLine,
   isSeparator,
   isSubheadLine,
@@ -101,6 +103,7 @@ export function parseArgs(argv) {
       { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
       ARG.open,
       ARG.sceneBreak,
+      ARG.sceneBreakIndent,
     ],
     { shunn: true, chapterBreak: true },
   );
@@ -185,8 +188,11 @@ export function buildParagraphs(inputFiles, opts) {
 
       if (isSeparator(line)) {
         if (opts.shunn) pendingBreak = true;
-        else
-          paragraphs.push(`\\pard\\qc ${rtfEscapeText(separatorMark(line, opts.sceneBreak ?? SCENE_BREAK_MARK))}\\par`);
+        else {
+          const mark = separatorMark(line, opts.sceneBreak ?? SCENE_BREAK_MARK);
+          const align = opts.sceneBreakIndent == null ? '\\qc ' : ' ';
+          paragraphs.push(`\\pard${align}${rtfEscapeText(indentSeparator(mark, opts.sceneBreakIndent))}\\par`);
+        }
         continue;
       }
 
@@ -561,6 +567,7 @@ if (import.meta.vitest) {
         chapterBreak: true,
         open: false,
         sceneBreak: null,
+        sceneBreakIndent: null,
       });
     });
     test('--ja で日本語原稿、--shunn で Shunn 形式に戻す', () => {
@@ -603,6 +610,11 @@ if (import.meta.vitest) {
         `\\pard\\qc ${rtfEscapeText('◆◆◆')}\\par`,
         `\\pard ${rtfEscapeText('三')}\\par`,
       ]);
+    });
+    test('--ja で --scene-break-indent があれば、区切りの行を中央寄せにせず全角空白で字下げする', () => {
+      expect(paragraphsOf('一\n*\n二\n', { shunn: false, sceneBreakIndent: 3 })[1]).toBe(
+        `\\pard ${rtfEscapeText('　　　＊')}\\par`,
+      );
     });
     test('Shunn 形式では記号だけの行も場面区切りになり、--scene-break の記号を使う', () => {
       const paragraphs = paragraphsOf('One.\n■■■\nTwo.\n', { shunn: true, sceneBreak: '~' });

@@ -30,6 +30,8 @@
  * レイアウトの "writingMode" / "chars" / "lines" も出力ごとに上書きできる。
  * 場面区切り（原稿の * の行）の記号は "sceneBreak"（日本語の出力）/ "english": { "sceneBreak" }（pdf-en）に書き、
  * 出力ごとの "sceneBreak" で上書きできる（rtf-en は出力ごとの指定だけ。省略時は #）。
+ * 日本語の出力の区切りの行は行の中央に置き、"sceneBreakIndent"（字数）を書くと行頭からその字数だけ下げて置く。
+ * 出力ごとの "sceneBreakIndent" で上書きでき、null を書けばその出力では中央に置く。
  *
  * format（novel <format> と同じコマンドで作る）と、それぞれの項目:
  *   pdf        縦書き（横書き）の PDF。coverless, chapterBreak（false で章ごとに改ページしない）,
@@ -90,6 +92,10 @@ function workValue(output, config, key) {
 /** 場面区切りの記号。出力に書いてあればそれ、無ければ作品の設定（どちらも無ければコマンドの既定） */
 const sceneBreakArgs = (output, workMark) => option(output.sceneBreak ?? workMark, '--scene-break');
 
+/** 日本語の出力の区切りの字下げ。出力に書いてあれば null でもそれ（null は中央）、無ければ作品の設定 */
+const sceneBreakIndentArgs = (output, config) =>
+  option('sceneBreakIndent' in output ? output.sceneBreakIndent : config.sceneBreakIndent, '--scene-break-indent');
+
 function layoutOf(output, config) {
   const layout = { ...config.layout };
   for (const key of LAYOUT_OVERRIDES) if (key in output) layout[key] = output[key];
@@ -117,6 +123,7 @@ function pdfArgs(output, config, { warn, pages, limit }) {
     ...flag(output.review, '--review'),
     ...option(config.parts?.join(','), '--part'),
     ...sceneBreakArgs(output, config.sceneBreak?.ja),
+    ...sceneBreakIndentArgs(output, config),
     ...option(pages, '--pages'),
     ...option(limit, '--limit'),
   ];
@@ -142,20 +149,23 @@ const novelPdfArgs = (output, config) => [
   ...flag(output.dark, '--dark'),
   ...flag(output.blankAfterHeading, '--blank-after-heading'),
   ...sceneBreakArgs(output, config.sceneBreak?.ja),
+  ...sceneBreakIndentArgs(output, config),
 ];
 
 const epubArgs = (output, config) => [
   ...flag(layoutOf(output, config).writingMode === 'horizontal', '--horizontal'),
   ...sceneBreakArgs(output, config.sceneBreak?.ja),
+  ...sceneBreakIndentArgs(output, config),
 ];
 
-/** rtf（日本語）は作品の sceneBreak、rtf-en（Shunn 形式）は出力ごとの指定だけを使う */
+/** rtf（日本語）は作品の sceneBreak、rtf-en（Shunn 形式）は出力ごとの指定だけを使う。字下げは rtf だけ */
 const rtfArgs = (style) => (output, config) => [
   style,
   ...option(output.contact?.join(';'), '--contact'),
   ...flag(output.rubyParens, '--ruby-parens'),
   ...flag(output.chapterBreak === false, '--no-chapter-break'),
   ...sceneBreakArgs(output, style === '--ja' ? config.sceneBreak?.ja : null),
+  ...(style === '--ja' ? sceneBreakIndentArgs(output, config) : []),
 ];
 
 /** split / merge は <原稿のディレクトリ> <出力先> <作品名> <ジャンル> を順に受け取る */
@@ -172,6 +182,7 @@ function textArgv(output, config, out, { target, rubyParens }, { merge }) {
     ...option(target ?? workValue(output, config, 'target'), '--target'),
     ...flag(merge && (rubyParens || output.rubyParens), '--ruby-parens'),
     ...sceneBreakArgs(output, config.sceneBreak?.ja),
+    ...sceneBreakIndentArgs(output, config),
   ];
 }
 
@@ -202,11 +213,12 @@ const FORMATS = {
 };
 
 const WORK_KEYS = ['format', 'out', 'title', 'author', 'input', 'sceneBreak'];
-const TEXT_KEYS = ['format', 'out', 'title', 'input', 'genre', 'target', 'sceneBreak'];
+const TEXT_KEYS = ['format', 'out', 'title', 'input', 'genre', 'target', 'sceneBreak', 'sceneBreakIndent'];
 /** format ごとに、出力の項目として読むもの（スキーマの definitions.output のうち、その format に効くもの） */
 const KEYS_BY_FORMAT = {
   pdf: [
     ...WORK_KEYS,
+    'sceneBreakIndent',
     'writingMode',
     'chars',
     'lines',
@@ -219,9 +231,9 @@ const KEYS_BY_FORMAT = {
     'review',
   ],
   'pdf-en': [...WORK_KEYS, 'recto', 'smartQuotes'],
-  'novel-pdf': [...WORK_KEYS, 'size', 'dark', 'blankAfterHeading'],
-  epub: [...WORK_KEYS, 'writingMode', 'chars', 'lines'],
-  rtf: [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
+  'novel-pdf': [...WORK_KEYS, 'sceneBreakIndent', 'size', 'dark', 'blankAfterHeading'],
+  epub: [...WORK_KEYS, 'sceneBreakIndent', 'writingMode', 'chars', 'lines'],
+  rtf: [...WORK_KEYS, 'sceneBreakIndent', 'contact', 'rubyParens', 'chapterBreak'],
   'rtf-en': [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
   split: TEXT_KEYS,
   merge: [...TEXT_KEYS, 'rubyParens'],
@@ -467,6 +479,25 @@ if (import.meta.vitest) {
       expect(mark({ format: 'rtf-en', out: 'a.rtf' })).toBeNull();
       expect(mark({ format: 'merge', out: 'a.txt' })).toBe('＊＊＊');
       expect(mark({ format: 'epub', out: 'a.epub' }, config())).toBeNull();
+    });
+
+    test('区切りの字下げは出力ごとの指定（null なら中央）、無ければ作品の sceneBreakIndent を日本語の出力にだけ渡す', () => {
+      const c = config({ sceneBreakIndent: 19 });
+      const indent = (output, cfg = c) => {
+        const a = argvOf(output, cfg);
+        const i = a.indexOf('--scene-break-indent');
+        return i < 0 ? null : a[i + 1];
+      };
+      expect(indent({ format: 'pdf', out: 'a.pdf' })).toBe('19');
+      expect(indent({ format: 'pdf', out: 'a.pdf', sceneBreakIndent: 0 })).toBe('0');
+      expect(indent({ format: 'pdf', out: 'a.pdf', sceneBreakIndent: null })).toBeNull();
+      expect(indent({ format: 'novel-pdf', out: 'a.pdf' })).toBe('19');
+      expect(indent({ format: 'epub', out: 'a.epub' })).toBe('19');
+      expect(indent({ format: 'rtf', out: 'a.rtf' })).toBe('19');
+      expect(indent({ format: 'merge', out: 'a.txt' })).toBe('19');
+      expect(indent({ format: 'pdf-en', out: 'a.pdf' })).toBeNull();
+      expect(indent({ format: 'rtf-en', out: 'a.rtf' })).toBeNull();
+      expect(indent({ format: 'pdf', out: 'a.pdf' }, config())).toBeNull();
     });
 
     test('split / merge は ディレクトリ・出力先・作品名・ジャンルを順に渡す', () => {

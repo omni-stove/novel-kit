@@ -14,6 +14,7 @@
  *               指定された場合は【】ではなくファイル単位でまとめて区切る。
  *               例: --splits=070,120,170 → 070から、120から、170からが新しい章
  *   --scene-break: 場面区切り（* の行）とファイルの継ぎ目に書く記号（既定: ＊）
+ *   --scene-break-indent: 区切りの行の前に全角空白を字数分入れて下げる（既定: 下げない）
  */
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -31,6 +32,7 @@ import {
   applyViewpointLabel,
   countTextChars,
   getFilteredLines,
+  indentSeparator,
   isEpigraphLine,
   isSeparator,
   isViewpointLine,
@@ -47,6 +49,7 @@ export function parseArgs(argv) {
       { key: 'splits', flags: ['--splits'], takesValue: true, parse: parseList },
       { key: 'target', flags: ['--target', '--persona'], takesValue: true },
       ARG.sceneBreak,
+      ARG.sceneBreakIndent,
     ],
     { sceneBreak: SCENE_BREAK_MARK },
   );
@@ -69,7 +72,8 @@ function groupIndexOf(path, markerNums) {
   return idx;
 }
 
-function collectLines(filePaths, markerNums, sceneBreak) {
+function collectLines(filePaths, markerNums, sceneBreak, sceneBreakIndent) {
+  const place = (mark) => indentSeparator(mark, sceneBreakIndent);
   const allLines = [];
   const files = filePaths.map((f) => getFilteredLines(f, { keepEpigraphs: true, aozora: false }));
   let prevGroup = -1;
@@ -79,11 +83,11 @@ function collectLines(filePaths, markerNums, sceneBreak) {
     const groupChanged = markerNums && i > 0 && group !== prevGroup;
     // ファイル末尾の空行の数が継ぎ目の空きに持ち込まれないよう、ファイルごとに詰めてから1行だけ空ける
     if (i > 0 && !groupChanged) {
-      const gap = startsNewChapter(files, i) ? [''] : fileSeparatorLines(sceneBreak);
+      const gap = startsNewChapter(files, i) ? [''] : fileSeparatorLines(place(sceneBreak));
       allLines.push(...gap.map((text) => ({ text, source: null, group })));
     }
     for (const line of trimBlankEdges(lines)) {
-      allLines.push({ text: isSeparator(line) ? separatorMark(line, sceneBreak) : line, source: src, group });
+      allLines.push({ text: isSeparator(line) ? place(separatorMark(line, sceneBreak)) : line, source: src, group });
     }
     prevGroup = group;
   });
@@ -182,8 +186,12 @@ function numberViewpoints(chapters, byGroups) {
   }
 }
 
-export function buildChapters(filePaths, markerNums = null, { sceneBreak = SCENE_BREAK_MARK } = {}) {
-  const allLines = collectLines(filePaths, markerNums, sceneBreak);
+export function buildChapters(
+  filePaths,
+  markerNums = null,
+  { sceneBreak = SCENE_BREAK_MARK, sceneBreakIndent = null } = {},
+) {
+  const allLines = collectLines(filePaths, markerNums, sceneBreak, sceneBreakIndent);
   const chapters = markerNums ? splitByGroups(allLines) : splitByViewpoints(allLines);
 
   const nonEmptyChapters = chapters.filter((ch) => ch.lines.some((l) => l.trim() !== ''));
@@ -221,7 +229,10 @@ export function main(argv = process.argv.slice(2)) {
   mkdirSync(outputDir, { recursive: true });
 
   const filePaths = getTextFilesFromDir(storyDir, [SYNOPSIS_FILENAME, CHARACTERS_FILENAME]);
-  const nonEmptyChapters = buildChapters(filePaths, markerNums, { sceneBreak: args.sceneBreak });
+  const nonEmptyChapters = buildChapters(filePaths, markerNums, {
+    sceneBreak: args.sceneBreak,
+    sceneBreakIndent: args.sceneBreakIndent,
+  });
 
   for (let i = 0; i < nonEmptyChapters.length; i++) {
     const chapter = nonEmptyChapters[i];
@@ -247,14 +258,14 @@ if (import.meta.vitest) {
   const { mkdtempSync, readdirSync, readFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
 
-  const split = (files, markerNums = null) => {
+  const split = (files, markerNums = null, opts = {}) => {
     const dir = mkdtempSync(join(tmpdir(), 'split-chapters-'));
     try {
       const paths = Object.entries(files).map(([name, content]) => {
         writeFileSync(join(dir, name), content);
         return join(dir, name);
       });
-      return buildChapters(paths, markerNums).map((ch) => ({
+      return buildChapters(paths, markerNums, opts).map((ch) => ({
         lines: chapterFileLines(ch),
         sources: [...ch.sources],
       }));
@@ -279,6 +290,11 @@ if (import.meta.vitest) {
       expect(split({ '010.txt': '【】\n本文一\n\n', '020.txt': '続き\n' })).toEqual([
         { lines: ['【1】', '', '本文一', '', '＊', '', '続き'], sources: ['010.txt', '020.txt'] },
       ]);
+    });
+    test('sceneBreakIndent があれば、区切りの行と継ぎ目の記号の前に全角空白を入れる', () => {
+      expect(
+        split({ '010.txt': '【】\n一\n*\n二\n', '020.txt': '続き\n' }, null, { sceneBreakIndent: 1 })[0].lines,
+      ).toEqual(['【1】', '', '一', '　＊', '二', '', '　＊', '', '続き']);
     });
     test('エピグラフは出典の Source: 行とともに見出しの下にまとめる', () => {
       expect(split({ '010.txt': 'Lead: 引用\nSource: 出典\n【】\n本文\n' })[0].lines).toEqual([
@@ -337,6 +353,7 @@ if (import.meta.vitest) {
         splits: null,
         target: null,
         sceneBreak: '＊',
+        sceneBreakIndent: null,
       });
     });
     test('--splits はカンマ区切り、--persona は --target と同じ', () => {

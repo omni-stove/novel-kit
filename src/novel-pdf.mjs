@@ -18,13 +18,14 @@
  *   --open               生成後にプレビューを開く
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
  *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
+ *   --scene-break-indent <字数>  区切りの行を中央でなく行頭から字数分下げて置く（既定: 中央）
  */
 
 import { execSync } from 'node:child_process';
 import { readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { PDFDocument, PDFName, rgb, StandardFonts } from 'pdf-lib';
 import { ARG, buildPdfFromHtml, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
-import { AOZORA_CSS, googleFontsLinks, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
+import { AOZORA_CSS, googleFontsLinks, separatorPlacementCss, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
 import { logSections, parseWithSectionNumbering, requireInputFiles, startsNewChapter } from './lib/manuscript.mjs';
 import { escapeHtml, parseTextFile, SCENE_BREAK_MARK } from './lib/text-parser.mjs';
 
@@ -80,6 +81,7 @@ export function parseArgs(argv) {
       ARG.open,
       { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
       ARG.sceneBreak,
+      ARG.sceneBreakIndent,
     ],
     { pageSize: 'a6', sceneBreak: SCENE_BREAK_MARK },
   );
@@ -158,8 +160,7 @@ ${
     }
 
     p.separator {
-      text-align: center;
-      text-indent: 0;
+      ${separatorPlacementCss(options.sceneBreakIndent)}
     }
 
     .separator-block {

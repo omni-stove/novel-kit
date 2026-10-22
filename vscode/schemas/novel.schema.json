@@ -115,6 +115,11 @@
       "type": "string",
       "description": "日本語の出力で場面区切り（原稿の * / *** / * * * の行）と、章の途中で切れたファイルの継ぎ目に組む記号（既定は ＊）。例: \"＊　＊　＊\""
     },
+    "sceneBreakIndent": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "日本語の出力で区切りの行（場面区切りと ◇◇◇ などの記号だけの行）を、行の中央ではなく行頭からこの字数だけ下げて置く（省略時は中央。テキストの split / merge は行頭）。中央は (1行の字数 − 記号の字数) が奇数だとマス目から半字ずれるので、マス目に揃えたいときに使う。例: 40字詰めで ＊ を中央のマス目に置くなら 19"
+    },
     "english": {
       "type": "object",
       "description": "英語の原稿（本文のアルファベットが日本語の文字より多いもの）のレイアウト。横書き固定で、文字サイズと行送りを指定する。省略時は 6×9in ペーパーバック",
@@ -328,6 +333,11 @@
         "sceneBreak": {
           "type": "string",
           "description": "この出力だけの場面区切りの記号（省略時は sceneBreak、pdf-en は english.sceneBreak、rtf-en は #）"
+        },
+        "sceneBreakIndent": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "この出力だけの区切りの行の字下げ（字数。null で中央。省略時は sceneBreakIndent）。pdf / novel-pdf / epub / rtf / split / merge"
         }
       }
     }

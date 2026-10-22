@@ -30,6 +30,7 @@
  *   --open               生成後にプレビューを開く
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
  *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
+ *   --scene-break-indent <字数>  区切りの行を中央でなく行頭から字数分下げて置く（既定: 中央）
  *   --count-only         原稿用紙換算（文字数・行数・枚数）のみを表示して終了
  *                        --size 未指定時は 20x20（400字詰め原稿用紙）
  *   --review             下読み用モード。表紙・梗概・人物紹介・部構成（--part）をすべて無視し、
@@ -45,7 +46,13 @@ import { basename } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { PDFDocument, PDFName, ReadingDirection, rgb } from 'pdf-lib';
 import { ARG, buildPdfFromHtml, fail, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
-import { AOZORA_CSS, googleFontsLinks, HORIZONTAL_GLYPH_CSS, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
+import {
+  AOZORA_CSS,
+  googleFontsLinks,
+  HORIZONTAL_GLYPH_CSS,
+  separatorPlacementCss,
+  VERTICAL_GLYPH_CSS,
+} from './lib/html.mjs';
 import {
   CHARACTERS_FILENAME,
   countGenkoRows,
@@ -142,6 +149,7 @@ export function parseArgs(argv) {
       { key: 'pages', flags: ['--pages'], takesValue: true, parse: parsePageSpec },
       { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
       ARG.sceneBreak,
+      ARG.sceneBreakIndent,
     ],
     { chapterBreak: true, vertical: true, chars: null, lines: null },
   );
@@ -258,8 +266,7 @@ ${googleFontsLinks('Noto+Serif+JP:wght@400')}
     }
 
     p.separator {
-      text-align: center;
-      text-indent: 0;
+      ${separatorPlacementCss(options.sceneBreakIndent)}
     }
 
     .separator-block {
@@ -267,8 +274,7 @@ ${googleFontsLinks('Noto+Serif+JP:wght@400')}
     }
 
     .separator-block p.separator {
-      text-align: center;
-      text-indent: 0;
+      ${separatorPlacementCss(options.sceneBreakIndent)}
       margin-block: 1lh;
     }
 
@@ -1043,6 +1049,13 @@ if (import.meta.vitest) {
       const html = generateHtml([makeSection(), makeSection()], { ...baseOptions, sceneBreak: '◆◆◆' });
       expect(html).toContain('<p class="separator">◆◆◆</p>');
       expect(html.includes('＊')).toBe(false);
+    });
+
+    test('--scene-break-indent があれば区切りの行を中央でなく字下げで置く', () => {
+      expect(generateHtml(one, baseOptions)).toContain('text-align: center; text-indent: 0;');
+      const html = generateHtml(one, { ...baseOptions, sceneBreakIndent: 19 });
+      expect(html).toContain('text-align: start; text-indent: 19em;');
+      expect(html).not.toContain('text-align: center; text-indent: 0;');
     });
   });
 
