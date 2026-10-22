@@ -38,6 +38,9 @@ export const LONG_SENTENCE_CHARS = 80;
 /** 同じ種類の文末がこの数以上続いたら「連続」として拾う */
 export const RUN_MIN = 3;
 
+/** 同じ語がこの文数の範囲に2回以上出たら「近くの繰り返し」として拾う */
+export const REPEAT_WINDOW = 3;
+
 /**
  * lindera-wasm の形態素解析器を作る。wasm: lindera_wasm_bg.wasm のパス、dictDir: IPA 辞書のディレクトリ。
  * 返す解析器の tokenize(text) は、各語の details に IPA 辞書の素性（品詞・細分類1〜3・活用型・活用形・基本形…）を持つ
@@ -63,11 +66,16 @@ const isNegative = (token) =>
   (pos(token) === '助動詞' && ['ない', 'ぬ', 'ん'].includes(baseForm(token))) ||
   (pos(token) === '形容詞' && baseForm(token) === 'ない');
 
-/** 文を形態素解析して、文末の種類の key を返す */
-function classifyEnding(text, tokenizer) {
+/** 文を形態素解析した語の列を返す */
+function tokenizeSentence(text, tokenizer) {
   // IPA 辞書は ―― や ――。 を未知語の名詞として返すので、解析する前に文末の記号を外す
   const stem = text.replace(/[。、！？!?―…‥　\s]+$/u, '');
-  const words = stem === '' ? [] : tokenizer.tokenize(stem);
+  return stem === '' ? [] : tokenizer.tokenize(stem);
+}
+
+/** tokenizeSentence の語の列から、文末の種類の key を返す */
+function classifyEnding(tokens) {
+  const words = [...tokens];
   while (words.length > 0 && pos(words.at(-1)) === '記号') words.pop();
   const last = words.at(-1);
   if (!last) return 'other';
@@ -87,6 +95,35 @@ function classifyEnding(text, tokenizer) {
   // IPA 辞書は文末の「という」を動詞を含まない連語の助詞として返す
   if (pos(last) === '助詞' && last.details[2] === '連語' && /いう$/.test(last.surface)) return 'present';
   return 'other';
+}
+
+// どの文にも出るので、繰り返しとして拾うと他が埋もれる語
+const COMMON_WORDS = new Set([
+  'する',
+  'ある',
+  'いる',
+  'なる',
+  'いう',
+  'ない',
+  'これ',
+  'それ',
+  'あれ',
+  'どれ',
+  'ここ',
+  'そこ',
+  'あそこ',
+  'どこ',
+]);
+const CONTENT_POS = ['名詞', '動詞', '形容詞', '副詞'];
+const FUNCTION_SUBTYPES = ['非自立', '接尾', '数', '特殊'];
+
+/** 繰り返しを見る語（名詞・動詞・形容詞・副詞）なら、その基本形を返す。ほかは null */
+function contentWord(token) {
+  if (!CONTENT_POS.includes(pos(token)) || FUNCTION_SUBTYPES.includes(token.details[1])) return null;
+  // 未知語は基本形が * になる
+  const base = baseForm(token) && baseForm(token) !== '*' ? baseForm(token) : token.surface;
+  if (!/\p{L}/u.test(base) || COMMON_WORDS.has(base)) return null;
+  return base;
 }
 
 const CLOSE = { '「': '」', '『': '』', '（': '）', '(': ')', '〈': '〉', '《': '》', '【': '】', '［': '］' };
@@ -121,6 +158,8 @@ const isDialogueLine = (line) => /^[「『]/.test(line);
  *   narrationChars / dialogueChars: 地の文・台詞の字数（台詞は 「 か 『 で始まる行）
  *   endings: 文末の種類ごとの文の数
  *   runs: 同じ種類の文末が RUN_MIN 文以上続いたところ { line, ending, count }。台詞と区切りで数え直す
+ *   repeats: 同じ語（基本形）が、前に出た文から REPEAT_WINDOW 文の範囲に続けて出たところ
+ *     { word, line（最初に出た行）, count（出た回数）, sentences（出た文） }。出た順。台詞と区切りで数え直す
  *   longSentences: LONG_SENTENCE_CHARS 字を超える文（長い順）
  *   datta: 「だった」で終わる文
  *   similes: 「ような・ように・みたい」を含む文
@@ -132,15 +171,26 @@ export function analyzeProse(lines, tokenizer) {
   let narrationChars = 0;
   let dialogueChars = 0;
   let run = null;
+  const repeats = [];
+  /** 語ごとの、いま続いている繰り返し。first・last は最初と最後に出た文の番号 */
+  let open = new Map();
+  const closeRepeat = (repeat) => {
+    if (repeat.count >= 2) repeats.push(repeat);
+  };
   const endRun = () => {
     if (run && run.count >= RUN_MIN) runs.push(run);
     run = null;
+  };
+  const endRepeats = () => {
+    for (const repeat of open.values()) closeRepeat(repeat);
+    open = new Map();
   };
 
   body.forEach((raw, i) => {
     if (raw.trim() === '' || isViewpointLine(raw)) return;
     if (isSeparator(raw)) {
       endRun();
+      endRepeats();
       return;
     }
     const text = stripInlineMarkup(raw).trim();
@@ -148,13 +198,26 @@ export function analyzeProse(lines, tokenizer) {
     if (isDialogueLine(text)) {
       dialogueChars += [...text].length;
       endRun();
+      endRepeats();
       return;
     }
     narrationChars += [...text].length;
     for (const s of splitSentences(text)) {
-      const ending = classifyEnding(s, tokenizer);
+      const tokens = tokenizeSentence(s, tokenizer);
+      const ending = classifyEnding(tokens);
       const sentence = { line: indices[i], text: s, length: [...s].length, ending };
-      sentences.push(sentence);
+      const index = sentences.push(sentence) - 1;
+      for (const word of tokens.map(contentWord).filter(Boolean)) {
+        const repeat = open.get(word);
+        if (repeat && index - repeat.last < REPEAT_WINDOW) {
+          repeat.count++;
+          if (repeat.last !== index) repeat.sentences.push(sentence);
+          repeat.last = index;
+          continue;
+        }
+        if (repeat) closeRepeat(repeat);
+        open.set(word, { word, line: sentence.line, count: 1, sentences: [sentence], first: index, last: index });
+      }
       if (run?.ending === ending) run.count++;
       else {
         endRun();
@@ -163,6 +226,7 @@ export function analyzeProse(lines, tokenizer) {
     }
   });
   endRun();
+  endRepeats();
 
   const endings = Object.fromEntries(ENDINGS.map(({ key }) => [key, 0]));
   for (const s of sentences) endings[s.ending]++;
@@ -173,6 +237,7 @@ export function analyzeProse(lines, tokenizer) {
     dialogueChars,
     endings,
     runs,
+    repeats: repeats.sort((a, b) => a.first - b.first).map(({ first, last, ...repeat }) => repeat),
     longSentences: sentences.filter((s) => s.length > LONG_SENTENCE_CHARS).sort((a, b) => b.length - a.length),
     datta: sentences.filter((s) => /だった[。！？!?]*$/.test(s.text)),
     similes: sentences.filter((s) => /ような|ように|みたい/.test(s.text)),
@@ -218,7 +283,7 @@ if (import.meta.vitest) {
       ['今夜、灯を三度瞬かせてください。', 'other'],
       ['――。', 'other'],
     ])('%s は %s', (text, key) => {
-      expect(classifyEnding(text, tokenizer)).toBe(key);
+      expect(classifyEnding(tokenizeSentence(text, tokenizer))).toBe(key);
     });
   });
 
@@ -262,6 +327,29 @@ if (import.meta.vitest) {
         tokenizer,
       );
       expect(r.runs).toEqual([{ line: 0, ending: 'past', count: 4 }]);
+    });
+
+    test('同じ語が REPEAT_WINDOW 文の範囲に続けて出たところを、基本形でまとめて拾う。離れて出た語は拾わない', () => {
+      const r = analyzeProse(
+        ['　彼は扉を見た。窓は暗い。', '　空は青い。扉を見ている。', '　海を見る。山を見る。'],
+        tokenizer,
+      );
+      expect(r.repeats.map(({ word, line, count, sentences }) => [word, line, count, sentences.length])).toEqual([
+        ['見る', 1, 3, 3],
+      ]);
+    });
+
+    test('同じ文の中の繰り返しも拾い、する・いる・こと などの語は拾わない', () => {
+      const r = analyzeProse(['　音がしていることにした。', '　雨の音、雨の匂い。'], tokenizer);
+      expect(r.repeats.map(({ word, count, sentences }) => [word, count, sentences.length])).toEqual([
+        ['音', 2, 2],
+        ['雨', 2, 1],
+      ]);
+    });
+
+    test('近くの繰り返しは台詞と区切りで数え直す', () => {
+      const r = analyzeProse(['　扉が開く。', '「誰だ」', '　扉が閉じる。', '', '*', '', '　扉が鳴る。'], tokenizer);
+      expect(r.repeats).toEqual([]);
     });
 
     test('長い文・だった・ような を拾う', () => {
