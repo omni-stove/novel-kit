@@ -26,7 +26,7 @@ import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../
 import { parsePageSpec } from '../../src/pdf.mjs';
 import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
-import { analyzeProse, createTokenizer, ENDINGS, LONG_SENTENCE_CHARS, RUN_MIN } from './prose.mjs';
+import { analyzeProse, createTokenizer, ENDINGS, LONG_SENTENCE_CHARS, REPEAT_WINDOW, RUN_MIN } from './prose.mjs';
 import { createSettingsEditorProvider, createWorkSettingsController, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
 import { renderWebviewHtml } from './webview.mjs';
 
@@ -1187,11 +1187,25 @@ const proseProvider = {
       return item;
     });
 
+    /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
+    const repeats = new vscode.TreeItem(
+      `近くの同じ語（${REPEAT_WINDOW}文以内）`,
+      r.repeats.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+    );
+    repeats.description = `${r.repeats.length}`;
+    repeats.children = r.repeats.map((repeat) => {
+      const item = sentenceGroup(`「${repeat.word}」×${repeat.count}`, proseFile, repeat.sentences);
+      item.description = `${repeat.line + 1}行`;
+      item.command = { command: 'novelPreview.revealLine', title: '開く', arguments: [proseFile, repeat.line] };
+      return item;
+    });
+
     return [
       dialogue,
       lengths,
       endings,
       runs,
+      repeats,
       sentenceGroup(
         `長い文（${LONG_SENTENCE_CHARS}字超）`,
         proseFile,
