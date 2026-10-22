@@ -450,8 +450,8 @@ if (import.meta.vitest) {
 
   describe('fileSeparatorLines', () => {
     test('場面区切りの記号を空行で挟む', () => {
-      expect(fileSeparatorLines()).toEqual(['', '◇◇◇', '']);
-      expect(fileSeparatorLines('＊')).toEqual(['', '＊', '']);
+      expect(fileSeparatorLines()).toEqual(['', '＊', '']);
+      expect(fileSeparatorLines('◆◆◆')).toEqual(['', '◆◆◆', '']);
     });
   });
 
@@ -511,9 +511,9 @@ if (import.meta.vitest) {
   });
 
   describe('mergeManuscriptLines', () => {
-    test('空の【】を採番し、視点行なしのファイル前に◇◇◇を挟む（視点行の直後に空行は補わない）', () => {
+    test('空の【】を採番し、視点行なしのファイル前に＊を挟む（視点行の直後に空行は補わない）', () => {
       withTmpFiles(['【】\n本文一\n\n', '\n続き\n', 'Memo: A\n【夜】\n本文二\n'], (paths) => {
-        expect(mergeManuscriptLines(paths)).toEqual(['【1】', '本文一', '', '◇◇◇', '', '続き', '【夜】', '本文二']);
+        expect(mergeManuscriptLines(paths)).toEqual(['【1】', '本文一', '', '＊', '', '続き', '【夜】', '本文二']);
       });
     });
 
@@ -537,18 +537,18 @@ if (import.meta.vitest) {
           'Lead: 引用\uF120出典',
           '本文',
           '',
-          '◇◇◇',
+          '＊',
           '',
           'Lead: 二',
           '続き',
         ]);
-        expect(mergeManuscriptLines(paths)).toEqual(['【1】', '本文', '', '◇◇◇', '', '続き']);
+        expect(mergeManuscriptLines(paths)).toEqual(['【1】', '本文', '', '＊', '', '続き']);
         expect(mergeManuscriptLines(paths, { blankAfterHeading: true })).toEqual([
           '【1】',
           '',
           '本文',
           '',
-          '◇◇◇',
+          '＊',
           '',
           '続き',
         ]);

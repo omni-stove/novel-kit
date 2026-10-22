@@ -17,7 +17,7 @@
  *   --dark               ダークモード（黒背景・白文字）
  *   --open               生成後にプレビューを開く
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
- *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ◇◇◇）
+ *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
  */
 
 import { execSync } from 'node:child_process';
@@ -371,11 +371,11 @@ if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
 
   describe('parseArgs', () => {
-    test('既定は A6 文庫本・場面区切りは ◇◇◇', () => {
+    test('既定は A6 文庫本・場面区切りは ＊', () => {
       expect(parseArgs(['-o', 'out.pdf', 'a.txt', 'dir/'])).toMatchObject({
         output: 'out.pdf',
         pageSize: 'a6',
-        sceneBreak: '◇◇◇',
+        sceneBreak: '＊',
         dark: false,
         open: false,
         blankAfterHeading: false,
@@ -402,7 +402,7 @@ if (import.meta.vitest) {
           '--open',
           '--blank-after-heading',
           '--scene-break',
-          '＊',
+          '◆◆◆',
         ]),
       ).toMatchObject({
         output: 'o.pdf',
@@ -411,7 +411,7 @@ if (import.meta.vitest) {
         dark: true,
         open: true,
         blankAfterHeading: true,
-        sceneBreak: '＊',
+        sceneBreak: '◆◆◆',
       });
     });
   });
