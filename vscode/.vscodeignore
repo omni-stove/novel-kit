@@ -5,6 +5,8 @@
 !dist/novel-cli.cjs
 !dist/pdf-renderer.cjs
 !dist/viewer/**
+!dist/ipadic/**
+!dist/lindera_wasm_bg.wasm
 !media/**
 media/tsconfig.json
 !schemas/**
