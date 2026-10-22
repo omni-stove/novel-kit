@@ -209,6 +209,12 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      jszip:
+        specifier: ^3.10.2
+        version: 3.10.2
+      lindera-wasm:
+        specifier: 6.2.0
+        version: 6.2.0
       puppeteer-core:
         specifier: 24.27.0
         version: 24.27.0(supports-color@7.2.0)
@@ -2292,6 +2298,9 @@ packages:
   lightningcss@1.33.0:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
+
+  lindera-wasm@6.2.0:
+    resolution: {integrity: sha512-cKdnZIjhOsbfgjEpGsjeAuzYsstKoYcNqQqM7LXlN6Pf2AD3yK8scD6SIv2kc+3JdJkWlPuQZFNr1IIm+rleKQ==}
 
   locate-path@5.0.0:
     resolution: {integrity: sha512-t7hw9pI+WvuwNJXwk5zVHpyhIqzg2qTlklJOf0mVxGSbe3Fp2VieZcduNYjaLDoy6p9uGpQEGWG87WpMKlNq8g==}
@@ -5538,6 +5547,8 @@ snapshots:
       lightningcss-linux-x64-musl: 1.33.0
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
+
+  lindera-wasm@6.2.0: {}
 
   locate-path@5.0.0:
     dependencies:

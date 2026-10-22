@@ -106,6 +106,11 @@
         "command": "novelPreview.openFromOutline",
         "title": "目次から開く",
         "category": "小説"
+      },
+      {
+        "command": "novelPreview.revealLine",
+        "title": "原稿の行を開く",
+        "category": "小説"
       }
     ],
     "menus": {
@@ -183,6 +188,10 @@
         },
         {
           "command": "novelPreview.openFromOutline",
+          "when": "false"
+        },
+        {
+          "command": "novelPreview.revealLine",
           "when": "false"
         },
         {
@@ -336,6 +345,11 @@
             }
           }
         },
+        "novelPreview.prose": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "エクスプローラーに「文章の傾向」を出す。形態素解析の辞書を開いたときに読み込み、メモリを約250MB使うので、重いときはオフにする（使っていたメモリは、ウィンドウを再読み込みすると戻る）"
+        },
         "novelPreview.outDir": {
           "type": "string",
           "default": "out",
@@ -355,13 +369,20 @@
           "name": "小説の目次",
           "when": "novelPreview.hasManuscript",
           "icon": "$(book)"
+        },
+        {
+          "id": "novelPreview.prose",
+          "name": "文章の傾向",
+          "when": "novelPreview.hasManuscript && config.novelPreview.prose",
+          "icon": "$(graph)",
+          "visibility": "collapsed"
         }
       ]
     }
   },
   "scripts": {
     "bundle": "esbuild src/extension.mjs src/novel-cli.mjs src/pdf-renderer.mjs --bundle --platform=node --format=cjs --target=node20 --external:vscode --define:import.meta.vitest=undefined --log-override:empty-import-meta=silent --outdir=dist --out-extension:.js=.cjs",
-    "build": "pnpm run bundle && node -e \"const fs = require('fs'), path = require('path'); fs.rmSync('dist/viewer', { recursive: true, force: true }); fs.cpSync(path.join(path.dirname(require.resolve('@vivliostyle/viewer/package.json')), 'lib'), 'dist/viewer', { recursive: true })\"",
+    "build": "pnpm run bundle && node -e \"const fs = require('fs'), path = require('path'); fs.rmSync('dist/viewer', { recursive: true, force: true }); fs.cpSync(path.join(path.dirname(require.resolve('@vivliostyle/viewer/package.json')), 'lib'), 'dist/viewer', { recursive: true }); fs.copyFileSync(path.join(path.dirname(require.resolve('lindera-wasm')), 'lindera_wasm_bg.wasm'), 'dist/lindera_wasm_bg.wasm')\" && node src/ipadic.mjs dist/ipadic",
     "watch": "pnpm run bundle --watch=forever",
     "package": "pnpm run build && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license -o dist/novel-preview.vsix",
     "install-extension": "pnpm run package && code --install-extension dist/novel-preview.vsix --force",
@@ -374,6 +395,8 @@
     "@types/vscode-webview": "^1.57.5",
     "@vivliostyle/viewer": "2.42.1",
     "esbuild": "^0.28.2",
+    "jszip": "^3.10.2",
+    "lindera-wasm": "6.2.0",
     "puppeteer-core": "24.27.0"
   },
   "keywords": [

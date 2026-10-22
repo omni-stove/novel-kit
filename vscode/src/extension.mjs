@@ -26,6 +26,7 @@ import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../
 import { parsePageSpec } from '../../src/pdf.mjs';
 import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
+import { analyzeProse, createTokenizer, ENDINGS, LONG_SENTENCE_CHARS, RUN_MIN } from './prose.mjs';
 import { createSettingsEditorProvider, createWorkSettingsController, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
 import { renderWebviewHtml } from './webview.mjs';
 
@@ -1079,6 +1080,143 @@ function refreshOutline() {
   outlineChanged.fire();
 }
 
+/** @type {vscode.EventEmitter<void>} */
+const proseChanged = new vscode.EventEmitter();
+let proseView;
+/** 傾向を出しているファイル（原稿から離れても、最後に見ていた原稿の傾向を残す） */
+let proseFile = null;
+let tokenizer = null;
+
+/** 形態素解析器。辞書の読み込みに数百 MB のメモリを使うので、「文章の傾向」を初めて開いたときに作る */
+function proseTokenizer() {
+  const dist = join(context.extensionPath, 'dist');
+  tokenizer ??= createTokenizer({ wasm: join(dist, 'lindera_wasm_bg.wasm'), dictDir: join(dist, 'ipadic') });
+  return tokenizer;
+}
+
+const BAR_CELLS = 10;
+const bar = (ratio) => {
+  const filled = Math.round(ratio * BAR_CELLS);
+  return '█'.repeat(filled) + '░'.repeat(BAR_CELLS - filled);
+};
+const percent = (n, total) => (total === 0 ? 0 : Math.round((n / total) * 100));
+
+/** 文を指す項目。クリックでその行を開く */
+function sentenceItem(file, sentence, description) {
+  const label = [...sentence.text].length > 24 ? `${[...sentence.text].slice(0, 24).join('')}…` : sentence.text;
+  const item = new vscode.TreeItem(label);
+  item.description = description ?? `${sentence.line + 1}行`;
+  item.tooltip = sentence.text;
+  item.command = { command: 'novelPreview.revealLine', title: '開く', arguments: [file, sentence.line] };
+  return item;
+}
+
+/** 件数を見出しにして、中に文を並べる項目 */
+function sentenceGroup(label, file, sentences, describe) {
+  /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
+  const item = new vscode.TreeItem(
+    label,
+    sentences.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+  );
+  item.description = `${sentences.length}`;
+  item.children = sentences.map((s) => sentenceItem(file, s, describe?.(s)));
+  return item;
+}
+
+/** エクスプローラーの「文章の傾向」。開いている原稿の文末の分布・文の長さ・台詞の割合などを出す（日本語の原稿だけ） */
+const proseProvider = {
+  onDidChangeTreeData: proseChanged.event,
+  getTreeItem: (item) => item,
+  getChildren(parent) {
+    if (parent) return parent.children;
+    if (!proseFile) return [];
+    const lines = linesOf(proseFile);
+    if (detectLanguageOfLines(lines) === 'en') {
+      return [new vscode.TreeItem('英語の原稿は数えません')];
+    }
+    const r = analyzeProse(lines, proseTokenizer());
+    const total = r.sentences.length;
+    const labelOf = Object.fromEntries(ENDINGS.map(({ key, label }) => [key, label]));
+
+    const dialogue = new vscode.TreeItem('台詞の割合');
+    dialogue.description = `${percent(r.dialogueChars, r.dialogueChars + r.narrationChars)}%`;
+    dialogue.tooltip = `台詞 ${r.dialogueChars.toLocaleString('ja-JP')}字 / 地の文 ${r.narrationChars.toLocaleString('ja-JP')}字`;
+
+    const lengths = new vscode.TreeItem('文の長さ');
+    const average = total === 0 ? 0 : Math.round(r.sentences.reduce((n, s) => n + s.length, 0) / total);
+    const longest = r.sentences.reduce((n, s) => Math.max(n, s.length), 0);
+    lengths.description = `平均 ${average}字・最長 ${longest}字`;
+
+    /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
+    const endings = new vscode.TreeItem(`文末（地の文 ${total}文）`, vscode.TreeItemCollapsibleState.Expanded);
+    endings.children = ENDINGS.map(({ key, label }) => {
+      const item = new vscode.TreeItem(label);
+      const n = r.endings[key];
+      item.description = `${bar(total === 0 ? 0 : n / total)} ${percent(n, total)}%・${n}`;
+      return item;
+    });
+
+    /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
+    const runs = new vscode.TreeItem(
+      `同じ文末の連続（${RUN_MIN}文以上）`,
+      r.runs.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+    );
+    runs.description = `${r.runs.length}`;
+    runs.children = r.runs.map((run) => {
+      const item = new vscode.TreeItem(`${labelOf[run.ending]} ×${run.count}`);
+      item.description = `${run.line + 1}行`;
+      item.command = { command: 'novelPreview.revealLine', title: '開く', arguments: [proseFile, run.line] };
+      return item;
+    });
+
+    return [
+      dialogue,
+      lengths,
+      endings,
+      runs,
+      sentenceGroup(
+        `長い文（${LONG_SENTENCE_CHARS}字超）`,
+        proseFile,
+        r.longSentences,
+        (s) => `${s.length}字・${s.line + 1}行`,
+      ),
+      sentenceGroup('〜だった。', proseFile, r.datta),
+      sentenceGroup('〜ような・ように・みたい', proseFile, r.similes),
+    ];
+  },
+};
+
+/** 傾向を出した時点の原稿の版（ファイルと、開いていれば document.version、開いていなければ mtime） */
+let proseStamp = null;
+
+function proseStampOf(filePath) {
+  const open = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === filePath);
+  if (open) return `${filePath}:v${open.version}`;
+  try {
+    return `${filePath}:m${statSync(filePath).mtimeMs}`;
+  } catch {
+    return `${filePath}:missing`;
+  }
+}
+
+function refreshProse() {
+  const doc = activeManuscript();
+  if (doc) proseFile = doc.uri.fsPath;
+  if (!proseView?.visible) return;
+  // カーソル移動や他のファイルの編集のたびに全文を形態素解析し直さないため、版が同じなら更新しない
+  const stamp = proseFile ? proseStampOf(proseFile) : null;
+  if (stamp === proseStamp) return;
+  proseStamp = stamp;
+  proseView.message = proseFile ? undefined : '原稿（.txt）を開くと、その文章の傾向を出します。';
+  proseView.title = proseFile ? `文章の傾向: ${basename(proseFile)}` : '文章の傾向';
+  proseChanged.fire();
+}
+
+async function revealLine(file, line) {
+  const position = new vscode.Position(line, 0);
+  await vscode.window.showTextDocument(vscode.Uri.file(file), { selection: new vscode.Range(position, position) });
+}
+
 /** 作品全体を表示している小説プレビューが見えていれば、その中で該当ファイルの頭へ動かす。無ければファイルを開く */
 async function openFromOutline(file) {
   const session = [...sessions].find((s) => !s.follow && s.panel.visible && s.files.includes(file));
@@ -1111,6 +1249,7 @@ const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
  */
 function updateStatusBar() {
   refreshOutline();
+  refreshProse();
   const doc = activeManuscript();
   const showing =
     doc && (isManuscript(vscode.window.activeTextEditor?.document) || [...sessions].some((s) => s.panel.active));
@@ -1194,6 +1333,7 @@ export function activate(ctx) {
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 200);
   statusBar.command = 'novelPreview.selectLayout';
   outlineView = vscode.window.createTreeView('novelPreview.outline', { treeDataProvider: outlineProvider });
+  proseView = vscode.window.createTreeView('novelPreview.prose', { treeDataProvider: proseProvider });
   reloadOnRebuild(ctx);
 
   // 設定ファイルを手で書き換えたとき・置き場所を変えたときにも追従する
@@ -1239,6 +1379,10 @@ export function activate(ctx) {
     outlineChanged,
     outlineView,
     outlineView.onDidChangeVisibility(refreshOutline),
+    vscode.commands.registerCommand('novelPreview.revealLine', revealLine),
+    proseChanged,
+    proseView,
+    proseView.onDidChangeVisibility(refreshProse),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       updateStatusBar();
       if (!isManuscript(editor?.document)) return;
@@ -1271,6 +1415,11 @@ export function activate(ctx) {
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('novelPreview')) refreshLayout();
+      // wasm のメモリは縮まないので、解析器を捨ててもプロセスのメモリは再読み込みまで戻らない
+      if (e.affectsConfiguration('novelPreview.prose') && !config().get('prose')) {
+        tokenizer?.free();
+        tokenizer = null;
+      }
     }),
     manuscriptWatcher,
     manuscriptWatcher.onDidCreate(onManuscriptFileEvent),

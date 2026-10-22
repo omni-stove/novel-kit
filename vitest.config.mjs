@@ -6,8 +6,10 @@ export default defineConfig({
     includeSource: [
       'src/**/*.mjs',
       'vscode/src/document.mjs',
+      'vscode/src/ipadic.mjs',
       'vscode/src/markup.mjs',
       'vscode/src/pdf-renderer.mjs',
+      'vscode/src/prose.mjs',
       'vscode/src/work-settings.mjs',
     ],
     environment: 'node',
