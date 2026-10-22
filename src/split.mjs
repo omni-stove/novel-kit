@@ -13,7 +13,7 @@
  *   --splits:   ファイル名（数値プレフィックス）で章境界を指定。
  *               指定された場合は【】ではなくファイル単位でまとめて区切る。
  *               例: --splits=070,120,170 → 070から、120から、170からが新しい章
- *   --scene-break: 場面区切り（* の行）とファイルの継ぎ目に書く記号（既定: ◇◇◇）
+ *   --scene-break: 場面区切り（* の行）とファイルの継ぎ目に書く記号（既定: ＊）
  */
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -275,9 +275,9 @@ if (import.meta.vitest) {
         { lines: ['【2　夜】', '', '本文二'], sources: ['020.txt'] },
       ]);
     });
-    test('章の途中で切れたファイルは前の章に◇◇◇を挟んでつなぐ', () => {
+    test('章の途中で切れたファイルは前の章に＊を挟んでつなぐ', () => {
       expect(split({ '010.txt': '【】\n本文一\n\n', '020.txt': '続き\n' })).toEqual([
-        { lines: ['【1】', '', '本文一', '', '◇◇◇', '', '続き'], sources: ['010.txt', '020.txt'] },
+        { lines: ['【1】', '', '本文一', '', '＊', '', '続き'], sources: ['010.txt', '020.txt'] },
       ]);
     });
     test('エピグラフは出典の Source: 行とともに見出しの下にまとめる', () => {
@@ -289,8 +289,8 @@ if (import.meta.vitest) {
         '本文',
       ]);
     });
-    test('* の場面区切りは ◇◇◇ にする', () => {
-      expect(split({ '010.txt': '【】\n一\n\n*\n\n二\n' })[0].lines).toEqual(['【1】', '', '一', '', '◇◇◇', '', '二']);
+    test('* の場面区切りは ＊ にする', () => {
+      expect(split({ '010.txt': '【】\n一\n\n*\n\n二\n' })[0].lines).toEqual(['【1】', '', '一', '', '＊', '', '二']);
     });
   });
 
@@ -307,7 +307,7 @@ if (import.meta.vitest) {
           lines: ['【1-1】', 'Lead: 一', '', '本文一', '', '【1-2】', '', '本文二'],
           sources: ['010.txt', '020.txt'],
         },
-        { lines: ['【2-1】', 'Lead: 三', '', '本文三', '', '◇◇◇', '', '続き'], sources: ['030.txt', '040.txt'] },
+        { lines: ['【2-1】', 'Lead: 三', '', '本文三', '', '＊', '', '続き'], sources: ['030.txt', '040.txt'] },
       ]);
     });
   });
@@ -336,14 +336,14 @@ if (import.meta.vitest) {
         files: ['story', 'out', '題', 'SF'],
         splits: null,
         target: null,
-        sceneBreak: '◇◇◇',
+        sceneBreak: '＊',
       });
     });
     test('--splits はカンマ区切り、--persona は --target と同じ', () => {
-      expect(parseArgs(['--splits=070, 120,170', '--persona', '30代', '--scene-break', '＊'])).toMatchObject({
+      expect(parseArgs(['--splits=070, 120,170', '--persona', '30代', '--scene-break', '◆◆◆'])).toMatchObject({
         splits: ['070', '120', '170'],
         target: '30代',
-        sceneBreak: '＊',
+        sceneBreak: '◆◆◆',
       });
     });
   });

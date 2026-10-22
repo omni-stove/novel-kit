@@ -27,7 +27,7 @@
  *                         （Word以外のRTF対応ソフトはEQフィールドを描画できないため）
  *   --no-chapter-break    章見出し（【】行）の前で改ページしない
  *   --open                生成後に開く
- *   --scene-break <記号>  場面区切りの記号（既定: Shunn形式は #、--jaは ◇◇◇）
+ *   --scene-break <記号>  場面区切りの記号（既定: Shunn形式は #、--jaは ＊）
  *
  * 原稿の記法:
  *   Memo: ...        出力しない
@@ -39,7 +39,7 @@
  *   《《text》》     傍点（\accdot）
  *   *text*           イタリック（英語原稿用）
  *   <<text>>         縦書き用の横倒し指定。RTFは横書きなので中身のみ出力
- *   * / * * *        場面区切り。Shunn形式では #、--jaでは ◇◇◇（中央寄せ。どちらも --scene-break で変えられる）
+ *   * / * * *        場面区切り。Shunn形式では #、--jaでは ＊（中央寄せ。どちらも --scene-break で変えられる）
  *   ◇◇◇ など         記号だけの行。--jaでは書いた記号のまま中央寄せ（Shunn形式では # の場面区切り）
  */
 
@@ -376,7 +376,7 @@ if (import.meta.vitest) {
   describe('buildParagraphs', () => {
     const opts = { rubyParens: false, chapterBreak: true };
 
-    test('章見出し・本文・区切り・空行を変換し、* の場面区切りは ◇◇◇ にする', () => {
+    test('章見出し・本文・区切り・空行を変換し、* の場面区切りは ＊ にする', () => {
       const tmp = join(tmpdir(), `rtf-${process.pid}-a.txt`);
       wf(tmp, 'Memo: 無視される\n【一章】\n本文。\n\n* * *\n続き。\n');
       try {
@@ -384,7 +384,7 @@ if (import.meta.vitest) {
         expect(paragraphs[0]).toContain('\\b ');
         expect(paragraphs[0]).not.toContain('\\page'); // 先頭章は改ページしない
         expect(paragraphs[2]).toBe('\\pard\\par');
-        expect(paragraphs[3]).toBe(`\\pard\\qc ${rtfEscapeText('◇◇◇')}\\par`);
+        expect(paragraphs[3]).toBe(`\\pard\\qc ${rtfEscapeText('＊')}\\par`);
         expect(paragraphs).toHaveLength(5); // Memoは出力されない
         expect(totalChars).toBe(6); // 「本文。」+「続き。」
       } finally {

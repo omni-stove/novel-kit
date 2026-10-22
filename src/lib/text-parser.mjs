@@ -18,7 +18,7 @@ export function isSceneBreak(line) {
 }
 
 /** 日本語の出力での場面区切りの既定。章の途中で切れたファイルの継ぎ目にも使う */
-export const SCENE_BREAK_MARK = '◇◇◇';
+export const SCENE_BREAK_MARK = '＊';
 
 /**
  * 区切りの行か。場面区切り（*）のほか、記号だけの行（◇◇◇・■■■・※・>>> など）は
@@ -902,7 +902,7 @@ if (import.meta.vitest) {
 
   describe('separatorMark', () => {
     test('場面区切りは出力ごとの記号に、ほかの記号は書いたまま', () => {
-      expect(separatorMark('* * *')).toBe('◇◇◇');
+      expect(separatorMark('* * *')).toBe('＊');
       expect(separatorMark('*', '#')).toBe('#');
       expect(separatorMark('■■■')).toBe('■■■');
       expect(separatorMark(' >>> ', '#')).toBe('>>>');
@@ -911,9 +911,9 @@ if (import.meta.vitest) {
       const { html } = parseTextLines(['一', '*', '二'], { sceneBreak: '＊　＊　＊' });
       expect(html).toContain('<p class="separator">＊　＊　＊</p>');
     });
-    test('日本語の組版では * の行が ◇◇◇ になり、イタリックにはならない', () => {
+    test('日本語の組版では * の行が ＊ になり、イタリックにはならない', () => {
       const { html } = parseTextLines(['本文一', '', '* * *', '', '本文二', '■■■', '本文三']);
-      expect(html).toContain('<div class="separator-block"><p class="separator">◇◇◇</p></div>');
+      expect(html).toContain('<div class="separator-block"><p class="separator">＊</p></div>');
       expect(html).toContain('<p class="separator">■■■</p>');
       expect(html).not.toContain('<i');
     });
@@ -1411,7 +1411,7 @@ if (import.meta.vitest) {
         const { xhtml, chapterTitle } = parseTextFileForEpub(tmp);
         expect(chapterTitle).toBe('夜');
         expect(xhtml).toBe(
-          '<p class="viewpoint">【夜】</p>\n<p>一</p>\n<p><br /></p>\n<p>二</p>\n<p class="separator">◇◇◇</p>\n<p>三</p>',
+          '<p class="viewpoint">【夜】</p>\n<p>一</p>\n<p><br /></p>\n<p>二</p>\n<p class="separator">＊</p>\n<p>三</p>',
         );
       } finally {
         unlinkSync(tmp);

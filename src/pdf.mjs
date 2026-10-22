@@ -12,7 +12,7 @@
  *   --title <text>       タイトル（表紙ページに表示）
  *   --author <text>      著者名（タイトルとともに表示）
  *   --no-chapter-break   章（視点切替）ごとの改ページを無効化。章境界は空行1つで連結し、
- *                        同一章内のファイル境界には区切り字「◇◇◇」を挟む（--part 非指定時のみ有効）
+ *                        同一章内のファイル境界には場面区切りの記号（既定: ＊）を挟む（--part 非指定時のみ有効）
  *   --no-page-break      --no-chapter-break と同じ（ファイル間の改ページは章境界でしか起きないため）
  *   --horizontal         横書きモード
  *   --size WxH           1ページの文字数（例: --size 40x40 → 40字×40行）
@@ -22,14 +22,14 @@
  *                        該当ファイルから新しい部が始まる。各部の頭で改ページし、
  *                        本文先頭に「N章」を表示。
  *                        部の内側のファイル境界は改ページせず、見出しで始まるファイルの前はそのまま連結、
- *                        同一章内のファイル境界には区切り字「◇◇◇」を挟む。
+ *                        同一章内のファイル境界には場面区切りの記号（既定: ＊）を挟む。
  *                        1始まりのファイル順インデックス指定もフォールバックで受け付ける。
  *   --synopsis-on-title   梗概をタイトルページに表示（デフォルト: 別ページ）
  *   --no-synopsis        梗概（synopsis.txt）を入れない
  *   --coverless          表紙ページを作らず、梗概と本文の頭にタイトル・著者名を本文サイズで表示
  *   --open               生成後にプレビューを開く
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
- *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ◇◇◇）
+ *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
  *   --count-only         原稿用紙換算（文字数・行数・枚数）のみを表示して終了
  *                        --size 未指定時は 20x20（400字詰め原稿用紙）
  *   --review             下読み用モード。表紙・梗概・人物紹介・部構成（--part）をすべて無視し、
@@ -706,7 +706,7 @@ if (import.meta.vitest) {
       expect(html).toMatch(/<div class="section page-break part-section">\s*<p>2部1ファイル目<\/p>/);
     });
 
-    test('--part指定時: 同一part内かつ見出しで始まらないファイルの境界には◇◇◇が前後空行付きで挿入される', () => {
+    test('--part指定時: 同一part内かつ見出しで始まらないファイルの境界には＊が前後空行付きで挿入される', () => {
       const sections = [
         makeSection({ html: '<p>1ファイル目</p>' }),
         makeSection({ html: '<p>2ファイル目</p>' }),
@@ -714,17 +714,17 @@ if (import.meta.vitest) {
       ];
       const html = generateHtml(sections, { ...baseOptions, parts: [1] });
 
-      const separatorCount = (html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length;
+      const separatorCount = (html.match(/<p class="separator">＊<\/p>/g) || []).length;
       expect(separatorCount).toBe(2);
       expect(html).toContain(
-        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
+        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">＊</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
       );
       expect(html).toContain(
-        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>3ファイル目</p>',
+        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">＊</p>\n<p class="empty">&nbsp;</p>\n<p>3ファイル目</p>',
       );
     });
 
-    test('--part指定時: 見出しで始まるファイルの前には◇◇◇は入らず、空行1つで連結', () => {
+    test('--part指定時: 見出しで始まるファイルの前には＊は入らず、空行1つで連結', () => {
       const sections = [
         makeSection({ html: '<p>1ファイル目</p>' }),
         makeSection({
@@ -734,7 +734,7 @@ if (import.meta.vitest) {
       ];
       const html = generateHtml(sections, { ...baseOptions, parts: [1] });
 
-      expect(html.includes('◇◇◇')).toBe(false);
+      expect(html.includes('＊')).toBe(false);
       expect((html.match(/page-break part-section/g) || []).length).toBe(1);
       expect(html.includes('<div class="section page-break">')).toBe(false);
       expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p class="viewpoint">【視点者】<\/p>/);
@@ -753,7 +753,7 @@ if (import.meta.vitest) {
       expect(firstDivMatch[1]).toMatch(/<p>1ファイル目<\/p>/);
     });
 
-    test('--part指定時: ファイル先頭の空行は◇◇◇境界で剥がされる', () => {
+    test('--part指定時: ファイル先頭の空行は＊境界で剥がされる', () => {
       const sections = [
         makeSection({ html: '<p>1ファイル目</p>' }),
         makeSection({ html: '<p class="empty">&nbsp;</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>' }),
@@ -762,11 +762,11 @@ if (import.meta.vitest) {
 
       expect(html).toMatch(/<p class="empty">&nbsp;<\/p>\n<p>2ファイル目<\/p>/);
       expect(html).not.toMatch(
-        /<p class="separator">◇◇◇<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>/,
+        /<p class="separator">＊<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>\n<p class="empty">&nbsp;<\/p>/,
       );
     });
 
-    test('--part未指定時: 視点切替で改ページ、それ以外は◇◇◇', () => {
+    test('--part未指定時: 視点切替で改ページ、それ以外は＊', () => {
       const sections = [
         makeSection({ html: '<p>1ファイル目</p>' }),
         makeSection({ html: '<p>2ファイル目</p>' }),
@@ -777,7 +777,7 @@ if (import.meta.vitest) {
       ];
       const html = generateHtml(sections, baseOptions);
 
-      const separatorCount = (html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length;
+      const separatorCount = (html.match(/<p class="separator">＊<\/p>/g) || []).length;
       expect(separatorCount).toBe(1);
       expect(html).toMatch(/<div class="section page-break">\n<p class="viewpoint">【視点】<\/p>/);
     });
@@ -789,16 +789,16 @@ if (import.meta.vitest) {
       ];
       const html = generateHtml(sections, baseOptions);
 
-      expect(html.includes('◇◇◇')).toBe(false);
+      expect(html.includes('＊')).toBe(false);
       expect(html).toMatch(/<div class="section page-break">\n<p>2ファイル目<\/p>/);
     });
 
-    test('--part未指定時: ◇◇◇は前後空行付きで挿入される', () => {
+    test('--part未指定時: ＊は前後空行付きで挿入される', () => {
       const sections = [makeSection({ html: '<p>1ファイル目</p>' }), makeSection({ html: '<p>2ファイル目</p>' })];
       const html = generateHtml(sections, baseOptions);
 
       expect(html).toContain(
-        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">◇◇◇</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
+        '<div class="section">\n<p class="empty">&nbsp;</p>\n<p class="separator">＊</p>\n<p class="empty">&nbsp;</p>\n<p>2ファイル目</p>',
       );
     });
 
@@ -847,7 +847,7 @@ if (import.meta.vitest) {
       const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
 
       expect(html.includes('<div class="section page-break')).toBe(false);
-      expect((html.match(/<p class="separator">◇◇◇<\/p>/g) || []).length).toBe(1);
+      expect((html.match(/<p class="separator">＊<\/p>/g) || []).length).toBe(1);
       expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p class="viewpoint">【視点】<\/p>/);
     });
 
@@ -865,7 +865,7 @@ if (import.meta.vitest) {
       const html = generateHtml(sections, { ...baseOptions, chapterBreak: false });
 
       expect(html.includes('<div class="section page-break')).toBe(false);
-      expect(html.includes('◇◇◇')).toBe(false);
+      expect(html.includes('＊')).toBe(false);
       expect(html).toMatch(/<div class="section">\n<p class="empty">&nbsp;<\/p>\n<p>2ファイル目<\/p>/);
     });
   });
@@ -981,7 +981,7 @@ if (import.meta.vitest) {
         '--pages',
         '42,50-53',
         '--scene-break',
-        '＊',
+        '◆◆◆',
       ]);
       expect(args).toMatchObject({
         output: 'out.pdf',
@@ -993,7 +993,7 @@ if (import.meta.vitest) {
           [42, 42],
           [50, 53],
         ],
-        sceneBreak: '＊',
+        sceneBreak: '◆◆◆',
       });
     });
 
@@ -1040,9 +1040,9 @@ if (import.meta.vitest) {
     });
 
     test('--scene-break の記号をファイルの継ぎ目に組む', () => {
-      const html = generateHtml([makeSection(), makeSection()], { ...baseOptions, sceneBreak: '＊' });
-      expect(html).toContain('<p class="separator">＊</p>');
-      expect(html.includes('◇◇◇')).toBe(false);
+      const html = generateHtml([makeSection(), makeSection()], { ...baseOptions, sceneBreak: '◆◆◆' });
+      expect(html).toContain('<p class="separator">◆◆◆</p>');
+      expect(html.includes('＊')).toBe(false);
     });
   });
 

@@ -12,11 +12,11 @@
  *                `--persona` でも同じ意味で受け付ける。
  *   --splits:    部の境界となるファイル名プレフィックス（novel split の --splits と同形式）。
  *                該当ファイルから新しい部が始まり、視点行の連番は「部-節」形式
- *                （1-1, 1-2, 2-1, ...）でリセットされる。部境界では ◇◇◇ は挿入しない。
+ *                （1-1, 1-2, 2-1, ...）でリセットされる。部境界では区切りの記号を挿入しない。
  *                `--part 060,085,...` でも同じ意味で受け付ける。
  *   --ruby-parens: ルビ |漢字《かんじ》 を 漢字（かんじ） の括弧表記にし、傍点などの記法は外して中身だけ残す
  *                （GA文庫大賞など、ルビを全角括弧で書く指定の応募先向け）。
- *   --scene-break: 場面区切り（* の行）とファイルの継ぎ目に書く記号（既定: ◇◇◇）
+ *   --scene-break: 場面区切り（* の行）とファイルの継ぎ目に書く記号（既定: ＊）
  */
 
 import { writeFileSync } from 'node:fs';
@@ -164,19 +164,19 @@ if (import.meta.vitest) {
         '本文二',
       ]);
     });
-    test('* の場面区切りは ◇◇◇ にし、ほかの記号の区切りは書いたまま', () => {
-      expect(merge(['【】\n一\n\n* * *\n\n二\n■■■\n三\n'])).toEqual(['【1】', '一', '', '◇◇◇', '', '二', '■■■', '三']);
+    test('* の場面区切りは ＊ にし、ほかの記号の区切りは書いたまま', () => {
+      expect(merge(['【】\n一\n\n* * *\n\n二\n■■■\n三\n'])).toEqual(['【1】', '一', '', '＊', '', '二', '■■■', '三']);
     });
-    test('章の途中で切れたファイルの継ぎ目には空行・◇◇◇・空行を挟む', () => {
-      expect(merge(['【】\n本文一\n', '続き\n'])).toEqual(['【1】', '本文一', '', '◇◇◇', '', '続き']);
+    test('章の途中で切れたファイルの継ぎ目には空行・＊・空行を挟む', () => {
+      expect(merge(['【】\n本文一\n', '続き\n'])).toEqual(['【1】', '本文一', '', '＊', '', '続き']);
     });
     test('ファイル末尾の空行がいくつあっても継ぎ目の空きは1行', () => {
-      expect(merge(['【】\n本文一\n\n\n', '\n続き\n'])).toEqual(['【1】', '本文一', '', '◇◇◇', '', '続き']);
+      expect(merge(['【】\n本文一\n\n\n', '\n続き\n'])).toEqual(['【1】', '本文一', '', '＊', '', '続き']);
     });
     test('エピグラフはプレフィックスを外して見出しの直後に置き、本文との間を1行空ける', () => {
       expect(merge(['Lead: 引用\nSource: 出典\n【】\n本文\n'])).toEqual(['【1】', '引用——出典', '', '本文']);
     });
-    test('部境界を渡すと「部-節」で採番し直し、部の頭には◇◇◇を挟まない', () => {
+    test('部境界を渡すと「部-節」で採番し直し、部の頭には＊を挟まない', () => {
       expect(merge(['【】\n一\n', '【】\n二\n', '三\n'], [2])).toEqual([
         '【1-1】',
         '一',
@@ -215,17 +215,17 @@ if (import.meta.vitest) {
         splits: null,
         target: null,
         rubyParens: false,
-        sceneBreak: '◇◇◇',
+        sceneBreak: '＊',
       });
     });
     test('--part・--parts は --splits と、--persona は --target と同じ', () => {
       expect(parseArgs(['--part', '060,085']).splits).toEqual(['060', '085']);
       expect(parseArgs(['--parts=060']).splits).toEqual(['060']);
-      expect(parseArgs(['--splits=060,085', '--persona', '30代', '--ruby-parens', '--scene-break=＊'])).toMatchObject({
+      expect(parseArgs(['--splits=060,085', '--persona', '30代', '--ruby-parens', '--scene-break=◆◆◆'])).toMatchObject({
         splits: ['060', '085'],
         target: '30代',
         rubyParens: true,
-        sceneBreak: '＊',
+        sceneBreak: '◆◆◆',
       });
     });
   });

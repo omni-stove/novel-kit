@@ -13,7 +13,7 @@
  *   --title <text>        書籍タイトル（デフォルト: ファイル名）
  *   --author <text>       著者名
  *   --horizontal          横書きモード（デフォルトは縦書き）
- *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ◇◇◇）
+ *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
  */
 
 import { execSync } from 'node:child_process';
@@ -368,7 +368,7 @@ if (import.meta.vitest) {
   const section = (xhtml, opts = {}) => ({ xhtml, chapterTitle: null, hasViewpointStart: false, ...opts });
 
   describe('groupIntoChapters', () => {
-    test('章の途中で切れたファイルは◇◇◇を挟んで前の章のxhtmlにつなぐ', () => {
+    test('章の途中で切れたファイルは＊を挟んで前の章のxhtmlにつなぐ', () => {
       const chapters = groupIntoChapters(
         [section('<p>一</p>', { hasViewpointStart: true, chapterTitle: '1　朝' }), section('<p>続き</p>')],
         ['010.txt', '020.txt'],
@@ -376,7 +376,7 @@ if (import.meta.vitest) {
       );
       expect(chapters).toEqual([
         {
-          xhtml: '<p>一</p>\n<p class="separator">◇◇◇</p>\n<p>続き</p>',
+          xhtml: '<p>一</p>\n<p class="separator">＊</p>\n<p>続き</p>',
           title: '1　朝',
           fileNames: ['010.txt', '020.txt'],
         },
@@ -410,21 +410,21 @@ if (import.meta.vitest) {
   });
 
   describe('parseArgs', () => {
-    test('既定は縦書き・場面区切り ◇◇◇、--horizontal で横書き', () => {
+    test('既定は縦書き・場面区切り ＊、--horizontal で横書き', () => {
       expect(parseArgs(['-o', 'out.epub', 'a.txt'])).toEqual({
         files: ['a.txt'],
         output: 'out.epub',
         title: null,
         author: null,
         vertical: true,
-        sceneBreak: '◇◇◇',
+        sceneBreak: '＊',
       });
       expect(parseArgs(['--horizontal']).vertical).toBe(false);
     });
     test('--output・--title・--author・--scene-break を読む', () => {
       expect(
-        parseArgs(['--output=o.epub', '--title', '書名', '--author', '著者', '--scene-break', '＊', 'dir/']),
-      ).toMatchObject({ files: ['dir/'], output: 'o.epub', title: '書名', author: '著者', sceneBreak: '＊' });
+        parseArgs(['--output=o.epub', '--title', '書名', '--author', '著者', '--scene-break', '◆◆◆', 'dir/']),
+      ).toMatchObject({ files: ['dir/'], output: 'o.epub', title: '書名', author: '著者', sceneBreak: '◆◆◆' });
     });
   });
 }
