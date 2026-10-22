@@ -1186,10 +1186,27 @@ const proseProvider = {
   },
 };
 
+/** 傾向を出した時点の原稿の版（ファイルと、開いていれば document.version、開いていなければ mtime） */
+let proseStamp = null;
+
+function proseStampOf(filePath) {
+  const open = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === filePath);
+  if (open) return `${filePath}:v${open.version}`;
+  try {
+    return `${filePath}:m${statSync(filePath).mtimeMs}`;
+  } catch {
+    return `${filePath}:missing`;
+  }
+}
+
 function refreshProse() {
   const doc = activeManuscript();
   if (doc) proseFile = doc.uri.fsPath;
   if (!proseView?.visible) return;
+  // カーソル移動や他のファイルの編集のたびに全文を形態素解析し直さないため、版が同じなら更新しない
+  const stamp = proseFile ? proseStampOf(proseFile) : null;
+  if (stamp === proseStamp) return;
+  proseStamp = stamp;
   proseView.message = proseFile ? undefined : '原稿（.txt）を開くと、その文章の傾向を出します。';
   proseView.title = proseFile ? `文章の傾向: ${basename(proseFile)}` : '文章の傾向';
   proseChanged.fire();
