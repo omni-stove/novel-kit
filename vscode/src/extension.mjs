@@ -1068,8 +1068,8 @@ function fileStampOf(filePath) {
   }
 }
 
-/** 「文章の傾向」を数えたときの、原稿・作品・レイアウトの版と、送る中身 */
-let proseCache = { stamp: null, state: null };
+/** 形態素解析をしたときの、原稿の版・言語・設定と、解析結果 */
+let proseCache = { stamp: null, report: null };
 
 /**
  * 「文章の傾向」のタブに送る中身。{ file, stats: { file: このファイル, work: 作品全体（1ファイルなら null）（computeStats）, layout: レイアウトの表記 },
@@ -1080,12 +1080,17 @@ function proseState(file) {
   const files = listWorkFiles(file);
   const work = files.length > 1 && files.includes(file) ? files : null;
   const enabled = config().get('prose') !== false;
-  // カーソル移動や他のファイルの編集のたびに全文を形態素解析し直さないため、版が同じなら数え直さない
-  const stamp = [english, enabled, JSON.stringify(layout), ...[file, ...(work ?? [])].map(fileStampOf)].join('\n');
-  if (stamp === proseCache.stamp) return proseCache.state;
   const metrics = computeMetrics(layout, { english });
   const lines = linesOf(file);
-  const state = {
+  // 形態素解析の結果は原稿1ファイルにしか左右されない。他のファイルの編集やレイアウトの変更のたびに解析し直さないため、キーはその原稿の版だけにする
+  const stamp = [english, enabled, fileStampOf(file)].join('\n');
+  if (stamp !== proseCache.stamp) {
+    proseCache = {
+      stamp,
+      report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer())),
+    };
+  }
+  return {
     file: basename(file),
     stats: {
       file: computeStats([lines], metrics),
@@ -1093,10 +1098,8 @@ function proseState(file) {
       layout: describeLayout(layout, { english }),
     },
     english,
-    report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer())),
+    report: proseCache.report,
   };
-  proseCache = { stamp, state };
-  return state;
 }
 
 /** 「ページ設定」のタブに送る中身（原稿の言語のレイアウトと、そこから決まる字数×行数・文字サイズ） */
