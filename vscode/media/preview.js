@@ -562,7 +562,7 @@
       e.preventDefault();
       e.stopPropagation();
       // 小説パネルの入力欄では、その欄の打ち間違いを戻す（原稿の取り消しにはしない）
-      if (/** @type {HTMLElement} */ (e.target).closest?.('#novel-panel')) {
+      if (/** @type {HTMLElement} */ (e.target).closest?.('#novel-panel :is(input, textarea, select)')) {
         document.execCommand(key === 'y' || e.shiftKey ? 'redo' : 'undo');
         return;
       }
