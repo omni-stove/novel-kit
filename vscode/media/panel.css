@@ -94,7 +94,6 @@ a {
   color: var(--vscode-textLink-foreground);
 }
 
-
 dl {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -242,7 +241,6 @@ button.line .note {
   flex: 0 0 auto;
   margin: 0;
 }
-
 
 #tab-page {
   display: flex;
