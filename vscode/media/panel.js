@@ -32,7 +32,7 @@ function createNovelPanel(vscode) {
    * type: 'ready' は最初の1回（拡張は前に送った中身を忘れて送り直す）
    */
   const postState = (type = 'state') =>
-    post({ type, open: !root.hidden, tab, width: root.style.width ? root.offsetWidth : null });
+    post({ type, open: !root.hidden, tab, width: parseFloat(root.style.width) || null });
 
   /** パネルを開け閉めし、next のタブを見せる（next が無ければいまのタブのまま）。notify: false なら拡張に伝えない */
   function show(open, next = tab, { notify = true } = {}) {
