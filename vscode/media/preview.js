@@ -21,6 +21,7 @@
   const stage = $('stage');
   const sheets = $('sheets');
   const flow = $('flow');
+  const novelPanel = createNovelPanel(vscode);
 
   let model = null;
   let geometry = null;
@@ -560,6 +561,11 @@
       if (key !== 'z' && key !== 'y') return;
       e.preventDefault();
       e.stopPropagation();
+      // 小説パネルの入力欄では、その欄の打ち間違いを戻す（原稿の取り消しにはしない）
+      if (/** @type {HTMLElement} */ (e.target).closest?.('#novel-panel :is(input, textarea, select)')) {
+        document.execCommand(key === 'y' || e.shiftKey ? 'redo' : 'undo');
+        return;
+      }
       vscode.postMessage({ type: key === 'y' || e.shiftKey ? 'redo' : 'undo' });
     },
     true,
@@ -618,8 +624,6 @@
     const scope = e.target.dataset?.scope;
     if (scope) vscode.postMessage({ type: 'view', view: { scope } });
   });
-  $('open-page-settings').addEventListener('click', () => vscode.postMessage({ type: 'openPanel', tab: 'page' }));
-  $('open-work-settings').addEventListener('click', () => vscode.postMessage({ type: 'openPanel', tab: 'work' }));
   $('toggle-edit').addEventListener('click', () => {
     setEditEnabled(!editEnabled);
     vscode.postMessage({ type: 'view', view: { edit: editEnabled } });
@@ -825,6 +829,8 @@
         // プレビュー側で作業している間は、エディタのカーソル位置へ引き戻さない
         reveal(data.reveal ?? lastReveal);
       }
+    } else if (data.type === 'panel') {
+      novelPanel.receive(data.msg);
     } else if (data.type === 'reveal') {
       reveal(data.target);
     } else if (data.type === 'message') {
@@ -976,7 +982,7 @@
   window.addEventListener('keydown', (e) => {
     if (!geometry || editing || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
     const target = /** @type {HTMLElement} */ (e.target);
-    if (target.isContentEditable || target.closest('input, select, textarea, #export-wrap')) return;
+    if (target.isContentEditable || target.closest('input, select, textarea, #export-wrap, #novel-panel')) return;
     if (geometry.scroll) return scrollByKey(e);
     if (e.key === 'Home' || e.key === 'End') {
       e.preventDefault();

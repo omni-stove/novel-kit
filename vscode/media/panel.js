@@ -1,11 +1,19 @@
 // @ts-check
-// 小説パネル（セカンダリサイドバーの webview）。タブは文章の傾向・作品設定・ページ設定。作品設定のフォームは settings.js
-(() => {
-  /** @type {import('vscode-webview').WebviewApi<{ tab: string }>} */
-  const vscode = acquireVsCodeApi();
+
+/**
+ * 小説パネル（プレビューの右の #novel-panel。タブは文章の傾向・作品設定・ページ設定）を動かす。preview.js から1回だけ呼ぶ。
+ * vscode: webview の API（acquireVsCodeApi は1つの webview で1回しか呼べないので、preview.js から受け取る）。
+ * 拡張とのメッセージは { type: 'panel', msg } に包む。返す値の receive(msg) に、拡張から届いたパネル宛ての msg を渡す
+ */
+// biome-ignore lint/correctness/noUnusedVariables: 別の script（preview.js）から呼ぶ
+function createNovelPanel(vscode) {
   const $ = (id) => /** @type {any} */ (document.getElementById(id));
+  const root = $('novel-panel');
+  const post = (msg) => vscode.postMessage({ type: 'panel', msg });
 
   const TABS = ['prose', 'work', 'page'];
+  /** ドラッグで変えられる幅（px）の下限。上限はプレビューの幅の割合（panel.css の max-width） */
+  const MIN_WIDTH_PX = 220;
 
   /** tag の要素を作る。props は要素のプロパティ（className・textContent・title など）、children は子 */
   function h(tag, props = {}, ...children) {
@@ -17,23 +25,53 @@
   const formatNumber = (n, language) => n.toLocaleString(language === 'en' ? 'en-US' : 'ja-JP');
   const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
 
-  let tab = vscode.getState()?.tab ?? 'prose';
+  let tab = TABS.includes(root.dataset.tab) ? root.dataset.tab : 'prose';
 
-  /** tab のタブを見せる。拡張にも伝え、見えているタブの中身だけを作ってもらう（notify: false なら伝えない） */
-  function selectTab(next, { notify = true } = {}) {
+  /**
+   * パネルの開け閉め・タブ・幅を拡張に伝える。拡張は見えているタブの中身だけを作り、次に開くプレビューもこの状態で始める。
+   * type: 'ready' は最初の1回（拡張は前に送った中身を忘れて送り直す）
+   */
+  const postState = (type = 'state') =>
+    post({ type, open: !root.hidden, tab, width: parseFloat(root.style.width) || null });
+
+  /** パネルを開け閉めし、next のタブを見せる（next が無ければいまのタブのまま）。notify: false なら拡張に伝えない */
+  function show(open, next = tab, { notify = true } = {}) {
     if (!TABS.includes(next)) return;
     tab = next;
-    vscode.setState({ tab });
-    for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('#tabs button'))) {
+    root.hidden = !open;
+    for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('#tabs [data-tab]'))) {
       button.setAttribute('aria-selected', String(button.dataset.tab === tab));
     }
+    for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('[data-panel-tab]'))) {
+      button.setAttribute('aria-pressed', String(open && button.dataset.panelTab === tab));
+    }
     for (const name of TABS) $(`tab-${name}`).hidden = name !== tab;
-    if (notify) vscode.postMessage({ type: 'tab', tab });
+    if (notify) postState();
   }
 
   $('tabs').addEventListener('click', (e) => {
     const next = e.target.closest?.('button')?.dataset.tab;
-    if (next && next !== tab) selectTab(next);
+    if (next && next !== tab) show(true, next);
+  });
+  $('close-panel').addEventListener('click', () => show(false));
+  $('panel-toggles').addEventListener('click', (e) => {
+    const next = e.target.closest?.('button')?.dataset.panelTab;
+    if (next) show(root.hidden || next !== tab, next);
+  });
+
+  $('panel-resizer').addEventListener('pointerdown', (/** @type {PointerEvent} */ e) => {
+    const resizer = $('panel-resizer');
+    resizer.setPointerCapture(e.pointerId);
+    const right = root.getBoundingClientRect().right;
+    const move = (/** @type {PointerEvent} */ ev) => {
+      root.style.width = `${Math.max(MIN_WIDTH_PX, right - ev.clientX)}px`;
+    };
+    const end = () => {
+      resizer.removeEventListener('pointermove', move);
+      postState();
+    };
+    resizer.addEventListener('pointermove', move);
+    resizer.addEventListener('lostpointercapture', end, { once: true });
   });
 
   /** 開いている一覧（title）。描き直しても開け閉めを保つ */
@@ -49,7 +87,7 @@
         onclick: (e) => {
           // 一覧の見出しの中にあるときも、開け閉めせずに行を開くだけにする
           e.preventDefault();
-          vscode.postMessage({ type: 'reveal', line });
+          post({ type: 'reveal', line });
         },
       },
       h('span', { className: 'text', textContent: text }),
@@ -120,7 +158,7 @@
       const link = h('a', { href: '#', textContent: '設定を開く' });
       link.addEventListener('click', (e) => {
         e.preventDefault();
-        vscode.postMessage({ type: 'openSettings' });
+        post({ type: 'openSettings' });
       });
       root.replaceChildren(
         h('p', { className: 'note' }, '文章の傾向の解析はオフです（設定 novelPreview.prose）。', link),
@@ -165,19 +203,19 @@
     const english = language === 'en';
     pageLayout = layout;
 
-    const preset = $('preset');
+    const preset = $('page-preset');
     preset.replaceChildren();
     if (!presetName) preset.append(new Option('（カスタム）', ''));
     for (const name of presets) preset.append(new Option(name, name));
     preset.value = presetName ?? '';
 
-    $('grid-fields').hidden = english;
-    $('en-fields').hidden = !english;
-    $('chars').value = layout.chars ?? '';
-    $('lines').value = layout.lines ?? '';
-    $('lines').placeholder = `自動(${metrics.lines})`;
-    $('font-size').value = english ? layout.fontSize : '';
-    $('line-height').value = english ? layout.lineHeight : '';
+    $('page-grid-fields').hidden = english;
+    $('page-en-fields').hidden = !english;
+    $('page-chars').value = layout.chars ?? '';
+    $('page-lines').value = layout.lines ?? '';
+    $('page-lines').placeholder = `自動(${metrics.lines})`;
+    $('page-font-size').value = english ? layout.fontSize : '';
+    $('page-line-height').value = english ? layout.lineHeight : '';
 
     $('language-note').textContent = english ? '英語の原稿（横書き固定。設定は english に保存）' : '';
     $('language-note').hidden = !english;
@@ -219,36 +257,36 @@
         bottom: $('margin-bottom').value,
         left: $('margin-left').value,
       },
-      chars: $('chars').value,
-      lines: $('lines').value,
-      fontSize: $('font-size').value,
-      lineHeight: $('line-height').value,
+      chars: $('page-chars').value,
+      lines: $('page-lines').value,
+      fontSize: $('page-font-size').value,
+      lineHeight: $('page-line-height').value,
       fontFamily: $('font-family').value,
     };
   }
 
-  for (const el of document.querySelectorAll('[data-layout-field]')) {
-    el.addEventListener('change', () => pageLayout && vscode.postMessage({ type: 'layout', layout: readPage() }));
+  for (const el of document.querySelectorAll('[data-page-field]')) {
+    el.addEventListener('change', () => pageLayout && post({ type: 'layout', layout: readPage() }));
   }
-  $('preset').addEventListener('change', (e) => {
-    if (e.target.value) vscode.postMessage({ type: 'preset', name: e.target.value });
+  $('page-preset').addEventListener('change', (e) => {
+    if (e.target.value) post({ type: 'preset', name: e.target.value });
   });
-  $('save-preset').addEventListener('click', () => vscode.postMessage({ type: 'savePreset' }));
-  $('delete-preset').addEventListener('click', () =>
-    vscode.postMessage({ type: 'deletePreset', name: $('preset').value }),
-  );
+  $('save-preset').addEventListener('click', () => post({ type: 'savePreset' }));
+  $('delete-preset').addEventListener('click', () => post({ type: 'deletePreset', name: $('page-preset').value }));
 
-  const postWork = (msg) => vscode.postMessage({ type: 'work', msg });
-  const workForm = createWorkSettingsForm($('tab-work'), postWork, { scroller: $('tab-work') });
+  const workForm = createWorkSettingsForm($('tab-work'), (msg) => post({ type: 'work', msg }), {
+    scroller: $('tab-work'),
+  });
 
-  window.addEventListener('message', ({ data }) => {
+  /** 拡張から届いたパネル宛てのメッセージ。show でパネルを開いてタブを替える */
+  function receive(data) {
     switch (data.type) {
-      case 'tab':
-        return selectTab(data.tab, { notify: false });
+      case 'show':
+        return show(true, data.tab);
       case 'message':
-        $('message').textContent = data.text ?? '';
-        $('message').hidden = !data.text;
-        document.body.classList.toggle('blank', !!data.text);
+        $('panel-message').textContent = data.text ?? '';
+        $('panel-message').hidden = !data.text;
+        root.classList.toggle('blank', !!data.text);
         return;
       case 'prose':
         $('prose-file').textContent = data.file;
@@ -260,8 +298,9 @@
       case 'workSettings':
         return workForm.render(data.state);
     }
-  });
+  }
 
-  selectTab(tab, { notify: false });
-  vscode.postMessage({ type: 'ready', tab });
-})();
+  show(!root.hidden, tab, { notify: false });
+  postState('ready');
+  return { receive };
+}

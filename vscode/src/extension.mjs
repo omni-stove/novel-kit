@@ -28,7 +28,7 @@ import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listW
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
 import { analyzeProse, createTokenizer, proseReport } from './prose.mjs';
 import { createSettingsEditorProvider, createWorkSettingsController, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
-import { renderPanelHtml, renderWebviewHtml } from './webview.mjs';
+import { renderWebviewHtml } from './webview.mjs';
 
 const RENDER_DELAY_MS = 250;
 /** 同じ段落への入力がこの間隔以内に続けば、取り消しの1回分にまとめる */
@@ -36,9 +36,9 @@ const UNDO_GROUP_MS = 1500;
 /** 小説プレビュー（カスタムエディタ）のID。workbench.editorAssociations で .txt の既定にできる */
 // package.json の customEditors と同じIDでなければならない
 const EDITOR_VIEW_TYPE = 'novelPreview.editor';
-/** 小説パネル（セカンダリサイドバーの webview）のID */
-// package.json の views と同じIDでなければならない
-const PANEL_VIEW_ID = 'novelPreview.panel';
+/** 小説パネルの開け閉め・タブ・幅を覚えておく globalState のキー。次に開くプレビューもこの状態で始める */
+const PANEL_STATE_KEY = 'novelPreview.panel';
+const PANEL_TABS = ['prose', 'work', 'page'];
 
 let context;
 let statusBar;
@@ -228,6 +228,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
       panel.webview.postMessage({ type: 'reveal', target: revealTarget() });
     },
   };
+  session.novelPanel = createNovelPanel(session);
 
   /** テキストエディタ側のカーソル位置 { fileIndex, line }（このプレビューが表示しているファイルにあるときだけ。無ければ null） */
   function revealTarget() {
@@ -418,7 +419,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   }
 
   /**
-   * webview からのメッセージ。openPanel は小説パネルを msg.tab のタブで開き、view は表示範囲・倍率・編集のオンオフ・表示の形（ページ・スクロール）を設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する。
+   * webview からのメッセージ。panel は小説パネルのメッセージ（msg.msg）、view は表示範囲・倍率・編集のオンオフ・表示の形（ページ・スクロール）を設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する。
    * jump は見ている位置のファイル（作品全体の表示なら、開いたファイルとは限らない）をテキストエディタで開く
    */
   function onMessage(msg) {
@@ -464,22 +465,25 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         return (
           session.doc && buildOutputs(vscode.Uri.file(layoutFileFor(session.doc) ?? session.doc.uri.fsPath), msg.names)
         );
-      case 'openPanel':
-        return showPanel(msg.tab);
+      case 'panel':
+        return session.novelPanel.onMessage(msg.msg);
     }
   }
 
   panel.webview.options = { enableScripts: true, localResourceRoots: [mediaRoot] };
+  const uri = (name) => panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, name));
   panel.webview.html = renderWebviewHtml({
-    cssUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'preview.css')),
-    jsUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'preview.js')),
+    cssUris: [uri('preview.css'), uri('panel.css'), uri('work-settings.css')],
+    jsUris: [uri('settings.js'), uri('panel.js'), uri('preview.js')],
     cspSource: panel.webview.cspSource,
     nonce: randomBytes(16).toString('hex'),
+    panel: storedPanelState(),
   });
   panel.webview.onDidReceiveMessage(onMessage);
   panel.onDidChangeViewState(updateStatusBar);
   panel.onDidDispose(() => {
     clearTimeout(renderTimer);
+    session.novelPanel.dispose();
     sessions.delete(session);
     if (sidePreview === session) sidePreview = null;
     updateStatusBar();
@@ -1035,16 +1039,6 @@ function refreshOutline() {
   outlineChanged.fire();
 }
 
-/** 小説パネルの webview（初めて開くまでは null） */
-let panelView = null;
-/** 小説パネルで見せているタブ（prose: 文章の傾向 / work: 作品設定 / page: ページ設定） */
-let panelTab = 'prose';
-/** パネルを開く前に頼まれたタブ。開いたときは、webview が覚えていたタブよりこちらを見せる */
-let pendingPanelTab = null;
-/** パネルが対象にしている原稿（原稿から離れても、最後に見ていた原稿を残す） */
-let panelFile = null;
-/** 最後にパネルへ送った中身（種類ごとの JSON）。同じなら送り直さない */
-let panelPosted = {};
 let tokenizer = null;
 
 /** 形態素解析器。辞書の読み込みに数百 MB のメモリを使うので、「文章の傾向」を初めて見せるときに作る */
@@ -1068,8 +1062,8 @@ function fileStampOf(filePath) {
   }
 }
 
-/** 形態素解析をしたときの、原稿の版・言語・設定と、解析結果 */
-let proseCache = { stamp: null, report: null };
+/** 原稿ごとの、形態素解析をしたときの原稿の版・言語・設定（stamp）と解析結果（report）。プレビューを並べて別々の原稿を見ても解析し直し合わないよう、原稿ごとに持つ */
+const proseCache = new Map();
 
 /**
  * 「文章の傾向」のタブに送る中身。{ file, stats: { file: このファイル, work: 作品全体（1ファイルなら null）（computeStats）, layout: レイアウトの表記 },
@@ -1084,11 +1078,10 @@ function proseState(file) {
   const lines = linesOf(file);
   // 形態素解析の結果は原稿1ファイルにしか左右されない。他のファイルの編集やレイアウトの変更のたびに解析し直さないため、キーはその原稿の版だけにする
   const stamp = [english, enabled, fileStampOf(file)].join('\n');
-  if (stamp !== proseCache.stamp) {
-    proseCache = {
-      stamp,
-      report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer())),
-    };
+  let cached = proseCache.get(file);
+  if (cached?.stamp !== stamp) {
+    cached = { stamp, report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer())) };
+    proseCache.set(file, cached);
   }
   return {
     file: basename(file),
@@ -1098,7 +1091,7 @@ function proseState(file) {
       layout: describeLayout(layout, { english }),
     },
     english,
-    report: proseCache.report,
+    report: cached.report,
   };
 }
 
@@ -1121,145 +1114,153 @@ function pageState(file) {
   };
 }
 
-/** パネルへ type の中身を送る（前に送ったものと同じなら送らない） */
-function postPanel(type, state) {
-  const json = JSON.stringify(state);
-  if (panelPosted[type] === json) return;
-  panelPosted[type] = json;
-  panelView.webview.postMessage({ type, ...state });
-}
-
-/** パネルの中身を作り直す。見えているタブの分だけ作る */
-function refreshPanel() {
-  const doc = activeManuscript();
-  if (doc) panelFile = doc.uri.fsPath;
-  if (!panelView?.visible) return;
-  postPanel('message', {
-    text: panelFile ? '' : '原稿（.txt）を開くと、その文章の傾向・作品設定・ページ設定を出します。',
-  });
-  if (!panelFile) return;
-  if (panelTab !== 'work') closePanelWork();
-  try {
-    if (panelTab === 'prose') postPanel('prose', proseState(panelFile));
-    else if (panelTab === 'page') postPanel('page', pageState(panelFile));
-    else syncPanelWork();
-  } catch (err) {
-    postPanel('message', {
-      text: `${basename(panelFile)} の${panelTab === 'prose' ? '文章の傾向' : '設定'}を出せませんでした: ${err.message}`,
-    });
-  }
+/** 覚えている小説パネルの状態 { open, tab, width }（width はドラッグで変えていなければ null） */
+function storedPanelState() {
+  const stored = context.globalState.get(PANEL_STATE_KEY) ?? {};
+  return {
+    open: !!stored.open,
+    tab: PANEL_TABS.includes(stored.tab) ? stored.tab : 'prose',
+    width: Number.isFinite(stored.width) ? stored.width : null,
+  };
 }
 
 /**
- * 作品設定のタブのフォーム（タブを見せている間だけ）。{ file: 原稿から一番近い novel.json（無ければ null）, controller }。
- * 別の作品の原稿に移ったり novel.json ができたりしたら、syncPanelWork で付け替える
+ * プレビュー session の右に出す小説パネル。原稿は session.doc（横のプレビューなら、原稿から離れても最後に見ていた原稿）。
+ * パネルが開いていてプレビューが見えている間だけ、見せているタブの中身を作る。
+ * 返す値: onMessage(msg) でパネルからのメッセージを受け、refresh() で中身を作り直し、show(tab) でパネルを開き、
+ * dispose() はプレビューを閉じたときに呼ぶ
  */
-let panelWork = null;
-const postPanelWork = (state) => panelView?.webview.postMessage({ type: 'workSettings', state });
+function createNovelPanel(session) {
+  let { open, tab } = storedPanelState();
+  /** 最後に送った中身（種類ごとの JSON）。同じなら送り直さない */
+  let posted = {};
+  /**
+   * 作品設定のタブのフォーム（タブを見せている間だけ）。{ file: 原稿から一番近い novel.json（無ければ null）, controller }。
+   * 別の作品の原稿に移ったり novel.json ができたりしたら、syncWork で付け替える
+   */
+  let work = null;
 
-async function syncPanelWork() {
-  const file = layoutFileFor(manuscriptAt(panelFile));
-  if (panelWork?.file === file) return;
-  panelWork?.controller?.dispose();
-  const current = { file, controller: null };
-  panelWork = current;
-  if (!file) {
-    postPanelWork({ file: null, missing: vscode.workspace.asRelativePath(dirname(panelFile)) });
+  const postRaw = (msg) => session.panel.webview.postMessage({ type: 'panel', msg });
+  const fileOf = () => session.doc?.uri.fsPath ?? null;
+
+  /** type の中身を送る（前に送ったものと同じなら送らない） */
+  function post(type, state) {
+    const json = JSON.stringify(state);
+    if (posted[type] === json) return;
+    posted[type] = json;
+    postRaw({ type, ...state });
+  }
+
+  function refresh() {
+    // 隠れている間は novel.json と原稿を見張らなくてよいので、作品設定のフォームを閉じる
+    if (!open || !session.panel.visible) return closeWork();
+    const file = fileOf();
+    post('message', { text: file ? '' : '原稿（.txt）を開くと、その文章の傾向・作品設定・ページ設定を出します。' });
+    if (!file) return;
+    if (tab !== 'work') closeWork();
+    try {
+      if (tab === 'prose') post('prose', proseState(file));
+      else if (tab === 'page') post('page', pageState(file));
+      else syncWork(file);
+    } catch (err) {
+      post('message', {
+        text: `${basename(file)} の${tab === 'prose' ? '文章の傾向' : '設定'}を出せませんでした: ${err.message}`,
+      });
+    }
+  }
+
+  const postWork = (state) => postRaw({ type: 'workSettings', state });
+
+  async function syncWork(file) {
+    const settingsFile = layoutFileFor(manuscriptAt(file));
+    if (work?.file === settingsFile) return;
+    work?.controller?.dispose();
+    const current = { file: settingsFile, controller: null };
+    work = current;
+    if (!settingsFile) {
+      postWork({ file: null, missing: vscode.workspace.asRelativePath(dirname(file)) });
+      return;
+    }
+    const document = await vscode.workspace.openTextDocument(settingsFile);
+    // 待つ間にタブを替えられたり付け替えられたりしていれば、もう要らない
+    if (work !== current) return;
+    current.controller = createWorkSettingsController(document, {
+      post: postWork,
+      build: buildOutputs,
+      linesOf,
+      openText: () => vscode.commands.executeCommand('vscode.openWith', document.uri, 'default'),
+      // novel.json はタブに無いことが多く、保存しないと見えないところに未保存の変更が残る。
+      // プレビューも設定ファイルをディスクから読むので、保存して初めて部の境界などが表示に効く
+      save: true,
+    });
+    current.controller.render();
+  }
+
+  function closeWork() {
+    work?.controller?.dispose();
+    work = null;
+  }
+
+  /**
+   * パネルからのメッセージ。ready（webview を作ったとき）・state で開け閉め・タブ・幅を受けて覚え、reveal で原稿の行を開き、layout・preset でレイアウトを変え、
+   * work は作品設定のフォームのメッセージ（create で novel.json を作る）
+   */
+  function onMessage(msg) {
+    const file = fileOf();
+    const doc = file ? manuscriptAt(file) : null;
+    switch (msg.type) {
+      case 'ready':
+        posted = {};
+        closeWork();
+        open = msg.open;
+        tab = msg.tab;
+        return refresh();
+      case 'state':
+        open = msg.open;
+        tab = msg.tab;
+        context.globalState.update(PANEL_STATE_KEY, { open, tab, width: msg.width });
+        return refresh();
+      case 'reveal':
+        return openInTextEditor(file, msg.line, session.panel);
+      case 'layout':
+        // 範囲外の値は丸めて保存するので、レイアウトが変わらなくても入力欄を保存した値に戻す
+        posted.page = null;
+        return doc && setLayout(doc, msg.layout);
+      case 'preset': {
+        const preset = doc && allPresets(isEnglishManuscript(doc))[msg.name];
+        return preset && setLayout(doc, preset);
+      }
+      case 'savePreset':
+        return doc && savePreset(doc);
+      case 'deletePreset':
+        return deletePreset(msg.name);
+      case 'openSettings':
+        return vscode.commands.executeCommand('workbench.action.openSettings', 'novelPreview.prose');
+      case 'work':
+        if (msg.msg.type !== 'create') return work?.controller?.onMessage(msg.msg);
+        if (doc && !layoutFileFor(doc)) writeFileSync(join(dirname(file), CONFIG_FILENAME), '{}\n');
+        return file && syncWork(file);
+    }
+  }
+
+  return {
+    onMessage,
+    refresh,
+    show: (next) => postRaw({ type: 'show', tab: next }),
+    dispose: closeWork,
+  };
+}
+
+/** 小説パネルを開く。いま操作しているプレビューの右に出す（プレビューが無ければ、横に出してから） */
+async function showPanel() {
+  const session = activeSession();
+  if (session) {
+    session.panel.reveal(undefined, true);
+    session.novelPanel.show();
     return;
   }
-  const document = await vscode.workspace.openTextDocument(file);
-  // 待つ間にタブを替えられたり付け替えられたりしていれば、もう要らない
-  if (panelWork !== current) return;
-  current.controller = createWorkSettingsController(document, {
-    post: postPanelWork,
-    build: buildOutputs,
-    linesOf,
-    openText: () => vscode.commands.executeCommand('vscode.openWith', document.uri, 'default'),
-    // novel.json はタブに無いことが多く、保存しないと見えないところに未保存の変更が残る。
-    // プレビューも設定ファイルをディスクから読むので、保存して初めて部の境界などが表示に効く
-    save: true,
-  });
-  current.controller.render();
-}
-
-function closePanelWork() {
-  panelWork?.controller?.dispose();
-  panelWork = null;
-}
-
-/**
- * パネルからのメッセージ。ready・tab でタブを決めて中身を作り、reveal で原稿の行を開き、layout・preset でレイアウトを変え、
- * work は作品設定のフォームのメッセージ（create で novel.json を作る）
- */
-function onPanelMessage(msg) {
-  const doc = panelFile ? manuscriptAt(panelFile) : null;
-  switch (msg.type) {
-    case 'ready':
-      panelTab = pendingPanelTab ?? msg.tab;
-      pendingPanelTab = null;
-      panelPosted = {};
-      closePanelWork();
-      panelView.webview.postMessage({ type: 'tab', tab: panelTab });
-      return refreshPanel();
-    case 'tab':
-      panelTab = msg.tab;
-      return refreshPanel();
-    case 'reveal':
-      return panelFile && revealLine(panelFile, msg.line);
-    case 'layout':
-      // 範囲外の値は丸めて保存するので、レイアウトが変わらなくても入力欄を保存した値に戻す
-      panelPosted.page = null;
-      return doc && setLayout(doc, msg.layout);
-    case 'preset': {
-      const preset = doc && allPresets(isEnglishManuscript(doc))[msg.name];
-      return preset && setLayout(doc, preset);
-    }
-    case 'savePreset':
-      return doc && savePreset(doc);
-    case 'deletePreset':
-      return deletePreset(msg.name);
-    case 'openSettings':
-      return vscode.commands.executeCommand('workbench.action.openSettings', 'novelPreview.prose');
-    case 'work':
-      if (msg.msg.type !== 'create') return panelWork?.controller?.onMessage(msg.msg);
-      if (doc && !layoutFileFor(doc)) writeFileSync(join(dirname(panelFile), CONFIG_FILENAME), '{}\n');
-      return syncPanelWork();
-  }
-}
-
-/** セカンダリサイドバーの「小説」に出す小説パネル */
-const panelProvider = {
-  resolveWebviewView(view) {
-    panelView = view;
-    const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media');
-    const uri = (name) => view.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, name));
-    view.webview.options = { enableScripts: true, localResourceRoots: [mediaRoot] };
-    view.webview.html = renderPanelHtml({
-      cssUris: [uri('panel.css'), uri('work-settings.css')],
-      jsUris: [uri('settings.js'), uri('panel.js')],
-      cspSource: view.webview.cspSource,
-      nonce: randomBytes(16).toString('hex'),
-    });
-    view.webview.onDidReceiveMessage(onPanelMessage);
-    // 隠れている間は novel.json と原稿を見張らなくてよいので、作品設定のフォームを閉じる
-    view.onDidChangeVisibility(() => (view.visible ? refreshPanel() : closePanelWork()));
-    view.onDidDispose(() => {
-      closePanelWork();
-      panelView = null;
-    });
-  },
-};
-
-/** 小説パネルを開く。tab があればそのタブにする */
-async function showPanel(tab) {
-  if (tab && panelView) {
-    panelTab = tab;
-    panelView.webview.postMessage({ type: 'tab', tab });
-    refreshPanel();
-  } else if (tab) {
-    pendingPanelTab = tab;
-  }
-  await vscode.commands.executeCommand(`${PANEL_VIEW_ID}.focus`);
+  await context.globalState.update(PANEL_STATE_KEY, { ...storedPanelState(), open: true });
+  openSidePreview();
 }
 
 async function revealLine(file, line) {
@@ -1299,7 +1300,7 @@ const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
  */
 function updateStatusBar() {
   refreshOutline();
-  refreshPanel();
+  for (const session of sessions) session.novelPanel.refresh();
   const doc = activeManuscript();
   const showing =
     doc && (isManuscript(vscode.window.activeTextEditor?.document) || [...sessions].some((s) => s.panel.active));
@@ -1429,17 +1430,17 @@ export function activate(ctx) {
     outlineView,
     outlineView.onDidChangeVisibility(refreshOutline),
     vscode.commands.registerCommand('novelPreview.revealLine', revealLine),
-    vscode.window.registerWebviewViewProvider(PANEL_VIEW_ID, panelProvider, {
-      webviewOptions: { retainContextWhenHidden: true },
-    }),
-    vscode.commands.registerCommand('novelPreview.showPanel', () => showPanel()),
+    vscode.commands.registerCommand('novelPreview.showPanel', showPanel),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       updateStatusBar();
       if (!isManuscript(editor?.document)) return;
       const filePath = editor.document.uri.fsPath;
       for (const session of sessions) {
         const changed = session.follow && session.doc?.uri.fsPath !== filePath;
-        if (session.follow) session.doc = editor.document;
+        if (session.follow) {
+          session.doc = editor.document;
+          session.novelPanel.refresh();
+        }
         if (changed && !(session.scope === 'work' && session.files.includes(filePath))) session.render();
         else session.postReveal();
       }
