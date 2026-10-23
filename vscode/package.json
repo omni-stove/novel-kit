@@ -11,7 +11,7 @@
   },
   "license": "ISC",
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "Visualization",
@@ -75,6 +75,12 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "novelPreview.showPanel",
+        "title": "小説パネルを開く",
+        "category": "小説",
+        "icon": "$(graph)"
+      },
+      {
         "command": "novelPreview.build",
         "title": "novel.json の出力を作る",
         "category": "小説",
@@ -131,19 +137,24 @@
           "group": "navigation"
         },
         {
-          "command": "novelPreview.openWorkSettings",
+          "command": "novelPreview.showPanel",
           "when": "resourceExtname == .txt",
           "group": "2_novel@0"
         },
         {
+          "command": "novelPreview.openWorkSettings",
+          "when": "resourceExtname == .txt",
+          "group": "2_novel@1"
+        },
+        {
           "command": "novelPreview.build",
           "when": "resourceExtname == .txt || resourceFilename == novel.json",
-          "group": "2_novel@1"
+          "group": "2_novel@2"
         },
         {
           "command": "novelPreview.exportPdf",
           "when": "resourceExtname == .txt",
-          "group": "2_novel@2"
+          "group": "2_novel@3"
         }
       ],
       "editor/title/context": [
@@ -197,6 +208,10 @@
         {
           "command": "novelPreview.openWorkSettings",
           "when": "resourceExtname == .txt || resourceFilename == novel.json || novelPreview.hasManuscript"
+        },
+        {
+          "command": "novelPreview.showPanel",
+          "when": "novelPreview.hasManuscript"
         }
       ],
       "editor/context": [
@@ -348,7 +363,7 @@
         "novelPreview.prose": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "エクスプローラーに「文章の傾向」を出す。形態素解析の辞書を開いたときに読み込み、メモリを約250MB使うので、重いときはオフにする（使っていたメモリは、ウィンドウを再読み込みすると戻る）"
+          "markdownDescription": "小説パネルの「文章の傾向」で、地の文の文末の分布などを形態素解析で数える。形態素解析の辞書はそのタブを初めて見せたときに読み込み、メモリを約250MB使うので、重いときはオフにする（使っていたメモリは、ウィンドウを再読み込みすると戻る）。オフでも文字数は出す"
         },
         "novelPreview.outDir": {
           "type": "string",
@@ -362,6 +377,15 @@
         }
       }
     },
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "novelPreview",
+          "title": "小説",
+          "icon": "media/panel-icon.svg"
+        }
+      ]
+    },
     "views": {
       "explorer": [
         {
@@ -369,13 +393,14 @@
           "name": "小説の目次",
           "when": "novelPreview.hasManuscript",
           "icon": "$(book)"
-        },
+        }
+      ],
+      "novelPreview": [
         {
-          "id": "novelPreview.prose",
-          "name": "文章の傾向",
-          "when": "novelPreview.hasManuscript && config.novelPreview.prose",
-          "icon": "$(graph)",
-          "visibility": "collapsed"
+          "type": "webview",
+          "id": "novelPreview.panel",
+          "name": "小説パネル",
+          "when": "novelPreview.hasManuscript"
         }
       ]
     }

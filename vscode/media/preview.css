@@ -20,8 +20,7 @@ body {
   font-size: var(--vscode-font-size);
 }
 
-#toolbar,
-#setup {
+#toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -31,40 +30,16 @@ body {
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 }
 
-#setup {
-  align-items: flex-start;
-  gap: 10px 16px;
-}
-
 /* display を指定した要素でも hidden 属性で隠せるようにする（言語で切り替える入力欄など） */
-#setup[hidden],
-#toolbar label[hidden],
-#setup fieldset[hidden] {
+#toolbar label[hidden] {
   display: none;
 }
 
-#toolbar label,
-#setup label {
+#toolbar label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
-}
-
-fieldset {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  margin: 0;
-  padding: 4px 10px 8px;
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
-  border-radius: 4px;
-}
-
-legend {
-  padding: 0 4px;
-  color: var(--vscode-descriptionForeground);
 }
 
 input,
@@ -85,14 +60,6 @@ select {
 
 input[type="number"] {
   width: 3.6em;
-}
-
-input[type="radio"] {
-  margin: 0 2px 0 0;
-}
-
-#font-family {
-  width: 16em;
 }
 
 button {
@@ -202,38 +169,13 @@ button:disabled {
   white-space: nowrap;
 }
 
-#derived,
-#layout-file,
-#language-note {
-  color: var(--vscode-descriptionForeground);
-  align-self: center;
-}
-
-#workspace {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
-
 #viewport {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
   padding: 0 24px;
   background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.15));
-}
-
-#work-panel {
-  flex: 0 0 auto;
-  width: min(480px, 50%);
-  overflow: auto;
-  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
-  background: var(--vscode-editor-background);
-}
-
-#work-panel[hidden] {
-  display: none;
 }
 
 #viewport.fit {

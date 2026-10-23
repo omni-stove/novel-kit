@@ -26,9 +26,9 @@ import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../
 import { parsePageSpec } from '../../src/pdf.mjs';
 import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
-import { analyzeProse, createTokenizer, ENDINGS, LONG_SENTENCE_CHARS, REPEAT_WINDOW, RUN_MIN } from './prose.mjs';
+import { analyzeProse, createTokenizer, proseReport } from './prose.mjs';
 import { createSettingsEditorProvider, createWorkSettingsController, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
-import { renderWebviewHtml } from './webview.mjs';
+import { renderPanelHtml, renderWebviewHtml } from './webview.mjs';
 
 const RENDER_DELAY_MS = 250;
 /** 同じ段落への入力がこの間隔以内に続けば、取り消しの1回分にまとめる */
@@ -36,6 +36,9 @@ const UNDO_GROUP_MS = 1500;
 /** 小説プレビュー（カスタムエディタ）のID。workbench.editorAssociations で .txt の既定にできる */
 // package.json の customEditors と同じIDでなければならない
 const EDITOR_VIEW_TYPE = 'novelPreview.editor';
+/** 小説パネル（セカンダリサイドバーの webview）のID */
+// package.json の views と同じIDでなければならない
+const PANEL_VIEW_ID = 'novelPreview.panel';
 
 let context;
 let statusBar;
@@ -282,7 +285,6 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         type: 'render',
         css: built.css,
         body: built.body,
-        stats: built.stats,
         metrics,
         language: metrics.language,
         layout: metrics.layout,
@@ -303,64 +305,6 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
       session.externalChange = false;
     } catch (err) {
       panel.webview.postMessage({ type: 'message', text: `プレビューを作れませんでした: ${err.message}` });
-    }
-    if (workForm) syncWorkForm();
-  }
-
-  /**
-   * 作品設定の欄（開いている間だけ）。{ file: 原稿から一番近い novel.json（無ければ null）, controller }。
-   * 横のプレビューが別の作品の原稿に移ったり novel.json ができたりしたら、描画のたびに syncWorkForm で付け替える
-   */
-  let workForm = null;
-  const postWorkForm = (state) => panel.webview.postMessage({ type: 'workSettings', state });
-
-  async function syncWorkForm() {
-    const file = session.doc ? layoutFileFor(session.doc) : null;
-    if (workForm?.file === file) return;
-    workForm?.controller?.dispose();
-    const current = { file, controller: null };
-    workForm = current;
-    if (!file) {
-      postWorkForm({
-        file: null,
-        missing: session.doc ? vscode.workspace.asRelativePath(dirname(session.doc.uri.fsPath)) : '原稿のディレクトリ',
-      });
-      return;
-    }
-    const document = await vscode.workspace.openTextDocument(file);
-    // 待つ間に閉じられたり付け替えられたりしていれば、もう要らない
-    if (workForm !== current) return;
-    current.controller = createWorkSettingsController(document, {
-      post: postWorkForm,
-      build: buildOutputs,
-      linesOf,
-      openText: () => vscode.commands.executeCommand('vscode.openWith', document.uri, 'default'),
-      // novel.json はタブに無いことが多く、保存しないと見えないところに未保存の変更が残る。
-      // プレビューも設定ファイルをディスクから読むので、保存して初めて部の境界などが表示に効く
-      save: true,
-    });
-    current.controller.render();
-  }
-
-  function closeWorkForm() {
-    workForm?.controller?.dispose();
-    workForm = null;
-  }
-
-  /** 作品設定の欄のフォームからのメッセージ。ready で開き、close で閉じ、create で novel.json を作る */
-  function onWorkFormMessage(msg) {
-    switch (msg.type) {
-      case 'ready':
-        closeWorkForm();
-        return syncWorkForm();
-      case 'close':
-        return closeWorkForm();
-      case 'create':
-        if (session.doc && !layoutFileFor(session.doc))
-          writeFileSync(join(dirname(session.doc.uri.fsPath), CONFIG_FILENAME), '{}\n');
-        return syncWorkForm();
-      default:
-        return workForm?.controller?.onMessage(msg);
     }
   }
 
@@ -474,7 +418,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   }
 
   /**
-   * webview からのメッセージ。view は表示範囲・倍率・編集のオンオフ・表示の形（ページ・スクロール）を設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する。
+   * webview からのメッセージ。openPanel は小説パネルを msg.tab のタブで開き、view は表示範囲・倍率・編集のオンオフ・表示の形（ページ・スクロール）を設定ファイルに書き、同じ設定を見ているプレビューすべてに反映する。
    * jump は見ている位置のファイル（作品全体の表示なら、開いたファイルとは限らない）をテキストエディタで開く
    */
   function onMessage(msg) {
@@ -515,17 +459,13 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         return editQueue;
       case 'save':
         return saveFiles();
-      case 'savePreset':
-        return session.doc && savePreset(session.doc);
-      case 'deletePreset':
-        return deletePreset(msg.name);
       case 'export':
         if (!msg.names) return exportPdf(session);
         return (
           session.doc && buildOutputs(vscode.Uri.file(layoutFileFor(session.doc) ?? session.doc.uri.fsPath), msg.names)
         );
-      case 'workSettings':
-        return onWorkFormMessage(msg.msg);
+      case 'openPanel':
+        return showPanel(msg.tab);
     }
   }
 
@@ -533,8 +473,6 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   panel.webview.html = renderWebviewHtml({
     cssUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'preview.css')),
     jsUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'preview.js')),
-    formCssUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'work-settings.css')),
-    formJsUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'settings.js')),
     cspSource: panel.webview.cspSource,
     nonce: randomBytes(16).toString('hex'),
   });
@@ -542,7 +480,6 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   panel.onDidChangeViewState(updateStatusBar);
   panel.onDidDispose(() => {
     clearTimeout(renderTimer);
-    closeWorkForm();
     sessions.delete(session);
     if (sidePreview === session) sidePreview = null;
     updateStatusBar();
@@ -1098,130 +1035,30 @@ function refreshOutline() {
   outlineChanged.fire();
 }
 
-/** @type {vscode.EventEmitter<void>} */
-const proseChanged = new vscode.EventEmitter();
-let proseView;
-/** 傾向を出しているファイル（原稿から離れても、最後に見ていた原稿の傾向を残す） */
-let proseFile = null;
+/** 小説パネルの webview（初めて開くまでは null） */
+let panelView = null;
+/** 小説パネルで見せているタブ（prose: 文章の傾向 / work: 作品設定 / page: ページ設定） */
+let panelTab = 'prose';
+/** パネルを開く前に頼まれたタブ。開いたときは、webview が覚えていたタブよりこちらを見せる */
+let pendingPanelTab = null;
+/** パネルが対象にしている原稿（原稿から離れても、最後に見ていた原稿を残す） */
+let panelFile = null;
+/** 最後にパネルへ送った中身（種類ごとの JSON）。同じなら送り直さない */
+let panelPosted = {};
 let tokenizer = null;
 
-/** 形態素解析器。辞書の読み込みに数百 MB のメモリを使うので、「文章の傾向」を初めて開いたときに作る */
+/** 形態素解析器。辞書の読み込みに数百 MB のメモリを使うので、「文章の傾向」を初めて見せるときに作る */
 function proseTokenizer() {
   const dist = join(context.extensionPath, 'dist');
   tokenizer ??= createTokenizer({ wasm: join(dist, 'lindera_wasm_bg.wasm'), dictDir: join(dist, 'ipadic') });
   return tokenizer;
 }
 
-const BAR_CELLS = 10;
-const bar = (ratio) => {
-  const filled = Math.round(ratio * BAR_CELLS);
-  return '█'.repeat(filled) + '░'.repeat(BAR_CELLS - filled);
-};
-const percent = (n, total) => (total === 0 ? 0 : Math.round((n / total) * 100));
+/** 原稿 file を、設定を読む関数に渡す文書の代わりにする。タブを閉じた原稿でも使えるよう、中身は linesOf で読む */
+const manuscriptAt = (file) => ({ uri: vscode.Uri.file(file), getText: () => linesOf(file).join('\n') });
 
-/** 文を指す項目。クリックでその行を開く */
-function sentenceItem(file, sentence, description) {
-  const label = [...sentence.text].length > 24 ? `${[...sentence.text].slice(0, 24).join('')}…` : sentence.text;
-  const item = new vscode.TreeItem(label);
-  item.description = description ?? `${sentence.line + 1}行`;
-  item.tooltip = sentence.text;
-  item.command = { command: 'novelPreview.revealLine', title: '開く', arguments: [file, sentence.line] };
-  return item;
-}
-
-/** 件数を見出しにして、中に文を並べる項目 */
-function sentenceGroup(label, file, sentences, describe) {
-  /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
-  const item = new vscode.TreeItem(
-    label,
-    sentences.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-  );
-  item.description = `${sentences.length}`;
-  item.children = sentences.map((s) => sentenceItem(file, s, describe?.(s)));
-  return item;
-}
-
-/** エクスプローラーの「文章の傾向」。開いている原稿の文末の分布・文の長さ・台詞の割合などを出す（日本語の原稿だけ） */
-const proseProvider = {
-  onDidChangeTreeData: proseChanged.event,
-  getTreeItem: (item) => item,
-  getChildren(parent) {
-    if (parent) return parent.children;
-    if (!proseFile) return [];
-    const lines = linesOf(proseFile);
-    if (detectLanguageOfLines(lines) === 'en') {
-      return [new vscode.TreeItem('英語の原稿は数えません')];
-    }
-    const r = analyzeProse(lines, proseTokenizer());
-    const total = r.sentences.length;
-    const labelOf = Object.fromEntries(ENDINGS.map(({ key, label }) => [key, label]));
-
-    const dialogue = new vscode.TreeItem('台詞の割合');
-    dialogue.description = `${percent(r.dialogueChars, r.dialogueChars + r.narrationChars)}%`;
-    dialogue.tooltip = `台詞 ${r.dialogueChars.toLocaleString('ja-JP')}字 / 地の文 ${r.narrationChars.toLocaleString('ja-JP')}字`;
-
-    const lengths = new vscode.TreeItem('文の長さ');
-    const average = total === 0 ? 0 : Math.round(r.sentences.reduce((n, s) => n + s.length, 0) / total);
-    const longest = r.sentences.reduce((n, s) => Math.max(n, s.length), 0);
-    lengths.description = `平均 ${average}字・最長 ${longest}字`;
-
-    /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
-    const endings = new vscode.TreeItem(`文末（地の文 ${total}文）`, vscode.TreeItemCollapsibleState.Expanded);
-    endings.children = ENDINGS.map(({ key, label }) => {
-      const item = new vscode.TreeItem(label);
-      const n = r.endings[key];
-      item.description = `${bar(total === 0 ? 0 : n / total)} ${percent(n, total)}%・${n}`;
-      return item;
-    });
-
-    /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
-    const runs = new vscode.TreeItem(
-      `同じ文末の連続（${RUN_MIN}文以上）`,
-      r.runs.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-    );
-    runs.description = `${r.runs.length}`;
-    runs.children = r.runs.map((run) => {
-      const item = new vscode.TreeItem(`${labelOf[run.ending]} ×${run.count}`);
-      item.description = `${run.line + 1}行`;
-      item.command = { command: 'novelPreview.revealLine', title: '開く', arguments: [proseFile, run.line] };
-      return item;
-    });
-
-    /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
-    const repeats = new vscode.TreeItem(
-      `近くの同じ語（${REPEAT_WINDOW}文以内）`,
-      r.repeats.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-    );
-    repeats.description = `${r.repeats.length}`;
-    repeats.children = r.repeats.map((repeat) => {
-      const item = sentenceGroup(`「${repeat.word}」×${repeat.count}`, proseFile, repeat.sentences);
-      item.description = `${repeat.line + 1}行`;
-      item.command = { command: 'novelPreview.revealLine', title: '開く', arguments: [proseFile, repeat.line] };
-      return item;
-    });
-
-    return [
-      dialogue,
-      lengths,
-      endings,
-      runs,
-      repeats,
-      sentenceGroup(
-        `長い文（${LONG_SENTENCE_CHARS}字超）`,
-        proseFile,
-        r.longSentences,
-        (s) => `${s.length}字・${s.line + 1}行`,
-      ),
-      sentenceGroup('〜だった。', proseFile, r.datta),
-      sentenceGroup('〜ような・ように・みたい', proseFile, r.similes),
-    ];
-  },
-};
-
-/** 傾向を出した時点の原稿の版（ファイルと、開いていれば document.version、開いていなければ mtime） */
-let proseStamp = null;
-
-function proseStampOf(filePath) {
+/** 原稿の版（ファイルと、開いていれば document.version、開いていなければ mtime） */
+function fileStampOf(filePath) {
   const open = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === filePath);
   if (open) return `${filePath}:v${open.version}`;
   try {
@@ -1231,17 +1068,195 @@ function proseStampOf(filePath) {
   }
 }
 
-function refreshProse() {
+/** 「文章の傾向」を数えたときの、原稿・作品・レイアウトの版と、送る中身 */
+let proseCache = { stamp: null, state: null };
+
+/**
+ * 「文章の傾向」のタブに送る中身。{ file, stats: { file: このファイル, work: 作品全体（1ファイルなら null）（computeStats）, layout: レイアウトの表記 },
+ * english, report: 文章の傾向（proseReport。英語の原稿か、設定 novelPreview.prose がオフなら null） }
+ */
+function proseState(file) {
+  const { layout, english } = resolvedSettingsFor(manuscriptAt(file));
+  const files = listWorkFiles(file);
+  const work = files.length > 1 && files.includes(file) ? files : null;
+  const enabled = config().get('prose') !== false;
+  // カーソル移動や他のファイルの編集のたびに全文を形態素解析し直さないため、版が同じなら数え直さない
+  const stamp = [english, enabled, JSON.stringify(layout), ...[file, ...(work ?? [])].map(fileStampOf)].join('\n');
+  if (stamp === proseCache.stamp) return proseCache.state;
+  const metrics = computeMetrics(layout, { english });
+  const lines = linesOf(file);
+  const state = {
+    file: basename(file),
+    stats: {
+      file: computeStats([lines], metrics),
+      work: work && computeStats(work.map(linesOf), metrics),
+      layout: describeLayout(layout, { english }),
+    },
+    english,
+    report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer())),
+  };
+  proseCache = { stamp, state };
+  return state;
+}
+
+/** 「ページ設定」のタブに送る中身（原稿の言語のレイアウトと、そこから決まる字数×行数・文字サイズ） */
+function pageState(file) {
+  const doc = manuscriptAt(file);
+  const { layout, english } = resolvedSettingsFor(doc);
+  const metrics = computeMetrics(layout, { english });
+  const presets = allPresets(english);
+  const layoutFile = layoutFileFor(doc);
+  return {
+    file: basename(file),
+    layout: metrics.layout,
+    metrics,
+    language: metrics.language,
+    presets: Object.keys(presets),
+    presetName: Object.keys(presets).find((name) => layoutsEqual(presets[name], layout, { english })) ?? null,
+    userPresetNames: Object.keys(userPresets(english)),
+    layoutFile: layoutFile ? vscode.workspace.asRelativePath(layoutFile) : null,
+  };
+}
+
+/** パネルへ type の中身を送る（前に送ったものと同じなら送らない） */
+function postPanel(type, state) {
+  const json = JSON.stringify(state);
+  if (panelPosted[type] === json) return;
+  panelPosted[type] = json;
+  panelView.webview.postMessage({ type, ...state });
+}
+
+/** パネルの中身を作り直す。見えているタブの分だけ作る */
+function refreshPanel() {
   const doc = activeManuscript();
-  if (doc) proseFile = doc.uri.fsPath;
-  if (!proseView?.visible) return;
-  // カーソル移動や他のファイルの編集のたびに全文を形態素解析し直さないため、版が同じなら更新しない
-  const stamp = proseFile ? proseStampOf(proseFile) : null;
-  if (stamp === proseStamp) return;
-  proseStamp = stamp;
-  proseView.message = proseFile ? undefined : '原稿（.txt）を開くと、その文章の傾向を出します。';
-  proseView.title = proseFile ? `文章の傾向: ${basename(proseFile)}` : '文章の傾向';
-  proseChanged.fire();
+  if (doc) panelFile = doc.uri.fsPath;
+  if (!panelView?.visible) return;
+  postPanel('message', {
+    text: panelFile ? '' : '原稿（.txt）を開くと、その文章の傾向・作品設定・ページ設定を出します。',
+  });
+  if (!panelFile) return;
+  if (panelTab !== 'work') closePanelWork();
+  try {
+    if (panelTab === 'prose') postPanel('prose', proseState(panelFile));
+    else if (panelTab === 'page') postPanel('page', pageState(panelFile));
+    else syncPanelWork();
+  } catch (err) {
+    postPanel('message', {
+      text: `${basename(panelFile)} の${panelTab === 'prose' ? '文章の傾向' : '設定'}を出せませんでした: ${err.message}`,
+    });
+  }
+}
+
+/**
+ * 作品設定のタブのフォーム（タブを見せている間だけ）。{ file: 原稿から一番近い novel.json（無ければ null）, controller }。
+ * 別の作品の原稿に移ったり novel.json ができたりしたら、syncPanelWork で付け替える
+ */
+let panelWork = null;
+const postPanelWork = (state) => panelView?.webview.postMessage({ type: 'workSettings', state });
+
+async function syncPanelWork() {
+  const file = layoutFileFor(manuscriptAt(panelFile));
+  if (panelWork?.file === file) return;
+  panelWork?.controller?.dispose();
+  const current = { file, controller: null };
+  panelWork = current;
+  if (!file) {
+    postPanelWork({ file: null, missing: vscode.workspace.asRelativePath(dirname(panelFile)) });
+    return;
+  }
+  const document = await vscode.workspace.openTextDocument(file);
+  // 待つ間にタブを替えられたり付け替えられたりしていれば、もう要らない
+  if (panelWork !== current) return;
+  current.controller = createWorkSettingsController(document, {
+    post: postPanelWork,
+    build: buildOutputs,
+    linesOf,
+    openText: () => vscode.commands.executeCommand('vscode.openWith', document.uri, 'default'),
+    // novel.json はタブに無いことが多く、保存しないと見えないところに未保存の変更が残る。
+    // プレビューも設定ファイルをディスクから読むので、保存して初めて部の境界などが表示に効く
+    save: true,
+  });
+  current.controller.render();
+}
+
+function closePanelWork() {
+  panelWork?.controller?.dispose();
+  panelWork = null;
+}
+
+/**
+ * パネルからのメッセージ。ready・tab でタブを決めて中身を作り、reveal で原稿の行を開き、layout・preset でレイアウトを変え、
+ * work は作品設定のフォームのメッセージ（create で novel.json を作る）
+ */
+function onPanelMessage(msg) {
+  const doc = panelFile ? manuscriptAt(panelFile) : null;
+  switch (msg.type) {
+    case 'ready':
+      panelTab = pendingPanelTab ?? msg.tab;
+      pendingPanelTab = null;
+      panelPosted = {};
+      closePanelWork();
+      panelView.webview.postMessage({ type: 'tab', tab: panelTab });
+      return refreshPanel();
+    case 'tab':
+      panelTab = msg.tab;
+      return refreshPanel();
+    case 'reveal':
+      return panelFile && revealLine(panelFile, msg.line);
+    case 'layout':
+      // 範囲外の値は丸めて保存するので、レイアウトが変わらなくても入力欄を保存した値に戻す
+      panelPosted.page = null;
+      return doc && setLayout(doc, msg.layout);
+    case 'preset': {
+      const preset = doc && allPresets(isEnglishManuscript(doc))[msg.name];
+      return preset && setLayout(doc, preset);
+    }
+    case 'savePreset':
+      return doc && savePreset(doc);
+    case 'deletePreset':
+      return deletePreset(msg.name);
+    case 'openSettings':
+      return vscode.commands.executeCommand('workbench.action.openSettings', 'novelPreview.prose');
+    case 'work':
+      if (msg.msg.type !== 'create') return panelWork?.controller?.onMessage(msg.msg);
+      if (doc && !layoutFileFor(doc)) writeFileSync(join(dirname(panelFile), CONFIG_FILENAME), '{}\n');
+      return syncPanelWork();
+  }
+}
+
+/** セカンダリサイドバーの「小説」に出す小説パネル */
+const panelProvider = {
+  resolveWebviewView(view) {
+    panelView = view;
+    const mediaRoot = vscode.Uri.joinPath(context.extensionUri, 'media');
+    const uri = (name) => view.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, name));
+    view.webview.options = { enableScripts: true, localResourceRoots: [mediaRoot] };
+    view.webview.html = renderPanelHtml({
+      cssUris: [uri('panel.css'), uri('work-settings.css')],
+      jsUris: [uri('settings.js'), uri('panel.js')],
+      cspSource: view.webview.cspSource,
+      nonce: randomBytes(16).toString('hex'),
+    });
+    view.webview.onDidReceiveMessage(onPanelMessage);
+    // 隠れている間は novel.json と原稿を見張らなくてよいので、作品設定のフォームを閉じる
+    view.onDidChangeVisibility(() => (view.visible ? refreshPanel() : closePanelWork()));
+    view.onDidDispose(() => {
+      closePanelWork();
+      panelView = null;
+    });
+  },
+};
+
+/** 小説パネルを開く。tab があればそのタブにする */
+async function showPanel(tab) {
+  if (tab && panelView) {
+    panelTab = tab;
+    panelView.webview.postMessage({ type: 'tab', tab });
+    refreshPanel();
+  } else if (tab) {
+    pendingPanelTab = tab;
+  }
+  await vscode.commands.executeCommand(`${PANEL_VIEW_ID}.focus`);
 }
 
 async function revealLine(file, line) {
@@ -1276,12 +1291,12 @@ async function openNeighborFile(step) {
 const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
 
 /**
- * ステータスバーに文字数（英語は語数）・換算枚数・レイアウトを出す（目次も作り直す）。
+ * ステータスバーに文字数（英語は語数）・換算枚数・レイアウトを出す（目次と小説パネルも作り直す）。
  * 横のプレビューだけが残っていて、前面が原稿でもプレビューでもないときは出さない
  */
 function updateStatusBar() {
   refreshOutline();
-  refreshProse();
+  refreshPanel();
   const doc = activeManuscript();
   const showing =
     doc && (isManuscript(vscode.window.activeTextEditor?.document) || [...sessions].some((s) => s.panel.active));
@@ -1365,7 +1380,6 @@ export function activate(ctx) {
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 200);
   statusBar.command = 'novelPreview.selectLayout';
   outlineView = vscode.window.createTreeView('novelPreview.outline', { treeDataProvider: outlineProvider });
-  proseView = vscode.window.createTreeView('novelPreview.prose', { treeDataProvider: proseProvider });
   reloadOnRebuild(ctx);
 
   // 設定ファイルを手で書き換えたとき・置き場所を変えたときにも追従する
@@ -1412,9 +1426,10 @@ export function activate(ctx) {
     outlineView,
     outlineView.onDidChangeVisibility(refreshOutline),
     vscode.commands.registerCommand('novelPreview.revealLine', revealLine),
-    proseChanged,
-    proseView,
-    proseView.onDidChangeVisibility(refreshProse),
+    vscode.window.registerWebviewViewProvider(PANEL_VIEW_ID, panelProvider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.commands.registerCommand('novelPreview.showPanel', () => showPanel()),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       updateStatusBar();
       if (!isManuscript(editor?.document)) return;

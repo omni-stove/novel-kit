@@ -1,6 +1,6 @@
 /**
- * プレビュー webview の外枠（ツールバー・ページ設定・用紙を並べる（スクロール表示では本文を流す）領域・作品設定の欄）。
- * 本文とそのスタイルは render メッセージで後から差し込む（media/preview.js）。作品設定の欄のフォームは media/settings.js
+ * webview の外枠。プレビュー（ツールバーと、用紙を並べる（スクロール表示では本文を流す）領域）と、
+ * 小説パネル（文章の傾向・作品設定・ページ設定のタブ）。中身は拡張からのメッセージで後から埋める（media/preview.js・media/panel.js）
  */
 
 import { PAPER_SIZES } from '../../src/layout.mjs';
@@ -14,7 +14,8 @@ const marginInput = (side, label) =>
 
 const PAPER_LABELS = { '6x9in': '6×9in', '5x8in': '5×8in' };
 
-export function renderWebviewHtml({ cssUri, jsUri, formCssUri, formJsUri, cspSource, nonce }) {
+/** プレビューの外枠。本文とそのスタイルは render メッセージで後から差し込む */
+export function renderWebviewHtml({ cssUri, jsUri, cspSource, nonce }) {
   const csp = [
     "default-src 'none'",
     `style-src ${cspSource} 'unsafe-inline' https://fonts.googleapis.com`,
@@ -32,7 +33,6 @@ export function renderWebviewHtml({ cssUri, jsUri, formCssUri, formJsUri, cspSou
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
   <style id="doc-style"></style>
   <link rel="stylesheet" href="${cssUri}">
-  <link rel="stylesheet" href="${formCssUri}">
 </head>
 <body>
   <header id="toolbar">
@@ -41,7 +41,7 @@ export function renderWebviewHtml({ cssUri, jsUri, formCssUri, formJsUri, cspSou
       <input id="lines" data-layout-field type="number" min="1" max="100">行</label>
     <label id="en-fields" hidden><input id="font-size" data-layout-field type="number" min="5" max="40" step="0.5">pt ×
       行送り<input id="line-height" data-layout-field type="number" min="1" max="3" step="0.05"></label>
-    <button id="toggle-setup" aria-pressed="false">ページ設定</button>
+    <button id="open-page-settings" title="用紙・余白・文字方向・フォントを、小説パネルの「ページ設定」で変える">ページ設定</button>
     <span id="scope" class="segmented">
       <button data-scope="file">このファイル</button><button data-scope="work">作品全体</button>
     </span>
@@ -51,14 +51,71 @@ export function renderWebviewHtml({ cssUri, jsUri, formCssUri, formJsUri, cspSou
       <button data-mode="page">ページ</button><button data-mode="scroll">スクロール</button>
     </span>
     <label>表示<select id="zoom">${options(ZOOM_OPTIONS)}</select></label>
-    <button id="work-settings" aria-pressed="false" title="novel.json の作品情報・部の境界・出力を、プレビューの横で編集する">作品設定</button>
+    <button id="open-work-settings" title="novel.json の作品情報・部の境界・出力を、小説パネルの「作品設定」で編集する">作品設定</button>
     <span id="export-wrap">
       <button id="export" aria-haspopup="menu" aria-expanded="false" title="作るものをメニューから選ぶ（現在のレイアウトでPDF・novel.json の出力）">出力 ▾</button>
       <div id="export-menu" role="menu" hidden></div>
     </span>
     <span id="stats"></span>
   </header>
-  <section id="setup" hidden>
+  <main id="viewport">
+    <p id="message">原稿のテキストファイル（.txt）を開くとプレビューを表示します。</p>
+    <div id="stage" hidden>
+      <div id="sheets"></div>
+      <div id="flow"></div>
+    </div>
+  </main>
+  <script nonce="${nonce}" src="${jsUri}"></script>
+</body>
+</html>`;
+}
+
+/**
+ * 小説パネルの外枠。タブは文章の傾向（#tab-prose）・作品設定（#tab-work。フォームは media/settings.js）・ページ設定（#tab-page）。
+ * cssUris / jsUris は読み込む順に並べる
+ */
+export function renderPanelHtml({ cssUris, jsUris, cspSource, nonce }) {
+  const csp = [
+    "default-src 'none'",
+    `style-src ${cspSource} 'unsafe-inline'`,
+    `font-src ${cspSource}`,
+    `script-src 'nonce-${nonce}'`,
+  ].join('; ');
+
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="${csp}">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  ${cssUris.map((uri) => `<link rel="stylesheet" href="${uri}">`).join('\n  ')}
+</head>
+<body>
+  <nav id="tabs" role="tablist">
+    <button role="tab" data-tab="prose" aria-selected="true">文章の傾向</button>
+    <button role="tab" data-tab="work" aria-selected="false">作品設定</button>
+    <button role="tab" data-tab="page" aria-selected="false">ページ設定</button>
+  </nav>
+  <p id="message" hidden></p>
+  <section id="tab-prose" role="tabpanel">
+    <p id="prose-file" class="file"></p>
+    <dl id="counts"></dl>
+    <div id="analysis"></div>
+  </section>
+  <section id="tab-work" role="tabpanel" hidden></section>
+  <section id="tab-page" role="tabpanel" hidden>
+    <p id="page-file" class="file"></p>
+    <label>レイアウト<select id="preset"></select></label>
+    <fieldset id="grid-fields">
+      <legend>字数×行数</legend>
+      <label><input id="chars" data-layout-field type="number" min="5" max="100">字</label>
+      <label><input id="lines" data-layout-field type="number" min="1" max="100">行</label>
+    </fieldset>
+    <fieldset id="en-fields" hidden>
+      <legend>文字</legend>
+      <label><input id="font-size" data-layout-field type="number" min="5" max="40" step="0.5">pt</label>
+      <label>行送り<input id="line-height" data-layout-field type="number" min="1" max="3" step="0.05"></label>
+    </fieldset>
     <fieldset id="writing-mode-fields">
       <legend>文字方向</legend>
       <label><input type="radio" name="writing-mode" value="vertical" data-layout-field>縦書き</label>
@@ -83,24 +140,15 @@ export function renderWebviewHtml({ cssUri, jsUri, formCssUri, formJsUri, cspSou
       <legend>フォント</legend>
       <input id="font-family" data-layout-field type="text">
     </fieldset>
-    <span id="language-note"></span>
-    <span id="derived"></span>
-    <span id="layout-file"></span>
-    <button id="save-preset">プリセットとして保存…</button>
-    <button id="delete-preset">プリセットを削除</button>
+    <p id="language-note" class="note"></p>
+    <p id="derived" class="note"></p>
+    <p id="layout-file" class="note"></p>
+    <div class="buttons">
+      <button id="save-preset">プリセットとして保存…</button>
+      <button id="delete-preset">プリセットを削除</button>
+    </div>
   </section>
-  <div id="workspace">
-    <main id="viewport">
-      <p id="message">原稿のテキストファイル（.txt）を開くとプレビューを表示します。</p>
-      <div id="stage" hidden>
-        <div id="sheets"></div>
-        <div id="flow"></div>
-      </div>
-    </main>
-    <aside id="work-panel" hidden></aside>
-  </div>
-  <script nonce="${nonce}" src="${formJsUri}"></script>
-  <script nonce="${nonce}" src="${jsUri}"></script>
+  ${jsUris.map((uri) => `<script nonce="${nonce}" src="${uri}"></script>`).join('\n  ')}
 </body>
 </html>`;
 }

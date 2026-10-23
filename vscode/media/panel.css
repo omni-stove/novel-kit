@@ -1,0 +1,332 @@
+/* 小説パネル（セカンダリサイドバー）。作品設定のフォームの見た目は work-settings.css */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+/* display を指定した要素でも hidden 属性で隠せるようにする。原稿を開くまでは案内（#message）だけを出す */
+#tab-page[hidden],
+fieldset[hidden],
+body.blank :is(#tab-prose, #tab-work, #tab-page) {
+  display: none;
+}
+
+#tabs {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+}
+
+#tabs button {
+  flex: 1;
+  padding: 6px 4px;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+}
+
+#tabs button:hover {
+  color: var(--vscode-foreground);
+}
+
+#tabs button[aria-selected="true"] {
+  color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
+  border-bottom-color: var(--vscode-focusBorder, var(--vscode-button-background));
+}
+
+#message {
+  margin: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+
+[role="tabpanel"] {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+#tab-prose,
+#tab-page {
+  padding: 8px 12px 16px;
+}
+
+/* サイドバーは狭いので、作品設定のフォームの余白を詰める */
+#tab-work .work-head {
+  padding: 6px 12px;
+}
+
+#tab-work .work-form {
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+#tab-work .card {
+  padding: 2px 10px 10px;
+}
+
+.file {
+  margin: 0 0 8px;
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 4px 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+a {
+  color: var(--vscode-textLink-foreground);
+}
+
+/* 文章の傾向 */
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0 0 10px;
+}
+
+dt {
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+
+dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+h3 {
+  margin: 12px 0 4px;
+  font-size: 1em;
+}
+
+table.endings {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+table.endings th {
+  padding: 1px 8px 1px 0;
+  font-weight: normal;
+  text-align: left;
+  white-space: nowrap;
+}
+
+table.endings td {
+  padding: 1px 0 1px 6px;
+}
+
+table.endings td:nth-child(2) {
+  width: 100%;
+}
+
+table.endings .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bar {
+  display: block;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.15));
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--vscode-charts-blue, var(--vscode-button-background));
+}
+
+details {
+  margin-top: 6px;
+}
+
+details ul {
+  margin: 2px 0 4px;
+  padding-left: 12px;
+  list-style: none;
+}
+
+details details {
+  margin-top: 0;
+}
+
+summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+summary::before {
+  content: "▸";
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+}
+
+details[open] > summary::before {
+  content: "▾";
+}
+
+details.empty > summary {
+  cursor: default;
+}
+
+details.empty > summary::before {
+  visibility: hidden;
+}
+
+.count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 0.9em;
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+}
+
+button.line {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 1px 4px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+}
+
+summary button.line {
+  flex: 1;
+  width: auto;
+}
+
+button.line:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+button.line .text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.line .note {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* ページ設定 */
+
+#tab-page {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+#tab-page label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 4px 10px 8px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  border-radius: 4px;
+}
+
+legend {
+  padding: 0 4px;
+  color: var(--vscode-descriptionForeground);
+}
+
+#tab-page :is(input, select, button) {
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.4));
+  border-radius: 3px;
+  padding: 2px 6px;
+  min-width: 0;
+}
+
+#tab-page select {
+  color: var(--vscode-dropdown-foreground);
+  background: var(--vscode-dropdown-background);
+}
+
+#tab-page input[type="number"] {
+  width: 5em;
+}
+
+#tab-page input[type="radio"] {
+  margin: 0 2px 0 0;
+}
+
+#font-family {
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#tab-page .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#tab-page button {
+  cursor: pointer;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border-color: transparent;
+}
+
+#tab-page button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+#tab-page button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#tab-page .note {
+  margin: 0;
+}

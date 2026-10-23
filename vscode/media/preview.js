@@ -35,8 +35,6 @@
   /** 表示の形。'page' = 用紙に組んでページで見せる / 'scroll' = ページを区切らず横書きで縦に流す */
   let mode = 'page';
 
-  const formatNumber = (n) => n.toLocaleString('ja-JP');
-  const formatPages = (n) => (Math.round(n * 10) / 10).toLocaleString('ja-JP');
   const isEnglish = () => model?.language === 'en';
 
   /** 左右の余白（px）。「画面に合わせる」では取らず、幅が決め手になるときは用紙を表示領域の幅いっぱいに広げる */
@@ -172,16 +170,10 @@
     return `${range > 0 ? Math.round((viewport.scrollTop / range) * 100) : 100}%`;
   }
 
+  /** ツールバーの右端に見ている位置を出す（文字数は小説パネルの「文章の傾向」とステータスバーに出す） */
   function updateStats() {
     if (!model || !geometry) return;
-    if (isEnglish()) {
-      const { words, chars } = model.stats;
-      $('stats').textContent =
-        `${words.toLocaleString('en-US')} words ・ ${formatNumber(chars)}字 ・ ${positionText()}`;
-      return;
-    }
-    const { chars, genkoPages } = model.stats;
-    $('stats').textContent = `${formatNumber(chars)}字 ・ 400字詰め ${formatPages(genkoPages)}枚 ・ ${positionText()}`;
+    $('stats').textContent = positionText();
   }
 
   /**
@@ -568,11 +560,6 @@
       if (key !== 'z' && key !== 'y') return;
       e.preventDefault();
       e.stopPropagation();
-      // 作品設定の欄の入力欄では、その欄の打ち間違いを戻す（原稿の取り消しにはしない）
-      if (/** @type {HTMLElement} */ (e.target).closest?.('#work-panel')) {
-        document.execCommand(key === 'y' || e.shiftKey ? 'redo' : 'undo');
-        return;
-      }
       vscode.postMessage({ type: key === 'y' || e.shiftKey ? 'redo' : 'undo' });
     },
     true,
@@ -585,9 +572,9 @@
     }
   });
 
-  /** ツールバーとページ設定の欄を、render で届いた値で埋める。英語の原稿は横書き固定で、設定ファイルの "english" のレイアウトを見せる */
+  /** ツールバーを、render で届いた値で埋める。英語の原稿は字数×行数の代わりに文字サイズと行送りを見せる */
   function fillForm() {
-    const { layout, metrics, presets, presetName, scope, canShowWork, userPresetNames, layoutFile, language } = model;
+    const { layout, metrics, presets, presetName, scope, canShowWork, language } = model;
     const english = language === 'en';
 
     const preset = $('preset');
@@ -604,51 +591,20 @@
     $('font-size').value = english ? layout.fontSize : '';
     $('line-height').value = english ? layout.lineHeight : '';
 
-    $('language-note').textContent = english ? '英語の原稿（横書き固定。設定は english に保存）' : '';
-    $('writing-mode-fields').hidden = english;
-    for (const radio of /** @type {NodeListOf<HTMLInputElement>} */ (
-      document.querySelectorAll('input[name="writing-mode"]')
-    )) {
-      radio.checked = radio.value === (layout.writingMode ?? 'horizontal');
-    }
-    $('paper').value = layout.paper;
-    $('orientation').value = layout.orientation;
-    for (const side of ['top', 'bottom', 'left', 'right']) $(`margin-${side}`).value = layout.margin[side];
-    $('font-family').value = layout.fontFamily;
-    $('font-family').placeholder = english ? '既定（EB Garamond / Georgia）' : '既定（Noto Serif JP / 游明朝）';
-    const pitch = `行送り ${Math.round(metrics.linePitchMm * 100) / 100}mm`;
-    $('derived').textContent = english
-      ? `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（約${metrics.charsApprox}字×${metrics.lines}行）`
-      : `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（${metrics.chars}字×${metrics.lines}行）`;
-    $('layout-file').textContent = layoutFile
-      ? `設定ファイル: ${layoutFile}`
-      : '設定ファイル: なし（変更すると原稿と同じ場所に novel.json を作ります）';
-    $('delete-preset').disabled = !userPresetNames.includes(presetName);
-
     for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('#scope button'))) {
       button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
       if (button.dataset.scope === 'work') button.disabled = !canShowWork;
     }
   }
 
-  /** ページ設定の欄の値（レイアウト） */
+  /** ツールバーで変えたレイアウト。用紙・余白などはツールバーに無いので、いまのレイアウトのまま */
   function readForm() {
     return {
-      writingMode: /** @type {HTMLInputElement | null} */ (document.querySelector('input[name="writing-mode"]:checked'))
-        ?.value,
-      paper: $('paper').value,
-      orientation: $('orientation').value,
-      margin: {
-        top: $('margin-top').value,
-        right: $('margin-right').value,
-        bottom: $('margin-bottom').value,
-        left: $('margin-left').value,
-      },
+      ...model.layout,
       chars: $('chars').value,
       lines: $('lines').value,
       fontSize: $('font-size').value,
       lineHeight: $('line-height').value,
-      fontFamily: $('font-family').value,
     };
   }
 
@@ -662,12 +618,8 @@
     const scope = e.target.dataset?.scope;
     if (scope) vscode.postMessage({ type: 'view', view: { scope } });
   });
-  $('toggle-setup').addEventListener('click', () => {
-    const setup = $('setup');
-    setup.hidden = !setup.hidden;
-    $('toggle-setup').setAttribute('aria-pressed', String(!setup.hidden));
-    layoutStage();
-  });
+  $('open-page-settings').addEventListener('click', () => vscode.postMessage({ type: 'openPanel', tab: 'page' }));
+  $('open-work-settings').addEventListener('click', () => vscode.postMessage({ type: 'openPanel', tab: 'work' }));
   $('toggle-edit').addEventListener('click', () => {
     setEditEnabled(!editEnabled);
     vscode.postMessage({ type: 'view', view: { edit: editEnabled } });
@@ -698,10 +650,6 @@
     layoutStage();
     reveal(lastReveal);
   });
-  $('save-preset').addEventListener('click', () => vscode.postMessage({ type: 'savePreset' }));
-  $('delete-preset').addEventListener('click', () =>
-    vscode.postMessage({ type: 'deletePreset', name: $('preset').value }),
-  );
 
   /**
    * 「出力」のメニュー。現在のレイアウトでPDF と、render で届いた novel.json の出力（model.outputs）を並べる。
@@ -776,19 +724,6 @@
     }
   });
 
-  /** 作品設定の欄のフォーム（settings.js）。初めて開いたときに作る */
-  let workForm = null;
-  const postWorkSettings = (msg) => vscode.postMessage({ type: 'workSettings', msg });
-  $('work-settings').addEventListener('click', () => {
-    const panel = $('work-panel');
-    panel.hidden = !panel.hidden;
-    $('work-settings').setAttribute('aria-pressed', String(!panel.hidden));
-    // 閉じている間は novel.json と原稿を見張らなくてよいので、拡張にも開け閉めを伝える
-    if (panel.hidden) return postWorkSettings({ type: 'close' });
-    workForm ??= createWorkSettingsForm(panel, postWorkSettings, { scroller: panel });
-    postWorkSettings({ type: 'ready' });
-  });
-
   // PDF 用 CSS の hanging-punctuation: allow-end last は Chromium では効かないので、Vivliostyle と同じ方法で再現する。
   // 句読点を文字送り 0（letter-spacing: -1em）にし、直後に 1 字ぶんの隠しスペースを置く（preview.css の .hang）。
   // 行の途中ではスペースが句読点のマスを埋めて見た目が変わらず、行末に来たときだけスペースが行末の空白として消え、
@@ -836,12 +771,8 @@
 
   window.addEventListener('message', ({ data }) => {
     if (data.type === 'render') {
-      if (editing && !data.focusEdit && !data.external) {
-        // 編集中の段落を壊さないよう、自分の入力の反映による組み直しは編集を終えるまで保留する
-        model.stats = data.stats;
-        updateStats();
-        return;
-      }
+      // 編集中の段落を壊さないよう、自分の入力の反映による組み直しは編集を終えるまで保留する
+      if (editing && !data.focusEdit && !data.external) return;
       if (editing && !data.focusEdit) {
         const { fileIndex, line } = editing;
         // 外からの変更（取り消しなど）は編集中の段落も組み直すので、同じ行・同じ位置で編集を続けられるようにする
@@ -894,8 +825,6 @@
         // プレビュー側で作業している間は、エディタのカーソル位置へ引き戻さない
         reveal(data.reveal ?? lastReveal);
       }
-    } else if (data.type === 'workSettings') {
-      workForm?.render(data.state);
     } else if (data.type === 'reveal') {
       reveal(data.target);
     } else if (data.type === 'message') {
@@ -1047,8 +976,7 @@
   window.addEventListener('keydown', (e) => {
     if (!geometry || editing || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
     const target = /** @type {HTMLElement} */ (e.target);
-    if (target.isContentEditable || target.closest('input, select, textarea, #setup, #work-panel, #export-wrap'))
-      return;
+    if (target.isContentEditable || target.closest('input, select, textarea, #export-wrap')) return;
     if (geometry.scroll) return scrollByKey(e);
     if (e.key === 'Home' || e.key === 'End') {
       e.preventDefault();
