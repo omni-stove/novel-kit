@@ -36,7 +36,6 @@
     if (next && next !== tab) selectTab(next);
   });
 
-  // 文章の傾向
 
   /** 開いている一覧（title）。描き直しても開け閉めを保つ */
   const openLists = new Set();
@@ -161,7 +160,6 @@
     );
   }
 
-  // ページ設定
 
   /** ページ設定の欄を、届いた値で埋める。英語の原稿は横書き固定で、設定ファイルの "english" のレイアウトを見せる */
   function fillPage(data) {
@@ -242,7 +240,6 @@
     vscode.postMessage({ type: 'deletePreset', name: $('preset').value }),
   );
 
-  // 作品設定
 
   const postWork = (msg) => vscode.postMessage({ type: 'work', msg });
   const workForm = createWorkSettingsForm($('tab-work'), postWork, { scroller: $('tab-work') });

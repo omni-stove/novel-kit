@@ -94,7 +94,6 @@ a {
   color: var(--vscode-textLink-foreground);
 }
 
-/* 文章の傾向 */
 
 dl {
   display: grid;
@@ -244,7 +243,6 @@ button.line .note {
   margin: 0;
 }
 
-/* ページ設定 */
 
 #tab-page {
   display: flex;
