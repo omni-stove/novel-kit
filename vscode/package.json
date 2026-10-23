@@ -11,7 +11,7 @@
   },
   "license": "ISC",
   "engines": {
-    "vscode": "^1.106.0"
+    "vscode": "^1.100.0"
   },
   "categories": [
     "Visualization",
@@ -377,15 +377,6 @@
         }
       }
     },
-    "viewsContainers": {
-      "secondarySidebar": [
-        {
-          "id": "novelPreview",
-          "title": "小説",
-          "icon": "media/panel-icon.svg"
-        }
-      ]
-    },
     "views": {
       "explorer": [
         {
@@ -393,14 +384,6 @@
           "name": "小説の目次",
           "when": "novelPreview.hasManuscript",
           "icon": "$(book)"
-        }
-      ],
-      "novelPreview": [
-        {
-          "type": "webview",
-          "id": "novelPreview.panel",
-          "name": "小説パネル",
-          "when": "novelPreview.hasManuscript"
         }
       ]
     }

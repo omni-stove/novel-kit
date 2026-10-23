@@ -1,34 +1,48 @@
-/* 小説パネル（セカンダリサイドバー）。作品設定のフォームの見た目は work-settings.css */
-html,
-body {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-body {
+/* 小説パネル（プレビューの右の #novel-panel）。プレビューと同じ文書に入るので、どの規則も #novel-panel の中に限る。作品設定のフォームの見た目は work-settings.css */
+#novel-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
+  width: 340px;
+  min-width: 220px;
+  max-width: 70%;
+  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
   color: var(--vscode-foreground);
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
 }
 
-/* display を指定した要素でも hidden 属性で隠せるようにする。原稿を開くまでは案内（#message）だけを出す */
-#tab-page[hidden],
-fieldset[hidden],
-body.blank :is(#tab-prose, #tab-work, #tab-page) {
+/* display を指定した要素でも hidden 属性で隠せるようにする。原稿を開くまでは案内（#panel-message）だけを出す */
+#novel-panel[hidden],
+#novel-panel #tab-page[hidden],
+#novel-panel fieldset[hidden],
+#novel-panel.blank :is(#tab-prose, #tab-work, #tab-page) {
   display: none;
 }
 
-#tabs {
+/* 境目をドラッグして幅を変える（media/panel.js） */
+#panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+#panel-resizer:hover,
+#panel-resizer:active {
+  background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+}
+
+#novel-panel #tabs {
   display: flex;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
 }
 
-#tabs button {
+#novel-panel #tabs button {
   flex: 1;
   padding: 6px 4px;
   font: inherit;
@@ -40,137 +54,142 @@ body.blank :is(#tab-prose, #tab-work, #tab-page) {
   border-bottom: 2px solid transparent;
 }
 
-#tabs button:hover {
+#novel-panel #tabs button:hover {
   color: var(--vscode-foreground);
 }
 
-#tabs button[aria-selected="true"] {
+#novel-panel #tabs #close-panel {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+}
+
+#novel-panel #tabs button[aria-selected="true"] {
   color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
   border-bottom-color: var(--vscode-focusBorder, var(--vscode-button-background));
 }
 
-#message {
+#novel-panel #panel-message {
   margin: 12px;
   color: var(--vscode-descriptionForeground);
 }
 
-[role="tabpanel"] {
+#novel-panel [role="tabpanel"] {
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
 
-#tab-prose,
-#tab-page {
+#novel-panel #tab-prose,
+#novel-panel #tab-page {
   padding: 8px 12px 16px;
 }
 
-/* サイドバーは狭いので、作品設定のフォームの余白を詰める */
-#tab-work .work-head {
+/* パネルは狭いので、作品設定のフォームの余白を詰める */
+#novel-panel #tab-work .work-head {
   padding: 6px 12px;
 }
 
-#tab-work .work-form {
+#novel-panel #tab-work .work-form {
   gap: 10px;
   padding: 10px 12px;
 }
 
-#tab-work .card {
+#novel-panel #tab-work .card {
   padding: 2px 10px 10px;
 }
 
-.file {
+#novel-panel .file {
   margin: 0 0 8px;
   font-weight: bold;
   overflow-wrap: anywhere;
 }
 
-.note {
+#novel-panel .note {
   margin: 4px 0;
   color: var(--vscode-descriptionForeground);
 }
 
-a {
+#novel-panel a {
   color: var(--vscode-textLink-foreground);
 }
 
-dl {
+#novel-panel dl {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 2px 10px;
   margin: 0 0 10px;
 }
 
-dt {
+#novel-panel dt {
   color: var(--vscode-descriptionForeground);
   white-space: nowrap;
 }
 
-dd {
+#novel-panel dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
 
-h3 {
+#novel-panel h3 {
   margin: 12px 0 4px;
   font-size: 1em;
 }
 
-table.endings {
+#novel-panel table.endings {
   width: 100%;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
 
-table.endings th {
+#novel-panel table.endings th {
   padding: 1px 8px 1px 0;
   font-weight: normal;
   text-align: left;
   white-space: nowrap;
 }
 
-table.endings td {
+#novel-panel table.endings td {
   padding: 1px 0 1px 6px;
 }
 
-table.endings td:nth-child(2) {
+#novel-panel table.endings td:nth-child(2) {
   width: 100%;
 }
 
-table.endings .num {
+#novel-panel table.endings .num {
   text-align: right;
   white-space: nowrap;
 }
 
-.bar {
+#novel-panel .bar {
   display: block;
   height: 8px;
   border-radius: 2px;
   background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.15));
 }
 
-.bar > span {
+#novel-panel .bar > span {
   display: block;
   height: 100%;
   border-radius: 2px;
   background: var(--vscode-charts-blue, var(--vscode-button-background));
 }
 
-details {
+#novel-panel details {
   margin-top: 6px;
 }
 
-details ul {
+#novel-panel details ul {
   margin: 2px 0 4px;
   padding-left: 12px;
   list-style: none;
 }
 
-details details {
+#novel-panel details details {
   margin-top: 0;
 }
 
-summary {
+#novel-panel summary {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -178,25 +197,25 @@ summary {
   list-style: none;
 }
 
-summary::before {
+#novel-panel summary::before {
   content: "▸";
   flex: 0 0 auto;
   color: var(--vscode-descriptionForeground);
 }
 
-details[open] > summary::before {
+#novel-panel details[open] > summary::before {
   content: "▾";
 }
 
-details.empty > summary {
+#novel-panel details.empty > summary {
   cursor: default;
 }
 
-details.empty > summary::before {
+#novel-panel details.empty > summary::before {
   visibility: hidden;
 }
 
-.count {
+#novel-panel .count {
   margin-left: auto;
   padding: 0 6px;
   border-radius: 8px;
@@ -205,7 +224,7 @@ details.empty > summary::before {
   background: var(--vscode-badge-background);
 }
 
-button.line {
+#novel-panel button.line {
   display: flex;
   gap: 8px;
   width: 100%;
@@ -220,16 +239,16 @@ button.line {
   border-radius: 3px;
 }
 
-summary button.line {
+#novel-panel summary button.line {
   flex: 1;
   width: auto;
 }
 
-button.line:hover {
+#novel-panel button.line:hover {
   background: var(--vscode-list-hoverBackground);
 }
 
-button.line .text {
+#novel-panel button.line .text {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -237,26 +256,26 @@ button.line .text {
   white-space: nowrap;
 }
 
-button.line .note {
+#novel-panel button.line .note {
   flex: 0 0 auto;
   margin: 0;
 }
 
-#tab-page {
+#novel-panel #tab-page {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
 }
 
-#tab-page label {
+#novel-panel #tab-page label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
 }
 
-fieldset {
+#novel-panel fieldset {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -267,12 +286,12 @@ fieldset {
   border-radius: 4px;
 }
 
-legend {
+#novel-panel legend {
   padding: 0 4px;
   color: var(--vscode-descriptionForeground);
 }
 
-#tab-page :is(input, select, button) {
+#novel-panel #tab-page :is(input, select, button) {
   font: inherit;
   color: var(--vscode-input-foreground);
   background: var(--vscode-input-background);
@@ -282,47 +301,47 @@ legend {
   min-width: 0;
 }
 
-#tab-page select {
+#novel-panel #tab-page select {
   color: var(--vscode-dropdown-foreground);
   background: var(--vscode-dropdown-background);
 }
 
-#tab-page input[type="number"] {
+#novel-panel #tab-page input[type="number"] {
   width: 5em;
 }
 
-#tab-page input[type="radio"] {
+#novel-panel #tab-page input[type="radio"] {
   margin: 0 2px 0 0;
 }
 
-#font-family {
+#novel-panel #font-family {
   flex: 1;
   width: 100%;
   box-sizing: border-box;
 }
 
-#tab-page .buttons {
+#novel-panel #tab-page .buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-#tab-page button {
+#novel-panel #tab-page button {
   cursor: pointer;
   color: var(--vscode-button-secondaryForeground);
   background: var(--vscode-button-secondaryBackground);
   border-color: transparent;
 }
 
-#tab-page button:hover {
+#novel-panel #tab-page button:hover {
   background: var(--vscode-button-secondaryHoverBackground);
 }
 
-#tab-page button:disabled {
+#novel-panel #tab-page button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-#tab-page .note {
+#novel-panel #tab-page .note {
   margin: 0;
 }

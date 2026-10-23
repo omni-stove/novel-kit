@@ -169,9 +169,15 @@ button:disabled {
   white-space: nowrap;
 }
 
+#workspace {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
 #viewport {
   flex: 1;
-  min-height: 0;
+  min-width: 0;
   overflow: auto;
   scrollbar-gutter: stable;
   padding: 0 24px;
