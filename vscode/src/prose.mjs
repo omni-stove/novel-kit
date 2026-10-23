@@ -1,6 +1,6 @@
 /**
  * 日本語の原稿の文章の傾向（文末の種類・文の長さ・台詞の割合など）を数える。
- * 直すための指摘ではなく、いまの原稿がどうなっているかを見るための集計（エクスプローラーの「文章の傾向」に出す）。
+ * 直すための指摘ではなく、いまの原稿がどうなっているかを見るための集計（小説パネルの「文章の傾向」に出す）。
  * 文末の種類は lindera-wasm と IPA 辞書（ipadic.mjs が用意する）で形態素解析して決める。
  */
 
@@ -23,7 +23,7 @@ export const IPADIC_FILES = [
 ];
 
 /** 文末の種類。表示の順に並べる */
-export const ENDINGS = [
+const ENDINGS = [
   { key: 'past', label: '〜た' },
   { key: 'present', label: '〜る・う・い' },
   { key: 'copula', label: '〜だ・である' },
@@ -33,13 +33,13 @@ export const ENDINGS = [
 ];
 
 /** 長い文とみなす字数（ルビを除く） */
-export const LONG_SENTENCE_CHARS = 80;
+const LONG_SENTENCE_CHARS = 80;
 
 /** 同じ種類の文末がこの数以上続いたら「連続」として拾う */
-export const RUN_MIN = 3;
+const RUN_MIN = 3;
 
 /** 同じ語がこの文数の範囲に2回以上出たら「近くの繰り返し」として拾う */
-export const REPEAT_WINDOW = 3;
+const REPEAT_WINDOW = 3;
 
 /**
  * lindera-wasm の形態素解析器を作る。wasm: lindera_wasm_bg.wasm のパス、dictDir: IPA 辞書のディレクトリ。
@@ -244,6 +244,62 @@ export function analyzeProse(lines, tokenizer) {
   };
 }
 
+const percent = (n, total) => (total === 0 ? 0 : Math.round((n / total) * 100));
+
+/**
+ * analyzeProse の結果を、小説パネルの「文章の傾向」に出す形にする。
+ * 返り値:
+ *   sentences: 地の文の文の数、dialogue: { percent, dialogueChars, narrationChars }、average / longest: 文の長さ（字）
+ *   endings: 文末の種類ごとの [{ label, count, percent }]（ENDINGS の順）
+ *   lists: 行を開ける一覧 [{ title, items: [{ line, text, note, children?: 同じ形の項目 }] }]
+ */
+export function proseReport(r) {
+  const total = r.sentences.length;
+  const labelOf = Object.fromEntries(ENDINGS.map(({ key, label }) => [key, label]));
+  const lineNote = (line) => `${line + 1}行`;
+  const sentenceItem = (s, note = lineNote(s.line)) => ({ line: s.line, text: s.text, note });
+  return {
+    sentences: total,
+    dialogue: {
+      percent: percent(r.dialogueChars, r.dialogueChars + r.narrationChars),
+      dialogueChars: r.dialogueChars,
+      narrationChars: r.narrationChars,
+    },
+    average: total === 0 ? 0 : Math.round(r.sentences.reduce((n, s) => n + s.length, 0) / total),
+    longest: r.sentences.reduce((n, s) => Math.max(n, s.length), 0),
+    endings: ENDINGS.map(({ key, label }) => ({
+      label,
+      count: r.endings[key],
+      percent: percent(r.endings[key], total),
+    })),
+    lists: [
+      {
+        title: `同じ文末の連続（${RUN_MIN}文以上）`,
+        items: r.runs.map((run) => ({
+          line: run.line,
+          text: `${labelOf[run.ending]} ×${run.count}`,
+          note: lineNote(run.line),
+        })),
+      },
+      {
+        title: `近くの同じ語（${REPEAT_WINDOW}文以内）`,
+        items: r.repeats.map((repeat) => ({
+          line: repeat.line,
+          text: `「${repeat.word}」×${repeat.count}`,
+          note: lineNote(repeat.line),
+          children: repeat.sentences.map((s) => sentenceItem(s)),
+        })),
+      },
+      {
+        title: `長い文（${LONG_SENTENCE_CHARS}字超）`,
+        items: r.longSentences.map((s) => sentenceItem(s, `${s.length}字・${lineNote(s.line)}`)),
+      },
+      { title: '〜だった。', items: r.datta.map((s) => sentenceItem(s)) },
+      { title: '〜ような・ように・みたい', items: r.similes.map((s) => sentenceItem(s)) },
+    ],
+  };
+}
+
 if (import.meta.vitest) {
   const { describe, test, expect, beforeAll } = import.meta.vitest;
   const { dirname, resolve } = await import('node:path');
@@ -358,6 +414,49 @@ if (import.meta.vitest) {
       expect(r.longSentences.map((s) => s.line)).toEqual([0]);
       expect(r.datta.map((s) => s.line)).toEqual([1]);
       expect(r.similes.map((s) => s.line)).toEqual([2]);
+    });
+  });
+
+  describe('proseReport', () => {
+    test('割合・長さ・一覧を出す形にする', () => {
+      const a = { line: 0, text: 'あいうえお。', length: 6, ending: 'past' };
+      const b = { line: 2, text: 'かきく。', length: 4, ending: 'past' };
+      const report = proseReport({
+        sentences: [a, b],
+        narrationChars: 30,
+        dialogueChars: 10,
+        endings: { past: 2, present: 0, copula: 0, negative: 0, noun: 0, other: 0 },
+        runs: [{ line: 0, ending: 'past', count: 3 }],
+        repeats: [{ word: '海', line: 0, count: 2, sentences: [a, b] }],
+        longSentences: [a],
+        datta: [],
+        similes: [b],
+      });
+      expect(report.dialogue.percent).toBe(25);
+      expect(report.average).toBe(5);
+      expect(report.longest).toBe(6);
+      expect(report.endings[0]).toEqual({ label: '〜た', count: 2, percent: 100 });
+      expect(report.lists.map((l) => l.items.length)).toEqual([1, 1, 1, 0, 1]);
+      expect(report.lists[0].items[0]).toEqual({ line: 0, text: '〜た ×3', note: '1行' });
+      expect(report.lists[1].items[0].children.map((c) => c.line)).toEqual([0, 2]);
+      expect(report.lists[2].items[0].note).toBe('6字・1行');
+    });
+
+    test('文が無ければ割合と長さは 0', () => {
+      const report = proseReport({
+        sentences: [],
+        narrationChars: 0,
+        dialogueChars: 0,
+        endings: { past: 0, present: 0, copula: 0, negative: 0, noun: 0, other: 0 },
+        runs: [],
+        repeats: [],
+        longSentences: [],
+        datta: [],
+        similes: [],
+      });
+      expect(report.dialogue.percent).toBe(0);
+      expect(report.average).toBe(0);
+      expect(report.endings.every((e) => e.percent === 0)).toBe(true);
     });
   });
 }

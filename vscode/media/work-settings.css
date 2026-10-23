@@ -1,4 +1,4 @@
-/* 作品の設定のフォーム（settings.js）。プレビューの中にも置くので、プレビューの入力欄の見た目と混ざらないよう .work-settings の中に限る */
+/* 作品の設定のフォーム（settings.js）。小説パネルの中にも置くので、パネルの入力欄の見た目と混ざらないよう .work-settings の中に限る */
 .work-head {
   position: sticky;
   top: 0;

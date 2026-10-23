@@ -1,7 +1,7 @@
 // @ts-check
 
 /**
- * 作品の設定（novel.json）のフォームを root に作る。作品の設定の画面（settings-page.js）と、プレビューの中の作品設定の欄で使う。
+ * 作品の設定（novel.json）のフォームを root に作る。作品の設定の画面（settings-page.js）と、小説パネルの「作品設定」のタブ（panel.js）で使う。
  * post(msg): 拡張へメッセージ（update / build / openFile / openText / create）を送る。
  * scroller: 作り直したあとにスクロール位置を戻す要素（既定は文書全体）。
  * 返す値の render(state) で、拡張から届いた状態を画面にする
@@ -588,7 +588,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
     uncommittedField = null;
   });
 
-  /** novel.json が無いとき（プレビューの中の欄だけ）。dir: 作る場所 */
+  /** novel.json が無いとき（小説パネルのタブだけ）。dir: 作る場所 */
   function missingSection(dir) {
     return section(
       'novel.json がありません',

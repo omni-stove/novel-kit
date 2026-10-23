@@ -8,7 +8,8 @@
         "src/pdf-renderer.mjs",
         "media/preview.js",
         "media/settings.js",
-        "media/settings-page.js"
+        "media/settings-page.js",
+        "media/panel.js"
       ],
       "ignoreDependencies": ["@vivliostyle/viewer"]
     }
