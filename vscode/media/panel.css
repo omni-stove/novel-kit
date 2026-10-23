@@ -104,12 +104,13 @@
   overflow-wrap: anywhere;
 }
 
-#novel-panel .note {
+/* 作品設定のフォーム（.work-settings）の注記とリンクには work-settings.css の見た目を効かせたいので、ほかのタブに限る */
+#novel-panel :is(#tab-prose, #tab-page) .note {
   margin: 4px 0;
   color: var(--vscode-descriptionForeground);
 }
 
-#novel-panel a {
+#novel-panel :is(#tab-prose, #tab-page) a {
   color: var(--vscode-textLink-foreground);
 }
 
