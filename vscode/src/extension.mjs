@@ -1221,7 +1221,7 @@ function createNovelPanel(session) {
         context.globalState.update(PANEL_STATE_KEY, { open, tab, width: msg.width });
         return refresh();
       case 'reveal':
-        return file && revealLine(file, msg.line);
+        return openInTextEditor(file, msg.line, session.panel);
       case 'layout':
         // 範囲外の値は丸めて保存するので、レイアウトが変わらなくても入力欄を保存した値に戻す
         posted.page = null;
