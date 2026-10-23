@@ -110,6 +110,10 @@
   color: var(--vscode-descriptionForeground);
 }
 
+#novel-panel #tab-page .note {
+  margin: 0;
+}
+
 #novel-panel :is(#tab-prose, #tab-page) a {
   color: var(--vscode-textLink-foreground);
 }
@@ -341,8 +345,4 @@
 #novel-panel #tab-page button:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-#novel-panel #tab-page .note {
-  margin: 0;
 }
