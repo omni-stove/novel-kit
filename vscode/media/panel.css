@@ -257,7 +257,7 @@
   white-space: nowrap;
 }
 
-#novel-panel button.line .note {
+#novel-panel #tab-prose button.line .note {
   flex: 0 0 auto;
   margin: 0;
 }
