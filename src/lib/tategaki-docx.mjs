@@ -104,7 +104,7 @@ export function lineToRunsXml(line, { fontHalfPt = DEFAULT_FONT_HALF_PT, bold = 
     .map((token) => {
       switch (token.type) {
         case 'emphasis':
-          return runXml(toVerticalText(token.text), `${b}<w:em w:val="dot"/>`);
+          return runXml(toVerticalText(stripInlineMarkup(token.text)), `${b}<w:em w:val="dot"/>`);
         case 'ruby':
           return rubyRunXml(token.base, token.ruby, fontHalfPt, b);
         case 'leftRuby':
@@ -116,7 +116,7 @@ export function lineToRunsXml(line, { fontHalfPt = DEFAULT_FONT_HALF_PT, bold = 
         case 'sideline':
           return textRunXml(stripInlineMarkup(token.text), `${b}<w:u w:val="${SIDELINE_UNDERLINE[token.style]}"/>`);
         case 'tcy':
-          return tcyRunXml(toVerticalBase(token.text), b);
+          return tcyRunXml(toVerticalBase(stripInlineMarkup(token.text)), b);
         // Wordの縦書きでは半角英数がそのまま横倒しになるので、全角化せずに出す
         case 'sideways':
           return runXml(toVerticalBase(stripInlineMarkup(token.text)), b);

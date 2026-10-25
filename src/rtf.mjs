@@ -148,7 +148,7 @@ export function formatInlineRtf(text, { rubyParens = false } = {}) {
     .map((token) => {
       switch (token.type) {
         case 'emphasis':
-          return `{\\accdot ${rtfEscapeText(token.text)}}`;
+          return `{\\accdot ${rtfEscapeText(stripInlineMarkup(token.text, { rubyParens }))}}`;
         case 'ruby':
           return rubyParens ? rtfEscapeText(`${token.base}（${token.ruby}）`) : rubyField(token.base, token.ruby);
         case 'leftRuby':

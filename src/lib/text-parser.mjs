@@ -213,10 +213,23 @@ const LEFT_RUBY_RE = new RegExp(`${LEFT_RUBY_OPEN}(.+?)${LEFT_RUBY_SEP}(.+?)${LE
 
 const INLINE_MARKUP_RE = new RegExp(
   `《《(.+?)》》|\\|(.+?)《(.+?)》|<<(.+?)>>|\\*([^*]+)\\*|${BOLD_OPEN}(.+?)${BOLD_CLOSE}|${TCY_OPEN}(.+?)${TCY_CLOSE}` +
-    `|${ITALIC_OPEN}(.+?)${ITALIC_CLOSE}|([${SIDELINE_OPENS}])(.+?)${SIDELINE_CLOSE}` +
+    `|${ITALIC_OPEN}(.+?)${ITALIC_CLOSE}|([${SIDELINE_OPENS}])` +
     `|${LEFT_RUBY_OPEN}(.+?)${LEFT_RUBY_SEP}(.+?)${LEFT_RUBY_CLOSE}`,
   'g',
 );
+
+/** 閉じの文字が種類によらず同じなので、入れ子を数えて開きに対応する閉じの位置を返す。なければ -1 */
+function findSidelineClose(text, from) {
+  let depth = 0;
+  for (let i = from; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === SIDELINE_CLOSE) {
+      if (depth === 0) return i;
+      depth--;
+    } else if (SIDELINE_OPENS.includes(ch)) depth++;
+  }
+  return -1;
+}
 
 /**
  * 1行をインライン記法のトークンに分ける。type は text / emphasis / ruby（base, ruby）/ sideways / italic / bold / tcy /
@@ -226,7 +239,17 @@ const INLINE_MARKUP_RE = new RegExp(
 export function tokenizeInlineMarkup(text) {
   const tokens = [];
   let last = 0;
-  for (const m of text.matchAll(INLINE_MARKUP_RE)) {
+  const re = new RegExp(INLINE_MARKUP_RE);
+  for (let m; (m = re.exec(text)); ) {
+    if (m[9] !== undefined) {
+      const close = findSidelineClose(text, m.index + 1);
+      if (close < 0) continue;
+      if (m.index > last) tokens.push({ type: 'text', text: text.slice(last, m.index) });
+      tokens.push({ type: 'sideline', style: SIDELINE_STYLE_OF[m[9]], text: text.slice(m.index + 1, close) });
+      last = close + 1;
+      re.lastIndex = last;
+      continue;
+    }
     if (m.index > last) tokens.push({ type: 'text', text: text.slice(last, m.index) });
     if (m[1] !== undefined) tokens.push({ type: 'emphasis', text: m[1] });
     else if (m[2] !== undefined) tokens.push({ type: 'ruby', base: m[2], ruby: m[3] });
@@ -235,8 +258,7 @@ export function tokenizeInlineMarkup(text) {
     else if (m[6] !== undefined) tokens.push({ type: 'bold', text: m[6] });
     else if (m[7] !== undefined) tokens.push({ type: 'tcy', text: m[7] });
     else if (m[8] !== undefined) tokens.push({ type: 'italic', text: m[8] });
-    else if (m[9] !== undefined) tokens.push({ type: 'sideline', style: SIDELINE_STYLE_OF[m[9]], text: m[10] });
-    else tokens.push({ type: 'leftRuby', base: m[11], ruby: m[12] });
+    else tokens.push({ type: 'leftRuby', base: m[10], ruby: m[11] });
     last = m.index + m[0].length;
   }
   if (last < text.length) tokens.push({ type: 'text', text: text.slice(last) });
