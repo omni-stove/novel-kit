@@ -162,6 +162,9 @@ export function formatInlineRtf(text, { rubyParens = false } = {}) {
         case 'sideline':
           return `{${SIDELINE_RTF[token.style]} ${formatInlineRtf(token.text, { rubyParens })}}`;
         // 横倒し <<text>> はRTFが横書きなので中身のみ
+        case 'sideways':
+        case 'tcy':
+          return rtfEscapeText(stripInlineMarkup(token.text, { rubyParens }));
         default:
           return rtfEscapeText(token.text);
       }

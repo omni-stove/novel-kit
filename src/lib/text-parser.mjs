@@ -534,7 +534,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   result = result.replace(RUBY_PLACEHOLDER_RE, (_, ch) => rubyHtmlOf(ch));
 
   result = result.replace(/\uE001([\uE010-\uEFFF])\uE001/g, (_, ch) => {
-    // \u508D\u70B9\u306E\u4E2D\u306E\u5DE6\u30EB\u30D3\u306F\u3001\u70B9\u3092\u6253\u3064\u5358\u4F4D\u306B\u5272\u3089\u308C\u306A\u3044\u3088\u30461\u3064\u306E\u307E\u3068\u307E\u308A\u306B\u3057\u3066\u5C55\u958B\u3059\u308B
+    // 傍点の中の左ルビは、点を打つ単位に割られないよう1つのまとまりにして展開する
     const html = processInnerText(emphasisPlaceholders[ch.charCodeAt(0) - 0xe010]).replace(
       RUBY_PLACEHOLDER_RE,
       (_m, r) => phSpan(rubyHtmlOf(r)),
@@ -555,9 +555,11 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return `<span class="sideways-latin">${content}</span>`;
   });
 
-  result = result.replace(/\uE002([\uE010-\uEFFF])\uE002/g, (_, ch) => {
-    return spanPlaceholders[ch.charCodeAt(0) - 0xe010];
-  });
+  // 傍点の中の左ルビは、スパンのプレースホルダーを含んだ HTML ごと1つのスパンのプレースホルダーにするので、入れ子が無くなるまで展開する
+  for (let prev; prev !== result; ) {
+    prev = result;
+    result = result.replace(/\uE002([\uE010-\uEFFF])\uE002/g, (_, ch) => spanPlaceholders[ch.charCodeAt(0) - 0xe010]);
+  }
 
   return result
     .replaceAll(BOLD_OPEN, '<strong class="bold">')
@@ -1445,6 +1447,13 @@ if (import.meta.vitest) {
       expect(escapeHtml(line, { rubyLayout: true })).toBe(
         '<span class="emphasis-dot">あ</span>' +
           '<span class="sideline sideline-solid"><span class="emphasis-dot">い</span></span>',
+      );
+    });
+    test('傍点の中の左ルビは、中の縦中横や英字も組む', () => {
+      const aozora = (line) => escapeHtml(normalizeAozoraInline(line), { rubyLayout: true });
+      expect(aozora('［＃傍点］英雄［＃「英雄」の左に「hero」のルビ］［＃傍点終わり］')).not.toMatch(/[\uE000-\uEFFF]/);
+      expect(aozora('［＃傍点］第2話［＃「第2話」の左に「だいにわ」のルビ］［＃傍点終わり］')).toContain(
+        '第<span class="tcy">2</span>話',
       );
     });
     test('横倒しの中のルビも組む', () => {
