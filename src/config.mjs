@@ -134,6 +134,12 @@ export function writeSettingsFile(filePath, { layout, english, view }) {
   writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
+/** 部の境界（"parts"）だけを書き換える。ほかの項目と並びはそのまま残し、parts が無かったファイルは末尾に足す */
+export function writeParts(filePath, parts) {
+  const current = JSON.parse(readFileSync(filePath, 'utf-8'));
+  writeFileSync(filePath, `${JSON.stringify({ ...current, parts }, null, 2)}\n`);
+}
+
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
   const { mkdtempSync, mkdirSync, rmSync } = await import('node:fs');
@@ -228,6 +234,16 @@ if (import.meta.vitest) {
       expect(readParts({ parts: ['050', 100] })).toEqual(['050', '100']);
       expect(readParts({ parts: [] })).toBeNull();
       expect(readParts({})).toBeNull();
+    });
+    test('writeParts は parts だけを書き換え、ほかの項目と並びは残す', () => {
+      withTree(({ story }) => {
+        const file = join(story, CONFIG_FILENAME);
+        writeFileSync(file, '{ "title": "作品", "parts": ["050"], "chars": 42 }');
+        writeParts(file, ['040', '070']);
+        const raw = JSON.parse(readFileSync(file, 'utf-8'));
+        expect(raw).toEqual({ title: '作品', parts: ['040', '070'], chars: 42 });
+        expect(Object.keys(raw)).toEqual(['title', 'parts', 'chars']);
+      });
     });
     test('場面区切りの記号は前後の空白を除き、空なら null', () => {
       expect(readSceneBreak({ sceneBreak: '  ◆  ', english: { sceneBreak: ' ' } })).toEqual({ ja: '◆', en: null });

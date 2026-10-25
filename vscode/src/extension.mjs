@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { findProjectRoot, formatTraits, normalizeOutputs, outputPath } from '../../src/build.mjs';
@@ -10,6 +10,7 @@ import {
   findConfigFile,
   readSettingsFile,
   readWorkConfig,
+  writeParts,
   writeSettingsFile,
 } from '../../src/config.mjs';
 import {
@@ -27,6 +28,7 @@ import { parsePageSpec } from '../../src/pdf.mjs';
 import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
 import { analyzeProse, createTokenizer, proseReport } from './prose.mjs';
+import { moveFiles, remapParts, renumberPlan } from './reorder.mjs';
 import { createSettingsEditorProvider, createWorkSettingsController, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
 import { renderWebviewHtml } from './webview.mjs';
 
@@ -988,6 +990,11 @@ let outlineFile = null;
 const formatCount = (n, language) =>
   language === 'en' ? `${n.toLocaleString('en-US')} words` : `${n.toLocaleString('ja-JP')}字`;
 
+/**
+ * 目次の項目。files: 項目のファイル（章なら章のファイルすべて）。siblings: 同じ階層の項目（上へ・下へ移動の相手を探す）
+ * @typedef {vscode.TreeItem & { files?: string[], siblings?: OutlineItem[], children?: OutlineItem[] }} OutlineItem
+ */
+
 /** エクスプローラーの目次。章ごとの項目と、複数ファイルの章はその下にファイルを並べる（数は日本語は文字数、英語は語数） */
 const outlineProvider = {
   onDidChangeTreeData: outlineChanged.event,
@@ -999,17 +1006,20 @@ const outlineProvider = {
     const { language, chapters } = buildOutline(outlineFile, { linesOf, parts });
     const current = activeManuscript()?.uri.fsPath;
     const fileItem = ({ file, count }) => {
+      /** @type {OutlineItem} */
       const item = new vscode.TreeItem(basename(file));
       item.description = formatCount(count, language);
       item.resourceUri = vscode.Uri.file(file);
       item.iconPath = new vscode.ThemeIcon(file === current ? 'edit' : 'file');
       item.command = { command: 'novelPreview.openFromOutline', title: '開く', arguments: [file] };
+      item.contextValue = 'manuscript';
+      item.files = [file];
       return item;
     };
-    return chapters.map((ch) => {
+    const items = chapters.map((ch) => {
       const single = ch.files.length === 1;
       const label = ch.title ? `${ch.label}${language === 'en' ? '. ' : '　'}${ch.title}` : ch.label;
-      /** @type {vscode.TreeItem & { children?: vscode.TreeItem[] }} */
+      /** @type {OutlineItem} */
       const item = new vscode.TreeItem(
         label,
         single ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Expanded,
@@ -1020,11 +1030,183 @@ const outlineProvider = {
       item.tooltip = ch.files.map((f) => basename(f.file)).join('\n');
       item.iconPath = new vscode.ThemeIcon(single && ch.file === current ? 'edit' : 'book');
       item.command = { command: 'novelPreview.openFromOutline', title: '開く', arguments: [ch.file] };
+      item.contextValue = 'manuscript';
+      item.files = ch.files.map((f) => f.file);
       item.children = single ? [] : ch.files.map(fileItem);
+      for (const child of item.children) child.siblings = item.children;
       return item;
     });
+    for (const item of items) item.siblings = items;
+    return items;
   },
 };
+
+/** 目次のドラッグ＆ドロップで運ぶ、動かすファイルの配列（JSON） */
+const OUTLINE_FILES_MIME = 'application/vnd.novelpreview.outline-files';
+
+/** 目次の項目をドラッグして、落とした項目と入れ替える（下へは後ろ、上へは前に入る。空いたところに落とせば末尾） */
+const outlineDragAndDrop = {
+  dragMimeTypes: [OUTLINE_FILES_MIME],
+  dropMimeTypes: [OUTLINE_FILES_MIME],
+  /** @param {readonly OutlineItem[]} source */
+  handleDrag(source, dataTransfer) {
+    const files = [...new Set(source.flatMap((item) => item.files ?? []))];
+    if (files.length > 0) dataTransfer.set(OUTLINE_FILES_MIME, new vscode.DataTransferItem(JSON.stringify(files)));
+  },
+  /** @param {OutlineItem | undefined} target */
+  async handleDrop(target, dataTransfer) {
+    const data = dataTransfer.get(OUTLINE_FILES_MIME);
+    if (!data || !outlineFile) return;
+    const files = listWorkFiles(outlineFile);
+    const order = moveFiles(files, JSON.parse(await data.asString()), target?.files ?? null);
+    if (order.some((f, i) => f !== files[i])) await renumberWork(files, order);
+  },
+};
+
+/**
+ * step: -1 で目次の項目を1つ上へ、1 で1つ下へ動かす。同じ階層の端なら、隣のファイルを越えて章の外へ出す
+ * @param {OutlineItem} item
+ * @param {number} step
+ */
+async function moveOutlineItem(item, step) {
+  if (!item?.files || !outlineFile) return;
+  const files = listWorkFiles(outlineFile);
+  const neighbor = item.siblings?.[item.siblings.indexOf(item) + step];
+  const edge = step < 0 ? files[files.indexOf(item.files[0]) - 1] : files[files.indexOf(item.files.at(-1)) + 1];
+  const target = neighbor?.files ?? (edge ? [edge] : null);
+  if (!target) {
+    vscode.window.showInformationMessage(step < 0 ? '最初のファイルです。' : '最後のファイルです。');
+    return;
+  }
+  await renumberWork(files, moveFiles(files, item.files, target));
+}
+
+/** 目次の並びのまま、ファイル名の先頭の番号を振り直す */
+async function renumberOutline() {
+  if (!outlineFile) return;
+  const files = listWorkFiles(outlineFile);
+  await renumberWork(files, files);
+}
+
+let renumbering = false;
+
+/**
+ * 作品のファイル（files。いまの並び）を order の並びにし、ファイル名の先頭の番号を振り直す。
+ * 一番近い novel.json の parts（部の境界）も、部の頭のファイルの新しい番号に書き換える。
+ * 英語の原稿のディレクトリ（english.input）のときは、parts は日本語の原稿の番号を指すので書き換えない。
+ * 変える名前を見せて確かめてから行う
+ */
+async function renumberWork(files, order) {
+  if (renumbering || files.length === 0) return;
+  const plan = renumberPlan(order);
+  const moves = plan.filter((p) => p.from !== p.to);
+  if (moves.length === 0) {
+    vscode.window.showInformationMessage('並びも番号も変わりません。');
+    return;
+  }
+  const workFiles = new Set(files);
+  const taken = moves.find((p) => !workFiles.has(p.to) && existsSync(p.to));
+  if (taken) {
+    vscode.window.showErrorMessage(`${basename(taken.to)} がすでにあるため、並べ替えられません。`);
+    return;
+  }
+
+  const dir = dirname(files[0]);
+  const configFile = layoutFileFor({ uri: vscode.Uri.file(files[0]) });
+  const notes = [];
+  let newParts = null;
+  if (configFile) {
+    let work;
+    try {
+      work = readWorkConfig(configFile);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `${vscode.workspace.asRelativePath(configFile)} を読めないため、部の境界を書き換えられません。直してから並べ替えてください: ${err.message}`,
+      );
+      return;
+    }
+    const englishDirs = work.en.input.map((p) => resolve(work.dir, String(p)));
+    if (englishDirs.includes(dir)) {
+      if (work.parts) notes.push('英語の原稿なので、novel.json の部の境界（日本語の原稿の番号）は書き換えません。');
+    } else {
+      const remapped = remapParts(work.parts, files, plan);
+      if (remapped && remapped.join() !== work.parts.join()) newParts = remapped;
+      if (englishDirs.some((d) => d !== dir && existsSync(d)))
+        notes.push(
+          '英語の原稿のファイル名は変えません。番号を揃えるなら、英語の目次でも同じように並べ替えてください。',
+        );
+    }
+  }
+
+  const SHOWN = 12;
+  const renames = moves.map((p) => `${basename(p.from)} → ${basename(p.to)}`);
+  const detail = [
+    ...renames.slice(0, SHOWN),
+    ...(renames.length > SHOWN ? [`ほか ${renames.length - SHOWN} 件`] : []),
+    ...(newParts ? ['', `novel.json の部の境界: ${newParts.join(', ')}`] : []),
+    ...(notes.length > 0 ? ['', ...notes] : []),
+  ].join('\n');
+  const ok = '並べ替える';
+  const answer = await vscode.window.showWarningMessage(
+    `${moves.length} 個のファイルの名前を変えて、番号を振り直しますか？`,
+    { modal: true, detail },
+    ok,
+  );
+  if (answer !== ok) return;
+
+  renumbering = true;
+  try {
+    const failure = await renameFiles(moves);
+    if (failure) {
+      vscode.window.showErrorMessage(`ファイルの名前を変えられませんでした。${failure}`);
+      return;
+    }
+    if (newParts) {
+      try {
+        writeParts(configFile, newParts);
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `ファイルの名前は変えましたが、${vscode.workspace.asRelativePath(configFile)} の部の境界を書き換えられませんでした。"parts" を ${JSON.stringify(newParts)} にしてください: ${err.message}`,
+        );
+      }
+    }
+    outlineFile = moves.find((p) => p.from === outlineFile)?.to ?? outlineFile;
+  } finally {
+    renumbering = false;
+    updateStatusBar();
+  }
+}
+
+/**
+ * moves（{ from, to }）のとおりにファイルの名前を変える。番号を入れ替えるファイル同士がぶつからないよう、
+ * いったん隠しファイルの名前にしてから付け直す。WorkspaceEdit で変えるので、開いているエディタ（未保存の編集も）が付いていく。
+ * 途中で失敗したら、隠しファイルの名前のまま残ったものを元の名前に戻す。
+ * 返す値: 失敗したらその説明、変えられたら null
+ */
+async function renameFiles(moves) {
+  const tag = randomBytes(4).toString('hex');
+  const staged = moves.map((p) => ({ ...p, temp: join(dirname(p.from), `.${basename(p.from)}.${tag}.renumber`) }));
+  const apply = async (pairs) => {
+    const edit = new vscode.WorkspaceEdit();
+    for (const [from, to] of pairs) edit.renameFile(vscode.Uri.file(from), vscode.Uri.file(to));
+    try {
+      return await vscode.workspace.applyEdit(edit);
+    } catch {
+      return false;
+    }
+  };
+  if ((await apply(staged.map((p) => [p.from, p.temp]))) && (await apply(staged.map((p) => [p.temp, p.to]))))
+    return null;
+
+  const left = [];
+  for (const p of staged) {
+    if (!existsSync(p.temp)) continue;
+    if (existsSync(p.from) || !(await apply([[p.temp, p.from]]))) left.push(basename(p.temp));
+  }
+  return left.length > 0
+    ? `次のファイルは元の名前に戻せなかったので、手で名前を直してください: ${left.join(', ')}`
+    : '一部のファイルだけ名前が変わっていることがあるので、目次で並びを確かめてください。';
+}
 
 /** 目次を作り直す。原稿を一度でも開いたら、エクスプローラーに目次を出す */
 function refreshOutline() {
@@ -1387,7 +1569,11 @@ export function activate(ctx) {
   context = ctx;
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 200);
   statusBar.command = 'novelPreview.selectLayout';
-  outlineView = vscode.window.createTreeView('novelPreview.outline', { treeDataProvider: outlineProvider });
+  outlineView = vscode.window.createTreeView('novelPreview.outline', {
+    treeDataProvider: outlineProvider,
+    dragAndDropController: outlineDragAndDrop,
+    canSelectMany: true,
+  });
   reloadOnRebuild(ctx);
 
   // 設定ファイルを手で書き換えたとき・置き場所を変えたときにも追従する
@@ -1430,6 +1616,9 @@ export function activate(ctx) {
     vscode.commands.registerCommand('novelPreview.openFromOutline', openFromOutline),
     vscode.commands.registerCommand('novelPreview.nextFile', () => openNeighborFile(1)),
     vscode.commands.registerCommand('novelPreview.previousFile', () => openNeighborFile(-1)),
+    vscode.commands.registerCommand('novelPreview.moveUp', (item) => moveOutlineItem(item, -1)),
+    vscode.commands.registerCommand('novelPreview.moveDown', (item) => moveOutlineItem(item, 1)),
+    vscode.commands.registerCommand('novelPreview.renumberFiles', renumberOutline),
     outlineChanged,
     outlineView,
     outlineView.onDidChangeVisibility(refreshOutline),

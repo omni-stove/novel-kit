@@ -123,6 +123,24 @@
         "category": "小説"
       },
       {
+        "command": "novelPreview.moveUp",
+        "title": "上へ移動",
+        "category": "小説",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "novelPreview.moveDown",
+        "title": "下へ移動",
+        "category": "小説",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "novelPreview.renumberFiles",
+        "title": "ファイル名の番号を振り直す",
+        "category": "小説",
+        "icon": "$(list-ordered)"
+      },
+      {
         "command": "novelPreview.revealLine",
         "title": "原稿の行を開く",
         "category": "小説"
@@ -211,6 +229,18 @@
           "when": "false"
         },
         {
+          "command": "novelPreview.moveUp",
+          "when": "false"
+        },
+        {
+          "command": "novelPreview.moveDown",
+          "when": "false"
+        },
+        {
+          "command": "novelPreview.renumberFiles",
+          "when": "novelPreview.hasManuscript"
+        },
+        {
           "command": "novelPreview.revealLine",
           "when": "false"
         },
@@ -245,6 +275,23 @@
           "command": "novelPreview.nextFile",
           "when": "view == novelPreview.outline",
           "group": "navigation@2"
+        },
+        {
+          "command": "novelPreview.renumberFiles",
+          "when": "view == novelPreview.outline",
+          "group": "1_order@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "novelPreview.moveUp",
+          "when": "view == novelPreview.outline && viewItem == manuscript",
+          "group": "1_order@1"
+        },
+        {
+          "command": "novelPreview.moveDown",
+          "when": "view == novelPreview.outline && viewItem == manuscript",
+          "group": "1_order@2"
         }
       ],
       "explorer/context": [
