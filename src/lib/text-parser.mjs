@@ -483,7 +483,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
   }
 
   let result = text.replace(new RegExp(`${TCY_OPEN}(.+?)${TCY_CLOSE}`, 'g'), (_, content) =>
-    vertical ? phSpan(`<span class="tcy">${escapeXml(content)}</span>`) : content,
+    vertical ? phSpan(`<span class="tcy">${escapeXml(content.replace(LEFT_RUBY_RE, '$1'))}</span>`) : content,
   );
 
   result = result.replace(/<<(.+?)>>/g, (_, content) => {
