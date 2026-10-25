@@ -54,7 +54,7 @@ Marketplace に出すにあたっての、機能面の競合調査。2026-10-21 
 1. ~~PDF 出力の依存~~（対応済み）。CLI の `pdf` / `pdf-en` と、`vivliostyle build` の代わりになる `src/pdf-renderer.mjs` を拡張に同梱し、VS Code の Node で動かす。Chrome は初回に `@vivliostyle/cli` と同じ版・同じキャッシュへダウンロードする。vsix は約3MB。jpnov と違って初回だけ約180MB のダウンロードが要る
 2. 記法の一般化と説明（一部対応済み: 場面区切りは `*` の行にして出力ごとの記号に変える。POV:・Source:・Title:・Genre:・末尾の【】は廃止）。青空文庫注記にも対応した（ルビ・傍点・太字・縦中横・見出し・改ページ・字下げ・地付き）。当初の課題: `【章題】`・`POV:`・`Epigraph:`・`■■■`・`>>>`、除外ファイル名の `synopsis.txt` / `characters.txt` など、自分の作品専用の決まりが組み込まれている。記法のリファレンスを書くか、設定で変えられるようにする。青空文庫注記（少なくともルビ・傍点・縦中横・改ページ）に対応すると、novel-writer や jpnov からの乗り換え先にもなれる
 3. ~~最低限の執筆補助~~（対応済み）。ルビ・傍点の挿入コマンド、エクスプローラーの「小説の目次」（章・文字数）、前後のファイルへの移動。ファイルの並べ替え（連番の振り直し）は未対応
-4. Marketplace 向けの体裁（一部対応済み: category・keywords・アイコン・`private` の削除・利用者向けの README・publish スクリプト）。残りは repository（リポジトリが非公開）・LICENSE ファイル・スクリーンショット・GIF、英語向けにも出すなら README の英語化と多言語化
+4. Marketplace 向けの体裁（一部対応済み: category・keywords・アイコン・`private` の削除・利用者向けの README・publish スクリプト・repository・LICENSE ファイル・README のスクリーンショットと GIF）。残りは、英語向けにも出すなら README の英語化と多言語化
 
 ## ポジショニング
 
