@@ -201,15 +201,15 @@
 
   /**
    * エディタのカーソル行 target（{ fileIndex, line }）の段落に印を付け、見えていなければそのページへスクロールする。
-   * scroll: false なら印を付けるだけ
+   * scroll: false なら印を付けるだけ。mark: false なら印を付けずにスクロールだけする（開いたファイルの頭へ動かすときなど）
    */
-  function reveal(target, { scroll = true } = {}) {
-    lastReveal = target;
+  function reveal(target, { scroll = true, mark = true } = {}) {
+    lastReveal = mark ? target : null;
     flow.querySelector('.cursor-line')?.classList.remove('cursor-line');
     if (!target || !geometry) return;
     const el = findLineElement(target.fileIndex, target.line);
     if (!el) return;
-    el.classList.add('cursor-line');
+    if (mark) el.classList.add('cursor-line');
     if (scroll) scrollToElement(el);
   }
 
@@ -817,14 +817,14 @@
         beginEdit(target, focus.offset);
         target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       } else if (anchor) {
-        reveal(data.reveal ?? lastReveal, { scroll: false });
+        reveal(data.reveal ?? lastReveal, { scroll: false, mark: !data.forceReveal });
         const el = findLineElement(anchor.fileIndex, anchor.line);
         if (el) scrollToElement(el);
       } else if (restored) {
         // 再読み込み前の位置に戻したので、エディタのカーソル位置へは動かさない（行の色付けだけ）
-        lastReveal = data.reveal ?? lastReveal;
+        if (!data.forceReveal) lastReveal = data.reveal ?? lastReveal;
       } else if (data.forceReveal) {
-        reveal(data.reveal);
+        reveal(data.reveal, { mark: false });
       } else if (!document.hasFocus() || !editEnabled) {
         // プレビュー側で作業している間は、エディタのカーソル位置へ引き戻さない
         reveal(data.reveal ?? lastReveal);
@@ -832,7 +832,7 @@
     } else if (data.type === 'panel') {
       novelPanel.receive(data.msg);
     } else if (data.type === 'reveal') {
-      reveal(data.target);
+      reveal(data.target, { mark: data.mark ?? true });
     } else if (data.type === 'message') {
       $('message').textContent = data.text;
       $('message').hidden = false;
