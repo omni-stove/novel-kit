@@ -552,6 +552,10 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     let content = sidewaysPlaceholders[ch.charCodeAt(0) - 0xe010];
     content = escapeXml(content);
     content = content.replace(/\|(.+?)《(.+?)》/g, (_, base, ruby) => `<ruby>${base}<rt>${ruby}</rt></ruby>`);
+    content = content.replace(
+      LEFT_RUBY_RE,
+      (_, base, ruby) => `<ruby class="left-ruby">${base}<rt>${ruby}</rt></ruby>`,
+    );
     return `<span class="sideways-latin">${content}</span>`;
   });
 
