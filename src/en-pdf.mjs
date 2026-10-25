@@ -143,7 +143,10 @@ const SIDELINE_MARK_RE = new RegExp(`[${Object.values(SIDELINE_OPEN).join('')}${
 export function formatInline(text, { curly = true } = {}) {
   let t = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   // 引用符の開閉判定が<em>タグを文脈にできるよう、イタリック変換を先に行う
-  t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>').replaceAll(ITALIC_OPEN, '<em>').replaceAll(ITALIC_CLOSE, '</em>');
+  t = t
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replaceAll(ITALIC_OPEN, '<em>')
+    .replaceAll(ITALIC_CLOSE, '</em>');
   if (curly) t = smartQuotes(t);
   t = t.replace(/《《(.+?)》》/g, '<span class="emphasis">$1</span>');
   // 縦中横は横組では意味を持たないので、印だけ外して中身を残す。傍線・左ルビはこの組版では組まず、本文だけを残す

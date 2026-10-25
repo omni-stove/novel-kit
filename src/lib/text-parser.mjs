@@ -251,8 +251,8 @@ export function stripInlineMarkup(text, { rubyParens = false } = {}) {
   return tokenizeInlineMarkup(normalizeAozoraInline(text).replace(/［＃[^］]*］/g, ''))
     .map((t) => {
       if (t.type === 'ruby' || t.type === 'leftRuby') return rubyParens ? `${t.base}（${t.ruby}）` : t.base;
-      if (t.type === 'sideways' || t.type === 'sideline') return stripInlineMarkup(t.text, { rubyParens });
-      return t.text;
+      if (t.type === 'text') return t.text;
+      return stripInlineMarkup(t.text, { rubyParens });
     })
     .join('');
 }

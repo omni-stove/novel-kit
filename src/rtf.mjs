@@ -156,9 +156,9 @@ export function formatInlineRtf(text, { rubyParens = false } = {}) {
             ? rtfEscapeText(`${token.base}（${token.ruby}）`)
             : rubyField(token.base, token.ruby, { left: true });
         case 'italic':
-          return `{\\i ${rtfEscapeText(token.text)}}`;
+          return `{\\i ${formatInlineRtf(token.text, { rubyParens })}}`;
         case 'bold':
-          return `{\\b ${rtfEscapeText(token.text)}}`;
+          return `{\\b ${formatInlineRtf(token.text, { rubyParens })}}`;
         case 'sideline':
           return `{${SIDELINE_RTF[token.style]} ${formatInlineRtf(token.text, { rubyParens })}}`;
         // 横倒し <<text>> はRTFが横書きなので中身のみ

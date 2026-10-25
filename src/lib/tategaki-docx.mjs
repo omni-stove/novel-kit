@@ -110,9 +110,9 @@ export function lineToRunsXml(line, { fontHalfPt = DEFAULT_FONT_HALF_PT, bold = 
         case 'leftRuby':
           return textRunXml(token.base, b);
         case 'italic':
-          return runXml(toVerticalText(token.text), `${b}<w:i/>`);
+          return runXml(toVerticalText(stripInlineMarkup(token.text)), `${b}<w:i/>`);
         case 'bold':
-          return textRunXml(token.text, '<w:b/>');
+          return textRunXml(stripInlineMarkup(token.text), '<w:b/>');
         case 'sideline':
           return textRunXml(stripInlineMarkup(token.text), `${b}<w:u w:val="${SIDELINE_UNDERLINE[token.style]}"/>`);
         case 'tcy':

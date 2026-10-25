@@ -212,9 +212,7 @@ if (import.meta.vitest) {
       expect(normalizeAozoraInline('［＃波線］運命［＃波線終わり］')).toBe(S('wavy', '運命'));
     });
     test('左ルビ・斜体', () => {
-      expect(normalizeAozoraInline('英雄［＃「英雄」の左に「ヒーロー」のルビ］だ')).toBe(
-        `${L('英雄', 'ヒーロー')}だ`,
-      );
+      expect(normalizeAozoraInline('英雄［＃「英雄」の左に「ヒーロー」のルビ］だ')).toBe(`${L('英雄', 'ヒーロー')}だ`);
       expect(normalizeAozoraInline('ここ［＃「ここ」は斜体］')).toBe(I('ここ'));
       expect(normalizeAozoraInline('［＃斜体］ここ［＃斜体終わり］')).toBe(I('ここ'));
     });
