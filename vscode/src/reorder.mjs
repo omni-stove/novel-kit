@@ -11,7 +11,7 @@ const NUMBER_STEP = 10;
 const PREFIX = /^\d+/;
 
 /** ファイル名の先頭の番号（novel.json の parts が指すもの）。無ければ null */
-const prefixOf =(file) => basename(file).match(PREFIX)?.[0] ?? null;
+const prefixOf = (file) => basename(file).match(PREFIX)?.[0] ?? null;
 
 /**
  * files（作品の並び）から moving を取り出し、target（落とした先の項目のファイル。null なら末尾）の位置へ入れた並びを返す。
@@ -38,11 +38,7 @@ export function moveFiles(files, moving, target = null) {
  * 返す値: [{ from, to, oldToken: いまの番号（無ければ null）, newToken: 振る番号 }]（files の順）
  */
 export function renumberPlan(files) {
-  const width = Math.max(
-    3,
-    String(files.length * NUMBER_STEP).length,
-    ...files.map((f) => prefixOf(f)?.length ?? 0),
-  );
+  const width = Math.max(3, String(files.length * NUMBER_STEP).length, ...files.map((f) => prefixOf(f)?.length ?? 0));
   return files.map((from, i) => {
     const name = basename(from);
     const oldToken = prefixOf(from);

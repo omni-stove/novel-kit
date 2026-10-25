@@ -1132,7 +1132,9 @@ async function renumberWork(files, order) {
       const remapped = remapParts(work.parts, files, plan);
       if (remapped && remapped.join() !== work.parts.join()) newParts = remapped;
       if (englishDirs.some((d) => d !== dir && existsSync(d)))
-        notes.push('英語の原稿のファイル名は変えません。番号を揃えるなら、英語の目次でも同じように並べ替えてください。');
+        notes.push(
+          '英語の原稿のファイル名は変えません。番号を揃えるなら、英語の目次でも同じように並べ替えてください。',
+        );
     }
   }
 
@@ -1193,10 +1195,7 @@ async function renameFiles(moves) {
       return false;
     }
   };
-  if (
-    (await apply(staged.map((p) => [p.from, p.temp]))) &&
-    (await apply(staged.map((p) => [p.temp, p.to])))
-  )
+  if ((await apply(staged.map((p) => [p.from, p.temp]))) && (await apply(staged.map((p) => [p.temp, p.to]))))
     return null;
 
   const left = [];
