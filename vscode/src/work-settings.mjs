@@ -288,7 +288,7 @@ if (import.meta.vitest) {
       expect(describeOutputs({ id: 'w', outputs: ['pdf-en'] }).defaultOut).toEqual({ 'pdf-en': 'w-en.pdf' });
     });
     test('書き方の誤りは error に返す', () => {
-      expect(describeOutputs({ outputs: { x: { format: 'docx' } } }).error).toMatch(/docx/);
+      expect(describeOutputs({ outputs: { x: { format: 'odt' } } }).error).toMatch(/odt/);
       expect(describeOutputs({ outputs: { pdf: {} } }).defaultOut).toEqual({ pdf: null });
     });
   });

@@ -1,9 +1,8 @@
 /**
- * 縦書きWordテンプレートへ本文を流し込むための共通処理
- * （応募用docx: ガガガ文庫テンプレート・日経「星新一賞」などで共有する）
+ * 縦書きWordテンプレートへ本文を流し込むための共通処理（novel docx が使う）
  *
- * 段落・ルビ・傍点・縦中横の組み方と、テンプレートのw:bodyの差し替えを提供する。
- * 文字グリッド（cols/rows）は呼び出し側の応募規定に合わせて渡す。
+ * 段落・ルビ・傍点・縦中横の組み方と、テンプレートのw:bodyの差し替え、用紙・余白・文字グリッドの組み替えを提供する。
+ * 文字グリッド（cols/rows）は呼び出し側のレイアウトに合わせて渡す。
  */
 
 import { existsSync } from 'node:fs';
@@ -27,108 +26,131 @@ import {
   tokenizeInlineMarkup,
 } from './text-parser.mjs';
 
-const DEFAULT_TEMPLATE_PATH = fileURLToPath(new URL('../templates/tategaki-a4-42x34.docx', import.meta.url));
-
+/**
+ * 流し込み先のテンプレートのパス。override が無ければ、環境変数 NOVEL_DOCX_TEMPLATE か同梱の A4横・縦書きのもの。
+ * 見つからなければ終了する。
+ */
+// VS Code 拡張は CommonJS に bundle して import.meta.url が無くなるので、同梱先のパスを NOVEL_DOCX_TEMPLATE に渡してくる
 export function resolveTemplatePath(override = null) {
-  const templatePath = override || DEFAULT_TEMPLATE_PATH;
+  const templatePath =
+    override ||
+    process.env.NOVEL_DOCX_TEMPLATE ||
+    fileURLToPath(new URL('../templates/tategaki-a4-42x34.docx', import.meta.url));
   if (!existsSync(templatePath)) fail(`テンプレートが見つかりません: ${templatePath}`);
   return templatePath;
 }
 
-const RPR = '<w:rPr><w:rFonts w:hint="eastAsia"/></w:rPr>';
+/** 本文の文字サイズの既定（半ポイント単位。21 = 10.5pt） */
+export const DEFAULT_FONT_HALF_PT = 21;
 
-function runXml(text, rPr = RPR) {
-  return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`;
+/** props はランの書式（w:rPr の中身。w:rFonts の後ろに置く。w:b → w:i → w:sz → w:em → w:eastAsianLayout の順に並べる） */
+const rPr = (props = '') => `<w:rPr><w:rFonts w:hint="eastAsia"/>${props}</w:rPr>`;
+
+function runXml(text, props = '') {
+  return `<w:r>${rPr(props)}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`;
 }
 
-function plainRunXml(text) {
-  return runXml(toFullWidth(text));
+function plainRunXml(text, props = '') {
+  return runXml(toFullWidth(text), props);
 }
 
-/** 2桁数字を縦中横にしたランの XML を返す。隣接する縦中横同士が Word で結合しないよう、id は連番にする。 */
+/** 縦中横にしたランの XML を返す。隣接する縦中横同士が Word で結合しないよう、id は連番にする。 */
 let tcyId = 1;
-function tcyRunXml(digits) {
-  return runXml(
-    digits,
-    `<w:rPr><w:rFonts w:hint="eastAsia"/><w:eastAsianLayout w:id="${tcyId++}" w:vert="1" w:vertCompress="1"/></w:rPr>`,
-  );
+function tcyRunXml(text, props = '') {
+  return runXml(text, `${props}<w:eastAsianLayout w:id="${tcyId++}" w:vert="1" w:vertCompress="1"/>`);
 }
 
 // 数字の立て方は PDF 出力（text-parser の escapeHtml）と揃える
-export function textRunXml(text) {
+export function textRunXml(text, props = '') {
   if (!text) return '';
   const base = toVerticalBase(text);
   let out = '';
   let last = 0;
   for (const m of base.matchAll(/[0-9]+/g)) {
-    if (m.index > last) out += plainRunXml(base.slice(last, m.index));
-    out += m[0].length === 2 ? tcyRunXml(m[0]) : plainRunXml(m[0]);
+    if (m.index > last) out += plainRunXml(base.slice(last, m.index), props);
+    out += m[0].length === 2 ? tcyRunXml(m[0], props) : plainRunXml(m[0], props);
     last = m.index + m[0].length;
   }
-  if (last < base.length) out += plainRunXml(base.slice(last));
+  if (last < base.length) out += plainRunXml(base.slice(last), props);
   return out;
 }
 
-function rubyRunXml(base, ruby) {
-  const rt = runXml(toVerticalText(ruby), '<w:rPr><w:rFonts w:hint="eastAsia"/><w:sz w:val="10"/></w:rPr>');
-  const rb = runXml(toVerticalText(base));
+/** ルビは親文字の半分の大きさにし、親文字との間隔は 10.5pt のときの値（9pt 上げる）を文字サイズに比例させる */
+function rubyRunXml(base, ruby, fontHalfPt, props) {
+  const rubyHalfPt = Math.round(fontHalfPt / 2);
+  const raise = Math.round((fontHalfPt * 18) / DEFAULT_FONT_HALF_PT);
+  const rt = runXml(toVerticalText(ruby), `${props}<w:sz w:val="${rubyHalfPt}"/>`);
+  const rb = runXml(toVerticalText(base), props);
   return (
-    `<w:r>${RPR}<w:ruby>` +
-    '<w:rubyPr><w:rubyAlign w:val="distributeSpace"/><w:hps w:val="10"/><w:hpsRaise w:val="18"/>' +
-    '<w:hpsBaseText w:val="21"/><w:lid w:val="ja-JP"/></w:rubyPr>' +
+    `<w:r>${rPr(props)}<w:ruby>` +
+    `<w:rubyPr><w:rubyAlign w:val="distributeSpace"/><w:hps w:val="${rubyHalfPt}"/><w:hpsRaise w:val="${raise}"/>` +
+    `<w:hpsBaseText w:val="${fontHalfPt}"/><w:lid w:val="ja-JP"/></w:rubyPr>` +
     `<w:rt>${rt}</w:rt><w:rubyBase>${rb}</w:rubyBase></w:ruby></w:r>`
   );
 }
 
-function emphasisRunXml(text) {
-  return runXml(toVerticalText(text), '<w:rPr><w:rFonts w:hint="eastAsia"/><w:em w:val="dot"/></w:rPr>');
-}
-
-function italicRunXml(text) {
-  return runXml(toVerticalText(text), '<w:rPr><w:rFonts w:hint="eastAsia"/><w:i/></w:rPr>');
-}
-
-// Wordの縦書きでは半角英数がそのまま横倒しになるので、全角化せずに出す
-function sidewaysRunXml(text) {
-  return runXml(toVerticalBase(stripInlineMarkup(text)));
-}
-
-export function lineToRunsXml(line) {
+/**
+ * 1行の記法（ルビ・傍点・イタリック・太字・縦中横・横倒し）をランの XML にする。
+ * fontHalfPt: 本文の文字サイズ（半ポイント単位。ルビの大きさを決める）、bold: 行全体を太字にする（青空文庫の見出し）
+ */
+export function lineToRunsXml(line, { fontHalfPt = DEFAULT_FONT_HALF_PT, bold = false } = {}) {
+  const b = bold ? '<w:b/>' : '';
   return tokenizeInlineMarkup(line)
     .map((token) => {
       switch (token.type) {
         case 'emphasis':
-          return emphasisRunXml(token.text);
+          return runXml(toVerticalText(token.text), `${b}<w:em w:val="dot"/>`);
         case 'ruby':
-          return rubyRunXml(token.base, token.ruby);
+          return rubyRunXml(token.base, token.ruby, fontHalfPt, b);
         case 'italic':
-          return italicRunXml(token.text);
+          return runXml(toVerticalText(token.text), `${b}<w:i/>`);
+        case 'bold':
+          return textRunXml(token.text, '<w:b/>');
+        case 'tcy':
+          return tcyRunXml(toVerticalBase(token.text), b);
+        // Wordの縦書きでは半角英数がそのまま横倒しになるので、全角化せずに出す
         case 'sideways':
-          return sidewaysRunXml(token.text);
+          return runXml(toVerticalBase(stripInlineMarkup(token.text)), b);
         default:
-          return textRunXml(token.text);
+          return textRunXml(token.text, b);
       }
     })
     .join('');
 }
 
-export function paragraphXml(runsXml, { center = false, right = false, pageBreakBefore = false } = {}) {
+/**
+ * 段落の XML。center / right（縦書きでは下揃え）で揃え、pageBreakBefore で前に改ページを入れる。
+ * indent / raise は行頭・行末から下げる字数（青空文庫の字下げ・地から上げ）
+ */
+export function paragraphXml(
+  runsXml,
+  { center = false, right = false, pageBreakBefore = false, indent = 0, raise = 0 } = {},
+) {
   const jc = center ? 'center' : right ? 'right' : null;
-  const pPr = jc ? `<w:pPr><w:jc w:val="${jc}"/></w:pPr>` : '';
+  const ind =
+    indent || raise
+      ? `<w:ind${indent ? ` w:leftChars="${indent * 100}"` : ''}${raise ? ` w:rightChars="${raise * 100}"` : ''}/>`
+      : '';
+  const props = `${ind}${jc ? `<w:jc w:val="${jc}"/>` : ''}`;
+  const pPr = props ? `<w:pPr>${props}</w:pPr>` : '';
   const br = pageBreakBefore ? '<w:r><w:br w:type="page"/></w:r>' : '';
   return `<w:p>${pPr}${br}${runsXml}</w:p>`;
 }
 
+const PLAIN_LINE = { indent: 0, alignEnd: false, raise: 0, heading: null };
+
 /**
- * 本文の行を走査し、出す行ごとに emit(line, { pageBreakBefore, epigraph }) を呼ぶ。
- * 2つ目以降の視点行【】と、pageBreakBeforeBody 指定時の最初の行は改ページ付きにする。
- * 青空文庫の改ページは次の行の前で改ページし、字下げ範囲の注記行は出さず、行頭の字下げなどの注記は外す。
+ * 本文の行を走査し、出す行ごとに emit(line, { pageBreakBefore, epigraph, indent, alignEnd, raise, heading }) を呼ぶ。
+ * 2つ目以降の視点行【】（chapterBreak が false なら改ページしない）と、pageBreakBeforeBody 指定時の最初の行は改ページ付きにする。
+ * 青空文庫の改ページは次の行の前で改ページし、字下げ範囲の注記行は出さない。
+ * 行頭の字下げ・地付き・地から上げ・見出しの注記は外し、indent（範囲の字下げを含む）/ alignEnd / raise / heading に渡す。
  * エピグラフは cols で折り返した表示行を epigraph に渡し、直後が空行でなければ空行を1つ補う。
  * 出力（buildBodyXml）とページ見積もり（estimateBodyPages）で改ページ位置がずれないよう、走査を共有する。
  */
-export function walkBodyLines(lines, { cols, pageBreakBeforeBody = false }, emit) {
+export function walkBodyLines(lines, { cols, pageBreakBeforeBody = false, chapterBreak = true }, emit) {
   let isFirstViewpoint = true;
   let needBodyPageBreak = pageBreakBeforeBody;
+  let blockIndent = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const aozora = parseAozoraLine(lines[i]);
@@ -136,27 +158,42 @@ export function walkBodyLines(lines, { cols, pageBreakBeforeBody = false }, emit
       needBodyPageBreak = true;
       continue;
     }
-    if (aozora.kind !== 'text') continue;
+    if (aozora.kind !== 'text') {
+      blockIndent = aozora.indent ?? 0;
+      continue;
+    }
     const line = aozora.text;
 
     if (isEpigraphLine(line)) {
       const { quote, source } = parseEpigraphLine(line);
-      emit(line, { pageBreakBefore: needBodyPageBreak, epigraph: epigraphDisplayLines(quote, source, cols) });
+      emit(line, {
+        ...PLAIN_LINE,
+        pageBreakBefore: needBodyPageBreak,
+        epigraph: epigraphDisplayLines(quote, source, cols),
+      });
       needBodyPageBreak = false;
-      if (!(i + 1 < lines.length && lines[i + 1].trim() === '')) emit('', { pageBreakBefore: false, epigraph: null });
+      if (!(i + 1 < lines.length && lines[i + 1].trim() === ''))
+        emit('', { ...PLAIN_LINE, pageBreakBefore: false, epigraph: null });
       continue;
     }
 
     const isViewpoint = isViewpointLine(line);
-    const pageBreakBefore = needBodyPageBreak || (isViewpoint && !isFirstViewpoint);
+    const pageBreakBefore = needBodyPageBreak || (chapterBreak && isViewpoint && !isFirstViewpoint);
     if (isViewpoint) isFirstViewpoint = false;
     needBodyPageBreak = false;
-    emit(line, { pageBreakBefore, epigraph: null });
+    emit(line, {
+      pageBreakBefore,
+      epigraph: null,
+      indent: aozora.indent || blockIndent,
+      alignEnd: aozora.alignEnd,
+      raise: aozora.raise,
+      heading: aozora.heading,
+    });
   }
 }
 
 export function countGridRows(line, cols) {
-  return countWrappedRows(normalizeTcy(stripInlineMarkup(line)), cols);
+  return countWrappedRows(normalizeTcy(stripInlineMarkup(line)), Math.max(1, cols));
 }
 
 export function bodyDisplayText(lines) {
@@ -196,34 +233,53 @@ export function buildBodyXml(
     headParagraphs = [],
     tailParagraphs = [],
     pageBreakBeforeBody = false,
+    chapterBreak = true,
     sceneBreak = SCENE_BREAK_MARK,
     sceneBreakIndent = null,
+    fontHalfPt = DEFAULT_FONT_HALF_PT,
   },
 ) {
   const paragraphs = [...headParagraphs];
 
-  walkBodyLines(lines, { cols, pageBreakBeforeBody }, (line, { pageBreakBefore, epigraph }) => {
-    if (epigraph) {
-      // PDF と同じく下揃えにする（縦書きでは right が下揃え）
-      epigraph.forEach((text, i) => {
+  walkBodyLines(
+    lines,
+    { cols, pageBreakBeforeBody, chapterBreak },
+    (line, { pageBreakBefore, epigraph, indent, alignEnd, raise, heading }) => {
+      if (epigraph) {
+        // PDF と同じく下揃えにする（縦書きでは right が下揃え）
+        epigraph.forEach((text, i) => {
+          paragraphs.push(
+            paragraphXml(lineToRunsXml(text, { fontHalfPt }), {
+              right: true,
+              pageBreakBefore: i === 0 && pageBreakBefore,
+            }),
+          );
+        });
+      } else if (line.trim() === '') {
+        paragraphs.push(paragraphXml('', { pageBreakBefore }));
+      } else if (isSeparator(line)) {
+        const mark = indentSeparator(separatorMark(line, sceneBreak), sceneBreakIndent);
+        paragraphs.push(paragraphXml(textRunXml(mark), { center: sceneBreakIndent == null, pageBreakBefore }));
+      } else {
         paragraphs.push(
-          paragraphXml(lineToRunsXml(text), { right: true, pageBreakBefore: i === 0 && pageBreakBefore }),
+          paragraphXml(lineToRunsXml(line, { fontHalfPt, bold: heading != null }), {
+            pageBreakBefore,
+            right: alignEnd,
+            indent,
+            raise,
+          }),
         );
-      });
-    } else if (line.trim() === '') {
-      paragraphs.push(paragraphXml('', { pageBreakBefore }));
-    } else if (isSeparator(line)) {
-      const mark = indentSeparator(separatorMark(line, sceneBreak), sceneBreakIndent);
-      paragraphs.push(paragraphXml(textRunXml(mark), { center: sceneBreakIndent == null, pageBreakBefore }));
-    } else {
-      paragraphs.push(paragraphXml(lineToRunsXml(line), { pageBreakBefore }));
-    }
-  });
+      }
+    },
+  );
 
   return [...paragraphs, ...tailParagraphs].join('');
 }
 
-export function estimateBodyPages(lines, { cols, rows, headLines = [], tailLines = [], pageBreakBeforeBody = false }) {
+export function estimateBodyPages(
+  lines,
+  { cols, rows, headLines = [], tailLines = [], pageBreakBeforeBody = false, chapterBreak = true },
+) {
   let pages = 1;
   let pageRows = 0;
 
@@ -231,8 +287,8 @@ export function estimateBodyPages(lines, { cols, rows, headLines = [], tailLines
     pages++;
     pageRows = 0;
   };
-  const addLine = (line) => {
-    for (let n = countGridRows(line, cols); n > 0; n--) {
+  const addLine = (line, indent = 0) => {
+    for (let n = countGridRows(line, cols - indent); n > 0; n--) {
       if (pageRows >= rows) breakPage();
       pageRows++;
     }
@@ -240,11 +296,16 @@ export function estimateBodyPages(lines, { cols, rows, headLines = [], tailLines
 
   headLines.forEach(addLine);
 
-  walkBodyLines(lines, { cols, pageBreakBeforeBody }, (line, { pageBreakBefore, epigraph }) => {
-    if (pageBreakBefore) breakPage();
-    if (epigraph) epigraph.forEach(addLine);
-    else addLine(line);
-  });
+  walkBodyLines(
+    lines,
+    { cols, pageBreakBeforeBody, chapterBreak },
+    (line, { pageBreakBefore, epigraph, indent, raise }) => {
+      if (pageBreakBefore) breakPage();
+      if (epigraph) {
+        for (const text of epigraph) addLine(text);
+      } else addLine(line, indent + raise);
+    },
+  );
 
   tailLines.forEach(addLine);
 
@@ -308,6 +369,34 @@ export function applyDocGrid(documentXml, { cols, rows, fontPt = 10.5 }) {
     /<w:docGrid[^>]*\/>/.test(section)
       ? section.replace(/<w:docGrid[^>]*\/>/, docGrid)
       : section.replace('</w:sectPr>', `${docGrid}</w:sectPr>`),
+  );
+}
+
+const twip = (mm) => Math.round((mm * 1440) / 25.4);
+
+/**
+ * 全セクションの用紙（w:pgSz）と余白（w:pgMar の上下左右）を、プレビューのレイアウトと同じ寸法（mm）にする。
+ * landscape なら横向き。ヘッダー・フッターの位置と綴じ代はテンプレートのまま。
+ */
+// w:code（用紙の番号）はテンプレートの A4 のものなので、別の用紙で残さないよう書き直す
+export function applyPageSetup(documentXml, { paperW, paperH, margin, landscape }) {
+  const pgSz = `<w:pgSz w:w="${twip(paperW)}" w:h="${twip(paperH)}"${landscape ? ' w:orient="landscape"' : ''}/>`;
+  const setMargin = (tag) =>
+    ['top', 'right', 'bottom', 'left'].reduce(
+      (t, side) => t.replace(new RegExp(`w:${side}="-?\\d+"`), `w:${side}="${twip(margin[side])}"`),
+      tag,
+    );
+  return documentXml.replace(/<w:sectPr[\s\S]*?<\/w:sectPr>/g, (section) =>
+    section.replace(/<w:pgSz[^>]*\/>/, pgSz).replace(/<w:pgMar[^>]*\/>/, setMargin),
+  );
+}
+
+/** styles.xml の既定の文字サイズ（w:docDefaults の w:sz / w:szCs）を halfPt（半ポイント単位）にする */
+export function applyFontSize(stylesXml, halfPt) {
+  return stylesXml.replace(/<w:rPrDefault>[\s\S]*?<\/w:rPrDefault>/, (rPrDefault) =>
+    rPrDefault
+      .replace(/<w:sz w:val="\d+"\/>/, `<w:sz w:val="${halfPt}"/>`)
+      .replace(/<w:szCs w:val="\d+"\/>/, `<w:szCs w:val="${halfPt}"/>`),
   );
 }
 

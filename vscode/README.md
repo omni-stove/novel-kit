@@ -43,11 +43,12 @@ PDF 出力に使う Chrome は、初回の PDF 出力のときにダウンロー
 
 ## 出力
 
-「novel.json の出力を作る」（コマンドパレット・エディタのタイトルバーの「…」・エクスプローラーで `novel.json` を右クリック）で、`novel.json` の `"outputs"` に書いた出力を選んで作る。`novel build` と同じ処理で、出力ごとの設定もそのまま効く。形式は pdf / pdf-en / novel-pdf / epub / rtf / rtf-en / split / merge。
+「novel.json の出力を作る」（コマンドパレット・エディタのタイトルバーの「…」・エクスプローラーで `novel.json` を右クリック）で、`novel.json` の `"outputs"` に書いた出力を選んで作る。`novel build` と同じ処理で、出力ごとの設定もそのまま効く。形式は pdf / pdf-en / novel-pdf / epub / rtf / rtf-en / docx / split / merge。
 
 - pdf はその場で抜き出すページ（`--pages`）と先頭から組むファイル数（`--limit`）、split / merge は想定読者（`--target`）、merge はルビの括弧表記（`--ruby-parens`）を聞く
 - 出力先は設定 `novelPreview.outDir`（ワークスペースのフォルダから。既定は `out`）
-- PDF・RTF は出力後に開く。設定 `novelPreview.openAfterExport` を false にするか、環境変数 `AUTO_OPEN=0` で開かない
+- docx は縦書きの Word 文書。用紙・余白・字数×行数はページ設定のレイアウトのまま Word の「ページ設定」に入るので、Word で開いても同じ字詰めになる。表紙・梗概にはページ番号を振らず、本文の1ページ目から振る
+- PDF・RTF・docx は出力後に開く。設定 `novelPreview.openAfterExport` を false にするか、環境変数 `AUTO_OPEN=0` で開かない
 - novel-pdf は Ghostscript（`gs`）、epub は `zip` を使う
 
 「現在のレイアウトでPDFを出力」は、プレビューで見ているレイアウトのまま確かめるための PDF を `out/preview/` に出す。
