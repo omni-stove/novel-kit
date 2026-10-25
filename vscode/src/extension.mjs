@@ -1273,7 +1273,11 @@ async function openFromOutline(file) {
   const session = [...sessions].find((s) => !s.follow && s.panel.visible && s.files.includes(file));
   if (session) {
     session.panel.reveal(undefined, false);
-    session.panel.webview.postMessage({ type: 'reveal', target: { fileIndex: session.files.indexOf(file), line: 0 } });
+    session.panel.webview.postMessage({
+      type: 'reveal',
+      target: { fileIndex: session.files.indexOf(file), line: 0 },
+      mark: false,
+    });
     return;
   }
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(file));
