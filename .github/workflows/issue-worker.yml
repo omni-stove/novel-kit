@@ -1,0 +1,22 @@
+name: Issue Worker
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  work:
+    uses: omni-stove/.github/.github/workflows/issue-worker.yml@main
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    with:
+      provider: "claude"
+      regen-command: 'pnpm install --lockfile-only --no-frozen-lockfile'
+      node-version: "26"
+      allowed-bots: ""  # 公開リポジトリでは外部 App が付けたラベルでも起動してしまうため
+      # 公開リポジトリなので、triage 権限を持つ人が増えてもエージェントを動かせるのはここに書いた人だけにする
+      allowed-users: "codyNog"
+    secrets: inherit
