@@ -46,7 +46,7 @@
         {
           "type": "array",
           "items": {
-            "enum": ["pdf", "pdf-en", "novel-pdf", "epub", "rtf", "rtf-en", "split", "merge"]
+            "enum": ["pdf", "pdf-en", "novel-pdf", "epub", "rtf", "rtf-en", "docx", "split", "merge"]
           },
           "uniqueItems": true
         },
@@ -229,8 +229,8 @@
       "type": "object",
       "properties": {
         "format": {
-          "enum": ["pdf", "pdf-en", "novel-pdf", "epub", "rtf", "rtf-en", "split", "merge"],
-          "description": "出力形式（省略時は出力名。pdf: 縦書き/横書き PDF、pdf-en: 英語のペーパーバック風 PDF、novel-pdf: 文庫本見開き PDF、epub、rtf: 日本語原稿の RTF、rtf-en: Shunn 形式の RTF、split: 章ごとの txt、merge: 1つにまとめた txt）"
+          "enum": ["pdf", "pdf-en", "novel-pdf", "epub", "rtf", "rtf-en", "docx", "split", "merge"],
+          "description": "出力形式（省略時は出力名。pdf: 縦書き/横書き PDF、pdf-en: 英語のペーパーバック風 PDF、novel-pdf: 文庫本見開き PDF、epub、rtf: 日本語原稿の RTF、rtf-en: Shunn 形式の RTF、docx: 縦書きの Word 文書、split: 章ごとの txt、merge: 1つにまとめた txt）"
         },
         "out": {
           "type": "string",
@@ -273,7 +273,7 @@
         },
         "chapterBreak": {
           "type": "boolean",
-          "description": "false で章ごとに改ページしない（pdf / rtf / rtf-en）"
+          "description": "false で章ごとに改ページしない（pdf / rtf / rtf-en / docx）"
         },
         "pageBreak": {
           "type": "boolean",
@@ -337,7 +337,7 @@
         "sceneBreakIndent": {
           "type": ["integer", "null"],
           "minimum": 0,
-          "description": "この出力だけの区切りの行の字下げ（字数。null で中央。省略時は sceneBreakIndent）。pdf / novel-pdf / epub / rtf / split / merge"
+          "description": "この出力だけの区切りの行の字下げ（字数。null で中央。省略時は sceneBreakIndent）。pdf / novel-pdf / epub / rtf / docx / split / merge"
         }
       }
     }

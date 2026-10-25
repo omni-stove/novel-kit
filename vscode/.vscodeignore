@@ -7,6 +7,7 @@
 !dist/viewer/**
 !dist/ipadic/**
 !dist/lindera_wasm_bg.wasm
+!dist/tategaki-a4-42x34.docx
 !media/**
 media/tsconfig.json
 !schemas/**

@@ -42,9 +42,11 @@
  *   epub       EPUB。縦書きか横書きかはレイアウトの writingMode
  *   rtf        日本語原稿の RTF。rubyParens, chapterBreak, contact
  *   rtf-en     英語投稿用（Shunn 形式）の RTF。rubyParens, chapterBreak, contact
+ *   docx       縦書きの Word 文書。coverless, chapterBreak, synopsis, blankAfterHeading。
+ *              用紙・余白・字数×行数はレイアウトのまま Word のページ設定に入れる（横書きのレイアウトでも縦書きで組む）
  *   split      章ごとの txt（out はディレクトリ）。input はディレクトリ1つ
  *   merge      1つにまとめた txt。input はディレクトリ1つ。rubyParens
- * parts は作品で1つだけ書き、pdf / pdf-en / split / merge のすべてに効く（出力ごとには変えない）。
+ * parts は作品で1つだけ書き、pdf / pdf-en / docx / split / merge のすべてに効く（出力ごとには変えない）。
  */
 
 import { existsSync, mkdirSync, statSync } from 'node:fs';
@@ -168,6 +170,31 @@ const rtfArgs = (style) => (output, config) => [
   ...(style === '--ja' ? sceneBreakIndentArgs(output, config) : []),
 ];
 
+/** docx は Word のページ設定に用紙・余白・字数×行数をそのまま入れるので、レイアウトを丸ごと渡す */
+function docxArgs(output, config, { warn }) {
+  const layout = layoutOf(output, config);
+  if (layout.writingMode === 'horizontal')
+    warn('docx は縦書きで組みます（横書きのレイアウトの字数×行数を縦書きに当てます）');
+  const metrics = computeMetrics({ ...layout, writingMode: 'vertical' });
+  const { paper, orientation, margin } = metrics.layout;
+  return [
+    '--size',
+    `${metrics.chars}x${metrics.lines}`,
+    '--paper',
+    paper,
+    ...flag(orientation === 'portrait', '--portrait'),
+    '--margin',
+    [margin.top, margin.right, margin.bottom, margin.left].join(','),
+    ...flag(output.coverless, '--coverless'),
+    ...flag(output.chapterBreak === false, '--no-chapter-break'),
+    ...flag(output.synopsis === false, '--no-synopsis'),
+    ...flag(output.blankAfterHeading, '--blank-after-heading'),
+    ...option(config.parts?.join(','), '--part'),
+    ...sceneBreakArgs(output, config.sceneBreak?.ja),
+    ...sceneBreakIndentArgs(output, config),
+  ];
+}
+
 /** split / merge は <原稿のディレクトリ> <出力先> <作品名> <ジャンル> を順に受け取る */
 function textArgv(output, config, out, { target, rubyParens }, { merge }) {
   const input = workValue(output, config, 'input');
@@ -198,6 +225,7 @@ const FORMATS = {
   epub: { load: () => import('./epub.mjs'), args: epubArgs, open: false, file: ['', '.epub'] },
   rtf: { load: () => import('./rtf.mjs'), args: rtfArgs('--ja'), open: true, file: ['', '.rtf'] },
   'rtf-en': { load: () => import('./rtf.mjs'), args: rtfArgs('--shunn'), open: true, file: ['-en', '.rtf'] },
+  docx: { load: () => import('./docx.mjs'), args: docxArgs, open: true, file: ['', '.docx'] },
   split: {
     load: () => import('./split.mjs'),
     argv: (...a) => textArgv(...a, { merge: false }),
@@ -235,6 +263,17 @@ const KEYS_BY_FORMAT = {
   epub: [...WORK_KEYS, 'sceneBreakIndent', 'writingMode', 'chars', 'lines'],
   rtf: [...WORK_KEYS, 'sceneBreakIndent', 'contact', 'rubyParens', 'chapterBreak'],
   'rtf-en': [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
+  docx: [
+    ...WORK_KEYS,
+    'sceneBreakIndent',
+    'writingMode',
+    'chars',
+    'lines',
+    'coverless',
+    'chapterBreak',
+    'synopsis',
+    'blankAfterHeading',
+  ],
   split: TEXT_KEYS,
   merge: [...TEXT_KEYS, 'rubyParens'],
 };
@@ -465,6 +504,36 @@ if (import.meta.vitest) {
       );
     });
 
+    test('docx は用紙・余白・字数×行数をレイアウトのまま渡し、横書きのレイアウトなら警告する', () => {
+      const c = config({
+        layout: { ...DEFAULT_LAYOUT, paper: 'B5', orientation: 'portrait', chars: 40, lines: 30 },
+        parts: ['050'],
+      });
+      const argv = argvOf({ format: 'docx', out: 'a.docx', coverless: true, synopsis: false }, c);
+      expect(argv).toEqual(
+        expect.arrayContaining([
+          '--size',
+          '40x30',
+          '--paper',
+          'B5',
+          '--portrait',
+          '--margin',
+          '20,20,25,20',
+          '--coverless',
+          '--no-synopsis',
+          '--part',
+          '050',
+          '--open',
+        ]),
+      );
+      const warnings = [];
+      outputArgv('d', { format: 'docx', out: 'a.docx', writingMode: 'horizontal' }, config(), '/p', {}, (m) =>
+        warnings.push(m),
+      );
+      expect(warnings).toEqual([expect.stringContaining('縦書き')]);
+      expect(argvOf({ format: 'docx', out: 'a.docx' })).not.toContain('--portrait');
+    });
+
     test('場面区切りは出力ごとの指定、無ければ作品の sceneBreak（pdf-en は english、rtf-en は出力ごとだけ）を渡す', () => {
       const c = config({ sceneBreak: { ja: '＊＊＊', en: '~' } });
       const mark = (output, cfg = c) => {
@@ -594,6 +663,7 @@ if (import.meta.vitest) {
             epub: { out: '作品.epub' },
             rtf: true,
             'rtf-en': true,
+            docx: true,
             split: true,
             merge: true,
           },
@@ -607,6 +677,7 @@ if (import.meta.vitest) {
         epub: { format: 'epub', out: '作品.epub' },
         rtf: { format: 'rtf', out: 'w.rtf' },
         'rtf-en': { format: 'rtf-en', out: 'w-en.rtf' },
+        docx: { format: 'docx', out: 'w.docx' },
         split: { format: 'split', out: 'w-chapters' },
         merge: { format: 'merge', out: 'w-all.txt' },
       });
