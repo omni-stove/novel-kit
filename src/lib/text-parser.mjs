@@ -535,8 +535,9 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
 
   result = result.replace(/\uE001([\uE010-\uEFFF])\uE001/g, (_, ch) => {
     // \u508D\u70B9\u306E\u4E2D\u306E\u5DE6\u30EB\u30D3\u306F\u3001\u70B9\u3092\u6253\u3064\u5358\u4F4D\u306B\u5272\u3089\u308C\u306A\u3044\u3088\u30461\u3064\u306E\u307E\u3068\u307E\u308A\u306B\u3057\u3066\u5C55\u958B\u3059\u308B
-    const html = processInnerText(emphasisPlaceholders[ch.charCodeAt(0) - 0xe010]).replace(RUBY_PLACEHOLDER_RE, (_m, r) =>
-      phSpan(rubyHtmlOf(r)),
+    const html = processInnerText(emphasisPlaceholders[ch.charCodeAt(0) - 0xe010]).replace(
+      RUBY_PLACEHOLDER_RE,
+      (_m, r) => phSpan(rubyHtmlOf(r)),
     );
     if (!rubyLayout) return `<span class="emphasis">${html}</span>`;
     // text-emphasis の圏点は Chromium が行の箱に含めて行送りを広げ、字詰めの版面や行間が崩れるため、

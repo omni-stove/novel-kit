@@ -10,6 +10,7 @@ export default defineConfig({
       'vscode/src/markup.mjs',
       'vscode/src/pdf-renderer.mjs',
       'vscode/src/prose.mjs',
+      'vscode/src/reorder.mjs',
       'vscode/src/work-settings.mjs',
     ],
     environment: 'node',

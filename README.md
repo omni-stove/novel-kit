@@ -12,6 +12,8 @@ pnpm add -D github:omni-stove/novel-kit
 
 mise なら `[env] _.path = ["{{config_root}}/node_modules/.bin"]` で `novel` だけで呼べる。
 
+原稿の記法は [vscode/docs/notation.md](vscode/docs/notation.md) にまとめた。
+
 作品の設定ファイル `novel.json` は `vscode/schemas/novel.schema.json` のスキーマで書く（VS Code では補完が効く）。
 
 バージョンを固定するときは `github:omni-stove/novel-kit#cli-v2026.1021.0` のようにタグを付ける。
