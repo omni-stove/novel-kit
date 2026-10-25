@@ -1,8 +1,8 @@
 name: CI
 
-# 共通 ci.yml の lint ジョブは依存の install を伴うが、Biome は standalone バイナリで動くので、lint は
-# 依存を install しない自前ジョブにする (run-lint: false)。typecheck と knip は node_modules が要るので
-# typecheck ジョブに置く。ci-gate.yml を呼ぶジョブ名は、必須チェック名 "ci / CI Gate" を保つため ci にする。
+# Biome は standalone バイナリで動くので、lint は依存を install しないジョブにする。typecheck と knip は
+# node_modules が要るので typecheck ジョブに置く。ci-gate.yml を呼ぶジョブ名は、必須チェック名
+# "ci / CI Gate" を保つため ci にする。
 # 必須チェックを毎回報告させるため、変更のない PR を on.paths で外さず、changes の結果で各ジョブを
 # skipped にする（CI Gate は skipped を失敗にしない）。
 
@@ -23,11 +23,7 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
-      actions: read
     with:
-      run-lint: false
-      run-test: false
-      gate: false
       run-review: true
       review-provider: "claude"
       # 公開リポジトリでは外部 App の PR でもレビューが起動してしまうため、自前の bot だけを許す。
@@ -35,8 +31,11 @@ jobs:
       review-allowed-bots: "omni-stove-agent"
     secrets: inherit
 
-  # push では前回の push との差分を取る手間に見合わないので、全部走らせる
+  # push では前回の push との差分を取る手間に見合わないので、全部走らせる。
+  # checks が緊急避難口やコンフリクトで proceed を立てない run では、ここから下を全部 skipped にする
   changes:
+    needs: checks
+    if: needs.checks.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
