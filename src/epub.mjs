@@ -111,6 +111,11 @@ ruby {
   -webkit-ruby-position: before;
 }
 
+ruby.left-ruby {
+  ruby-position: under;
+  -webkit-ruby-position: after;
+}
+
 rt {
   font-size: 0.5em;
   line-height: 1;

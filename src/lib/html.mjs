@@ -21,8 +21,9 @@ export function separatorPlacementCss(indent = null) {
 }
 
 /**
- * 青空文庫の注記（改ページ・見出し・太字）から組んだ要素のスタイル。pdf / novel-pdf / epub が共有する。
- * 見出しは本文と同じ大きさのゴシック体の太字にする（章の見出し【】とは別の、本文中の見出し）
+ * 青空文庫の注記（改ページ・見出し・太字・斜体・傍線）から組んだ要素のスタイル。pdf / novel-pdf / epub が共有する。
+ * 見出しは本文と同じ大きさのゴシック体の太字にする（章の見出し【】とは別の、本文中の見出し）。
+ * 傍線は縦書きでは字の右、横書きでは字の下に引く
  */
 export const AOZORA_CSS = `
     .page-break-marker {
@@ -38,6 +39,33 @@ export const AOZORA_CSS = `
 
     strong.bold {
       font-weight: bold;
+    }
+
+    i.italic {
+      font-style: italic;
+    }
+
+    /* right は縦書きのときだけ効き、横書きでは under が効く */
+    .sideline {
+      text-decoration-line: underline;
+      text-underline-position: under right;
+    }
+
+    .sideline-double {
+      text-decoration-style: double;
+    }
+
+    /* CSS には一点鎖線が無いので、鎖線は点線で代える */
+    .sideline-chain {
+      text-decoration-style: dotted;
+    }
+
+    .sideline-dashed {
+      text-decoration-style: dashed;
+    }
+
+    .sideline-wavy {
+      text-decoration-style: wavy;
     }
 `;
 
@@ -177,6 +205,13 @@ export const VERTICAL_GLYPH_CSS = `
       transform: translateX(calc(100% - 0.4em));
       letter-spacing: calc(var(--rt-ls, 0) * 1em);
     }
+
+    /* 左ルビ（青空文庫の注記）は rt と同じ置き方を左右反転し、親文字の左端から自分の幅ぶん左へずらす */
+    ruby.left-ruby > rt {
+      right: auto;
+      left: 0;
+      transform: translate(calc(-100% + 0.4em), -50%);
+    }
 `;
 
 /**
@@ -208,6 +243,14 @@ export const HORIZONTAL_GLYPH_CSS = `
       bottom: 50%;
       inset-block-start: auto;
       transform: translateY(-1em);
+    }
+
+    /* 左ルビは横書きでは字の下に置く。縦書き用の ruby.left-ruby > rt より後ろで同じ詳細度にして上書きする */
+    ruby.left-ruby > rt {
+      left: 50%;
+      top: 50%;
+      bottom: auto;
+      transform: translate(-50%, 1em);
     }
 `;
 

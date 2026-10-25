@@ -6,7 +6,21 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { BOLD_CLOSE, BOLD_OPEN, normalizeAozoraInline, parseAozoraLine, TCY_CLOSE, TCY_OPEN } from './aozora.mjs';
+import {
+  BOLD_CLOSE,
+  BOLD_OPEN,
+  ITALIC_CLOSE,
+  ITALIC_OPEN,
+  LEFT_RUBY_CLOSE,
+  LEFT_RUBY_OPEN,
+  LEFT_RUBY_SEP,
+  normalizeAozoraInline,
+  parseAozoraLine,
+  SIDELINE_CLOSE,
+  SIDELINE_OPEN,
+  TCY_CLOSE,
+  TCY_OPEN,
+} from './aozora.mjs';
 
 /**
  * 場面区切りの行か。原稿では * だけの行（* / *** / * * *。全角の ＊ も可）で書き、出力ごとの記号に変える
@@ -191,12 +205,24 @@ export function countTextChars(text) {
   return [...text.replace(/\s/g, '')].length;
 }
 
+/** 傍線の開きの文字から種類（SIDELINE_OPEN のキー）を引く */
+const SIDELINE_STYLE_OF = Object.fromEntries(Object.entries(SIDELINE_OPEN).map(([style, ch]) => [ch, style]));
+const SIDELINE_OPENS = Object.values(SIDELINE_OPEN).join('');
+const SIDELINE_OPEN_RE = new RegExp(`[${SIDELINE_OPENS}]`, 'g');
+const LEFT_RUBY_RE = new RegExp(`${LEFT_RUBY_OPEN}(.+?)${LEFT_RUBY_SEP}(.+?)${LEFT_RUBY_CLOSE}`, 'g');
+
 const INLINE_MARKUP_RE = new RegExp(
-  `《《(.+?)》》|\\|(.+?)《(.+?)》|<<(.+?)>>|\\*([^*]+)\\*|${BOLD_OPEN}(.+?)${BOLD_CLOSE}|${TCY_OPEN}(.+?)${TCY_CLOSE}`,
+  `《《(.+?)》》|\\|(.+?)《(.+?)》|<<(.+?)>>|\\*([^*]+)\\*|${BOLD_OPEN}(.+?)${BOLD_CLOSE}|${TCY_OPEN}(.+?)${TCY_CLOSE}` +
+    `|${ITALIC_OPEN}(.+?)${ITALIC_CLOSE}|([${SIDELINE_OPENS}])(.+?)${SIDELINE_CLOSE}` +
+    `|${LEFT_RUBY_OPEN}(.+?)${LEFT_RUBY_SEP}(.+?)${LEFT_RUBY_CLOSE}`,
   'g',
 );
 
-// sideways の中身にはルビ記法が入りうるので、text は未解釈のまま返す
+/**
+ * 1行をインライン記法のトークンに分ける。type は text / emphasis / ruby（base, ruby）/ sideways / italic / bold / tcy /
+ * sideline（style は SIDELINE_OPEN のキー）/ leftRuby（base, ruby）。
+ * sideways・sideline の中身にはルビ記法が入りうるので、text は未解釈のまま返す
+ */
 export function tokenizeInlineMarkup(text) {
   const tokens = [];
   let last = 0;
@@ -207,7 +233,10 @@ export function tokenizeInlineMarkup(text) {
     else if (m[4] !== undefined) tokens.push({ type: 'sideways', text: m[4] });
     else if (m[5] !== undefined) tokens.push({ type: 'italic', text: m[5] });
     else if (m[6] !== undefined) tokens.push({ type: 'bold', text: m[6] });
-    else tokens.push({ type: 'tcy', text: m[7] });
+    else if (m[7] !== undefined) tokens.push({ type: 'tcy', text: m[7] });
+    else if (m[8] !== undefined) tokens.push({ type: 'italic', text: m[8] });
+    else if (m[9] !== undefined) tokens.push({ type: 'sideline', style: SIDELINE_STYLE_OF[m[9]], text: m[10] });
+    else tokens.push({ type: 'leftRuby', base: m[11], ruby: m[12] });
     last = m.index + m[0].length;
   }
   if (last < text.length) tokens.push({ type: 'text', text: text.slice(last) });
@@ -221,8 +250,8 @@ export function tokenizeInlineMarkup(text) {
 export function stripInlineMarkup(text, { rubyParens = false } = {}) {
   return tokenizeInlineMarkup(normalizeAozoraInline(text).replace(/［＃[^］]*］/g, ''))
     .map((t) => {
-      if (t.type === 'ruby') return rubyParens ? `${t.base}（${t.ruby}）` : t.base;
-      if (t.type === 'sideways') return stripInlineMarkup(t.text, { rubyParens });
+      if (t.type === 'ruby' || t.type === 'leftRuby') return rubyParens ? `${t.base}（${t.ruby}）` : t.base;
+      if (t.type === 'sideways' || t.type === 'sideline') return stripInlineMarkup(t.text, { rubyParens });
       return t.text;
     })
     .join('');
@@ -288,7 +317,7 @@ export function layoutRuby(n, m, capBefore = 0, capAfter = 0) {
 
 // 生成済みの span を1単位にするのは、縦中横などの1字分の箱を割って点を打ち分けないため
 const EMPHASIS_UNIT_RE = /\uE002[\uE010-\uEFFF]\uE002|<span[^>]*>[^<]*<\/span>|&[^;]+;|.\p{M}*/gsu;
-// text-emphasis と同じく約物・空白には点を打たない。私用領域は太字の目印
+// text-emphasis と同じく約物・空白には点を打たない。私用領域は太字・斜体・傍線の目印
 const NO_EMPHASIS_RE = /^[\p{P}\p{Z}\p{Cc}\p{Co}]+$/u;
 
 const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -446,6 +475,12 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return phEmphasis(idx);
   });
 
+  result = result.replace(LEFT_RUBY_RE, (_, base, ruby) => {
+    const idx = rubyPlaceholders.length;
+    rubyPlaceholders.push({ base, ruby, left: true });
+    return phRuby(idx);
+  });
+
   result = result.replace(/\|(.+?)《(.+?)》/g, (match, base, ruby, offset, whole) => {
     const idx = rubyPlaceholders.length;
     const before = [...whole.slice(0, offset)];
@@ -465,7 +500,9 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
 
   result = result.replace(/\uE000([\uE010-\uEFFF])\uE000/g, (_, ch) => {
     const placeholder = rubyPlaceholders[ch.charCodeAt(0) - 0xe010];
-    const { base, ruby } = placeholder;
+    const { base, ruby, left } = placeholder;
+    // 字数に合わせた配置（fittedRubyHtml）は右（横書きでは上）のルビの置き方なので、左ルビには使わない
+    if (left) return `<ruby class="left-ruby">${processInnerText(base)}<rt>${processInnerText(ruby)}</rt></ruby>`;
     if (!rubyLayout) return `<ruby>${processInnerText(base)}<rt>${processInnerText(ruby)}</rt></ruby>`;
     return fittedRubyHtml(placeholder);
   });
@@ -492,7 +529,13 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     return spanPlaceholders[ch.charCodeAt(0) - 0xe010];
   });
 
-  return result.replaceAll(BOLD_OPEN, '<strong class="bold">').replaceAll(BOLD_CLOSE, '</strong>');
+  return result
+    .replaceAll(BOLD_OPEN, '<strong class="bold">')
+    .replaceAll(BOLD_CLOSE, '</strong>')
+    .replaceAll(ITALIC_OPEN, '<i class="italic">')
+    .replaceAll(ITALIC_CLOSE, '</i>')
+    .replace(SIDELINE_OPEN_RE, (ch) => `<span class="sideline sideline-${SIDELINE_STYLE_OF[ch]}">`)
+    .replaceAll(SIDELINE_CLOSE, '</span>');
 }
 
 /**
@@ -847,6 +890,20 @@ if (import.meta.vitest) {
         { type: 'italic', text: 'it' },
         { type: 'text', text: 'e' },
       ]);
+    });
+    test('青空文庫の斜体・傍線・左ルビを切り出す', () => {
+      const line = normalizeAozoraInline('あ［＃「あ」は斜体］い［＃「い」に破線］英［＃「英」の左に「え」のルビ］');
+      expect(tokenizeInlineMarkup(line)).toEqual([
+        { type: 'italic', text: 'あ' },
+        { type: 'sideline', style: 'dashed', text: 'い' },
+        { type: 'leftRuby', base: '英', ruby: 'え' },
+      ]);
+    });
+    test('stripInlineMarkup は傍線の中のルビも外し、左ルビは親文字だけ（rubyParens なら括弧で）残す', () => {
+      const leftRuby = '英雄［＃「英雄」の左に「ヒーロー」のルビ］';
+      expect(stripInlineMarkup('［＃傍線］|東京《とうきょう》［＃傍線終わり］へ')).toBe('東京へ');
+      expect(stripInlineMarkup(leftRuby)).toBe('英雄');
+      expect(stripInlineMarkup(leftRuby, { rubyParens: true })).toBe('英雄（ヒーロー）');
     });
   });
 
@@ -1341,6 +1398,24 @@ if (import.meta.vitest) {
     test('青空文庫の縦中横は縦書きだけ tcy にし、横書きでは中身をそのまま組む', () => {
       expect(escapeHtml(`${TCY_OPEN}123${TCY_CLOSE}`)).toBe('<span class="tcy">123</span>');
       expect(escapeHtml(`${TCY_OPEN}123${TCY_CLOSE}`, { vertical: false })).toBe('123');
+    });
+    test('青空文庫の傍線は種類ごとのクラス、斜体は i、左ルビは left-ruby の ruby にする', () => {
+      const aozora = (line, opts) => escapeHtml(normalizeAozoraInline(line), opts);
+      expect(aozora('運命［＃「運命」に波線］が')).toBe('<span class="sideline sideline-wavy">運命</span>が');
+      expect(aozora('［＃二重傍線］|東京《とうきょう》［＃二重傍線終わり］')).toBe(
+        '<span class="sideline sideline-double"><ruby>東京<rt>とうきょう</rt></ruby></span>',
+      );
+      expect(aozora('ここ［＃「ここ」は斜体］')).toBe('<i class="italic">ここ</i>');
+      expect(aozora('英雄［＃「英雄」の左に「ヒーロー」のルビ］', { rubyLayout: true })).toBe(
+        '<ruby class="left-ruby">英雄<rt>ヒーロー</rt></ruby>',
+      );
+    });
+    test('傍点の中の傍線の目印には点を打たない', () => {
+      const line = normalizeAozoraInline('［＃傍点］あ［＃傍線］い［＃傍線終わり］［＃傍点終わり］');
+      expect(escapeHtml(line, { rubyLayout: true })).toBe(
+        '<span class="emphasis-dot">あ</span>' +
+          '<span class="sideline sideline-solid"><span class="emphasis-dot">い</span></span>',
+      );
     });
     test('横倒しの中のルビも組む', () => {
       expect(tokenizeInlineMarkup('<<A|漢《かん》>>')).toEqual([{ type: 'sideways', text: 'A|漢《かん》' }]);
