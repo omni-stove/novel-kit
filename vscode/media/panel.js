@@ -132,17 +132,25 @@ function createNovelPanel(vscode) {
       if (!s) return;
       const value =
         s.language === 'en'
-          ? `${formatNumber(s.words, 'en')} words ・ ${formatNumber(s.chars)}字`
-          : `${formatNumber(s.chars)}字 ・ 400字詰め ${formatPages(s.genkoPages)}枚 ・ ${stats.layout} ${formatPages(s.gridPages)}枚`;
+          ? t('{0} words · {1} chars', formatNumber(s.words, 'en'), formatNumber(s.chars))
+          : t(
+              '{0} chars · {1} sheets of 400 chars · {2}: {3} pages',
+              formatNumber(s.chars),
+              formatPages(s.genkoPages),
+              stats.layout,
+              formatPages(s.gridPages),
+            );
       rows.push(h('dt', { textContent: label }), h('dd', { textContent: value }));
     };
-    add('このファイル', stats.file);
-    add('作品全体', stats.work);
+    add(t('This file'), stats.file);
+    add(t('Whole work'), stats.work);
     $('counts').replaceChildren(...rows);
     $('counts').title =
       stats.file?.language === 'en'
-        ? '語数・文字数（メタ行を除く）'
-        : '文字数（ルビ・メタ行を除く）・400字詰め原稿用紙換算・現在のレイアウトでの換算枚数';
+        ? t('Words and characters (excluding meta lines)')
+        : t(
+            'Characters (excluding ruby and meta lines), sheets of 400-character manuscript paper, and pages in the current layout',
+          );
   }
 
   /** 文末の分布の棒 */
@@ -151,17 +159,19 @@ function createNovelPanel(vscode) {
   function renderAnalysis(data) {
     const root = $('analysis');
     if (data.english) {
-      root.replaceChildren(h('p', { className: 'note', textContent: '英語の原稿は文章の傾向を数えません。' }));
+      root.replaceChildren(
+        h('p', { className: 'note', textContent: t('Prose analysis is not available for English manuscripts.') }),
+      );
       return;
     }
     if (!data.report) {
-      const link = h('a', { href: '#', textContent: '設定を開く' });
+      const link = h('a', { href: '#', textContent: t('Open Settings') });
       link.addEventListener('click', (e) => {
         e.preventDefault();
         post({ type: 'openSettings' });
       });
       root.replaceChildren(
-        h('p', { className: 'note' }, '文章の傾向の解析はオフです（設定 novelPreview.prose）。', link),
+        h('p', { className: 'note' }, t('Prose analysis is turned off (setting novelPreview.prose). '), link),
       );
       return;
     }
@@ -170,15 +180,19 @@ function createNovelPanel(vscode) {
       h(
         'dl',
         { className: 'summary' },
-        h('dt', { textContent: '台詞の割合' }),
+        h('dt', { textContent: t('Dialogue') }),
         h('dd', {
           textContent: `${r.dialogue.percent}%`,
-          title: `台詞 ${formatNumber(r.dialogue.dialogueChars)}字 / 地の文 ${formatNumber(r.dialogue.narrationChars)}字`,
+          title: t(
+            'Dialogue {0} chars / narration {1} chars',
+            formatNumber(r.dialogue.dialogueChars),
+            formatNumber(r.dialogue.narrationChars),
+          ),
         }),
-        h('dt', { textContent: '文の長さ' }),
-        h('dd', { textContent: `平均 ${r.average}字・最長 ${r.longest}字` }),
+        h('dt', { textContent: t('Sentence length') }),
+        h('dd', { textContent: t('Average {0} chars · longest {1} chars', r.average, r.longest) }),
       ),
-      h('h3', { textContent: `文末（地の文 ${r.sentences}文）` }),
+      h('h3', { textContent: t('Sentence endings ({0} sentences of narration)', r.sentences) }),
       h(
         'table',
         { className: 'endings' },
@@ -205,7 +219,7 @@ function createNovelPanel(vscode) {
 
     const preset = $('page-preset');
     preset.replaceChildren();
-    if (!presetName) preset.append(new Option('（カスタム）', ''));
+    if (!presetName) preset.append(new Option(t('(Custom)'), ''));
     for (const name of presets) preset.append(new Option(name, name));
     preset.value = presetName ?? '';
 
@@ -213,11 +227,11 @@ function createNovelPanel(vscode) {
     $('page-en-fields').hidden = !english;
     $('page-chars').value = layout.chars ?? '';
     $('page-lines').value = layout.lines ?? '';
-    $('page-lines').placeholder = `自動(${metrics.lines})`;
+    $('page-lines').placeholder = t('Auto ({0})', metrics.lines);
     $('page-font-size').value = english ? layout.fontSize : '';
     $('page-line-height').value = english ? layout.lineHeight : '';
 
-    $('language-note').textContent = english ? '英語の原稿（横書き固定。設定は english に保存）' : '';
+    $('language-note').textContent = english ? t('English manuscript (always horizontal; saved under english)') : '';
     $('language-note').hidden = !english;
     $('writing-mode-fields').hidden = english;
     for (const radio of /** @type {NodeListOf<HTMLInputElement>} */ (
@@ -229,14 +243,28 @@ function createNovelPanel(vscode) {
     $('orientation').value = layout.orientation;
     for (const side of ['top', 'bottom', 'left', 'right']) $(`margin-${side}`).value = layout.margin[side];
     $('font-family').value = layout.fontFamily;
-    $('font-family').placeholder = english ? '既定（EB Garamond / Georgia）' : '既定（Noto Serif JP / 游明朝）';
-    const pitch = `行送り ${Math.round(metrics.linePitchMm * 100) / 100}mm`;
+    $('font-family').placeholder = english
+      ? t('Default ({0})', 'EB Garamond / Georgia')
+      : t('Default ({0})', 'Noto Serif JP / 游明朝');
+    const pitch = Math.round(metrics.linePitchMm * 100) / 100;
     $('derived').textContent = english
-      ? `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（約${metrics.charsApprox}字×${metrics.lines}行）`
-      : `文字サイズ ${metrics.fontSizePt}pt ・ ${pitch}（${metrics.chars}字×${metrics.lines}行）`;
+      ? t(
+          'Font size {0}pt · line pitch {1}mm (about {2} chars × {3} lines)',
+          metrics.fontSizePt,
+          pitch,
+          metrics.charsApprox,
+          metrics.lines,
+        )
+      : t(
+          'Font size {0}pt · line pitch {1}mm ({2} chars × {3} lines)',
+          metrics.fontSizePt,
+          pitch,
+          metrics.chars,
+          metrics.lines,
+        );
     $('layout-file').textContent = layoutFile
-      ? `設定ファイル: ${layoutFile}`
-      : '設定ファイル: なし（変更すると原稿と同じ場所に novel.json を作ります）';
+      ? t('Settings file: {0}', layoutFile)
+      : t('Settings file: none (a change creates novel.json next to the manuscript)');
     $('delete-preset').disabled = !userPresetNames.includes(presetName);
   }
 

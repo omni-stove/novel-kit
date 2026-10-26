@@ -6,6 +6,7 @@
       "entry": [
         "src/novel-cli.mjs",
         "src/pdf-renderer.mjs",
+        "media/l10n.js",
         "media/preview.js",
         "media/settings.js",
         "media/settings-page.js",

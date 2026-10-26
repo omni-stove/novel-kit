@@ -230,12 +230,6 @@ export function enPdfPageSize(rawLayout) {
   return { '5x8in': '5x8', '6x9in': '6x9', A5: 'a5' }[paper] ?? null;
 }
 
-export function describeLayout(rawLayout, { english = false } = {}) {
-  const m = computeMetrics(rawLayout, { english });
-  if ('charsApprox' in m) return `${m.fontSizePt}pt・行送り${m.lineHeight}（約${m.charsApprox}字×${m.lines}行）`;
-  return `${m.chars}字×${m.lines}行`;
-}
-
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
 
@@ -305,12 +299,6 @@ if (import.meta.vitest) {
       expect(enPdfPageSize(BUILTIN_ENGLISH_PRESETS.A5)).toBe('a5');
       expect(enPdfPageSize({ paper: 'A5', orientation: 'landscape' })).toBeNull();
       expect(enPdfPageSize({ paper: 'A4' })).toBeNull();
-    });
-    test('describeLayout は英語では文字サイズと行送りを出す', () => {
-      expect(describeLayout(DEFAULT_LAYOUT)).toBe('30字×41行');
-      expect(describeLayout(BUILTIN_ENGLISH_PRESETS.A5, { english: true })).toMatch(
-        /^11pt・行送り1\.4（約\d+字×\d+行）$/,
-      );
     });
     test('英語のプリセットは src/en-pdf.mjs の PAGE_SIZES と同じ判型・余白・文字サイズ・行送り', async () => {
       const { PAGE_SIZES } = await import('./en-pdf.mjs');

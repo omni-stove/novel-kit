@@ -4,8 +4,9 @@
  */
 
 import { PAPER_SIZES } from '../../src/layout.mjs';
+import { l10nScript, t } from './l10n.mjs';
 
-const ZOOM_OPTIONS = [['fit', '画面に合わせる'], ...[50, 75, 100, 125, 150, 200].map((p) => [String(p), `${p}%`])];
+const zoomOptions = () => [['fit', t('Fit')], ...[50, 75, 100, 125, 150, 200].map((p) => [String(p), `${p}%`])];
 
 const options = (pairs) => pairs.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
 
@@ -14,12 +15,15 @@ const marginInput = (side, label) =>
 
 const PAPER_LABELS = { '6x9in': '6×9in', '5x8in': '5×8in' };
 
+/** title などの属性値に入れる（改行は &#10; にして、ツールチップで改行する） */
+const attr = (text) => text.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('\n', '&#10;');
+
 /**
  * プレビューの外枠。本文とそのスタイルは render メッセージで後から差し込む。
  * 小説パネル（#novel-panel）はプレビューの右に出し、panel: { open, tab, width } で最初の開け閉め・タブ・幅（px）を決める。
- * cssUris / jsUris は読み込む順に並べる
+ * cssUris / jsUris は読み込む順に並べる（jsUris の先頭は l10n.js）。language: 表示の言語（vscode.env.language）
  */
-export function renderWebviewHtml({ cssUris, jsUris, cspSource, nonce, panel }) {
+export function renderWebviewHtml({ cssUris, jsUris, cspSource, nonce, panel, language }) {
   const csp = [
     "default-src 'none'",
     `style-src ${cspSource} 'unsafe-inline' https://fonts.googleapis.com`,
@@ -28,7 +32,7 @@ export function renderWebviewHtml({ cssUris, jsUris, cspSource, nonce, panel }) 
   ].join('; ');
 
   return `<!DOCTYPE html>
-<html lang="ja">
+<html lang="${language}">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -40,32 +44,32 @@ export function renderWebviewHtml({ cssUris, jsUris, cspSource, nonce, panel }) 
 </head>
 <body>
   <header id="toolbar">
-    <label>レイアウト<select id="preset"></select></label>
-    <label id="grid-fields"><input id="chars" data-layout-field type="number" min="5" max="100">字 ×
-      <input id="lines" data-layout-field type="number" min="1" max="100">行</label>
+    <label>${t('Layout')}<select id="preset"></select></label>
+    <label id="grid-fields">${t('{0} chars ×', '<input id="chars" data-layout-field type="number" min="5" max="100">')}
+      ${t('{0} lines', '<input id="lines" data-layout-field type="number" min="1" max="100">')}</label>
     <label id="en-fields" hidden><input id="font-size" data-layout-field type="number" min="5" max="40" step="0.5">pt ×
-      行送り<input id="line-height" data-layout-field type="number" min="1" max="3" step="0.05"></label>
+      ${t('Leading')}<input id="line-height" data-layout-field type="number" min="1" max="3" step="0.05"></label>
     <span id="scope" class="segmented">
-      <button data-scope="file">このファイル</button><button data-scope="work">作品全体</button>
+      <button data-scope="file">${t('This file')}</button><button data-scope="work">${t('Whole work')}</button>
     </span>
-    <button id="toggle-edit" aria-pressed="true" title="オン: 段落をクリックしてその場で編集（Cmd/Ctrl+クリックでエディタの該当行へ）&#10;オフ: ダブルクリックでエディタの該当行へ">編集</button>
-    <button id="open-text" title="このタブをテキストエディタに切り替える（見ている位置の行で開く）">テキストで開く</button>
-    <span id="mode" class="segmented" title="ページ: 用紙に組んで1ページずつ見せる&#10;スクロール: カクヨム・小説家になろうのように横書きでページを区切らず縦に流す">
-      <button data-mode="page">ページ</button><button data-mode="scroll">スクロール</button>
+    <button id="toggle-edit" aria-pressed="true" title="${attr(t('On: click a paragraph to edit it in place (Cmd/Ctrl+click opens the line in the editor)\nOff: double-click opens the line in the editor'))}">${t('Edit')}</button>
+    <button id="open-text" title="${attr(t('Switch this tab to the text editor (at the line you are looking at)'))}">${t('Open as Text')}</button>
+    <span id="mode" class="segmented" title="${attr(t('Page: typeset on paper, one page at a time\nScroll: horizontal text flowing down without page breaks, as on Kakuyomu or Shōsetsuka ni Narō'))}">
+      <button data-mode="page">${t('Page')}</button><button data-mode="scroll">${t('Scroll')}</button>
     </span>
-    <label>表示<select id="zoom">${options(ZOOM_OPTIONS)}</select></label>
+    <label>${t('Zoom')}<select id="zoom">${options(zoomOptions())}</select></label>
     <span id="export-wrap">
-      <button id="export" aria-haspopup="menu" aria-expanded="false" title="作るものをメニューから選ぶ（現在のレイアウトでPDF・novel.json の出力）">出力 ▾</button>
+      <button id="export" aria-haspopup="menu" aria-expanded="false" title="${attr(t('Choose what to make from a menu (a PDF in the current layout, or the outputs in novel.json)'))}">${t('Export')} ▾</button>
       <div id="export-menu" role="menu" hidden></div>
     </span>
     <span id="stats"></span>
-    <span id="panel-toggles" class="segmented" title="右のパネルに出す（選んでいるものをもう一度押すと閉じる）">
-      <button data-panel-tab="prose" title="文字数と、地の文の文末の分布などを右のパネルに出す">文章の傾向</button><button data-panel-tab="work" title="novel.json の作品情報・部の境界・出力を右のパネルで編集する">作品設定</button><button data-panel-tab="page" title="用紙・余白・文字方向・フォントを右のパネルで変える">ページ設定</button>
+    <span id="panel-toggles" class="segmented" title="${attr(t('Show in the panel on the right (press the selected one again to close it)'))}">
+      <button data-panel-tab="prose" title="${attr(t('Show the character count and the distribution of sentence endings in the narration in the panel on the right'))}">${t('Prose')}</button><button data-panel-tab="work" title="${attr(t('Edit the work information, part boundaries and outputs of novel.json in the panel on the right'))}">${t('Work')}</button><button data-panel-tab="page" title="${attr(t('Change the paper, margins, writing direction and font in the panel on the right'))}">${t('Page Setup')}</button>
     </span>
   </header>
   <div id="workspace">
     <main id="viewport">
-      <p id="message">原稿のテキストファイル（.txt）を開くとプレビューを表示します。</p>
+      <p id="message">${t('Open a manuscript text file (.txt) to show the preview.')}</p>
       <div id="stage" hidden>
         <div id="sheets"></div>
         <div id="flow"></div>
@@ -73,6 +77,7 @@ export function renderWebviewHtml({ cssUris, jsUris, cspSource, nonce, panel }) 
     </main>
     ${renderPanel(panel)}
   </div>
+  ${l10nScript()}
   ${jsUris.map((uri) => `<script nonce="${nonce}" src="${uri}"></script>`).join('\n  ')}
 </body>
 </html>`;
@@ -86,10 +91,10 @@ function renderPanel({ open, tab, width }) {
   const tabButton = (name, label) =>
     `<button role="tab" data-tab="${name}" aria-selected="${name === tab}">${label}</button>`;
   return `<aside id="novel-panel" data-tab="${tab}"${open ? '' : ' hidden'}${width ? ` style="width: ${Number(width)}px"` : ''}>
-      <div id="panel-resizer" title="ドラッグして幅を変える"></div>
+      <div id="panel-resizer" title="${attr(t('Drag to change the width'))}"></div>
       <nav id="tabs" role="tablist">
-        ${tabButton('prose', '文章の傾向')}${tabButton('work', '作品設定')}${tabButton('page', 'ページ設定')}
-        <button id="close-panel" title="パネルを閉じる" aria-label="パネルを閉じる">×</button>
+        ${tabButton('prose', t('Prose'))}${tabButton('work', t('Work'))}${tabButton('page', t('Page Setup'))}
+        <button id="close-panel" title="${attr(t('Close the panel'))}" aria-label="${attr(t('Close the panel'))}">×</button>
       </nav>
       <p id="panel-message" hidden></p>
       <section id="tab-prose" role="tabpanel">
@@ -100,47 +105,47 @@ function renderPanel({ open, tab, width }) {
       <section id="tab-work" role="tabpanel" hidden></section>
       <section id="tab-page" role="tabpanel" hidden>
         <p id="page-file" class="file"></p>
-        <label>レイアウト<select id="page-preset"></select></label>
+        <label>${t('Layout')}<select id="page-preset"></select></label>
         <fieldset id="page-grid-fields">
-          <legend>字数×行数</legend>
-          <label><input id="page-chars" data-page-field type="number" min="5" max="100">字</label>
-          <label><input id="page-lines" data-page-field type="number" min="1" max="100">行</label>
+          <legend>${t('Characters × lines')}</legend>
+          <label>${t('{0} chars', '<input id="page-chars" data-page-field type="number" min="5" max="100">')}</label>
+          <label>${t('{0} lines', '<input id="page-lines" data-page-field type="number" min="1" max="100">')}</label>
         </fieldset>
         <fieldset id="page-en-fields" hidden>
-          <legend>文字</legend>
+          <legend>${t('Type')}</legend>
           <label><input id="page-font-size" data-page-field type="number" min="5" max="40" step="0.5">pt</label>
-          <label>行送り<input id="page-line-height" data-page-field type="number" min="1" max="3" step="0.05"></label>
+          <label>${t('Leading')}<input id="page-line-height" data-page-field type="number" min="1" max="3" step="0.05"></label>
         </fieldset>
         <fieldset id="writing-mode-fields">
-          <legend>文字方向</legend>
-          <label><input type="radio" name="writing-mode" value="vertical" data-page-field>縦書き</label>
-          <label><input type="radio" name="writing-mode" value="horizontal" data-page-field>横書き</label>
+          <legend>${t('Writing direction')}</legend>
+          <label><input type="radio" name="writing-mode" value="vertical" data-page-field>${t('Vertical')}</label>
+          <label><input type="radio" name="writing-mode" value="horizontal" data-page-field>${t('Horizontal')}</label>
         </fieldset>
         <fieldset>
-          <legend>用紙</legend>
-          <label>サイズ<select id="paper" data-page-field>${options(Object.keys(PAPER_SIZES).map((p) => [p, PAPER_LABELS[p] ?? p]))}</select></label>
-          <label>向き<select id="orientation" data-page-field>${options([
-            ['landscape', '横'],
-            ['portrait', '縦'],
+          <legend>${t('Paper')}</legend>
+          <label>${t('Size')}<select id="paper" data-page-field>${options(Object.keys(PAPER_SIZES).map((p) => [p, PAPER_LABELS[p] ?? p]))}</select></label>
+          <label>${t('Orientation')}<select id="orientation" data-page-field>${options([
+            ['landscape', t('Landscape')],
+            ['portrait', t('Portrait')],
           ])}</select></label>
         </fieldset>
         <fieldset>
-          <legend>余白</legend>
-          ${marginInput('top', '上')}
-          ${marginInput('bottom', '下')}
-          ${marginInput('left', '左')}
-          ${marginInput('right', '右')}
+          <legend>${t('Margins')}</legend>
+          ${marginInput('top', t('Top'))}
+          ${marginInput('bottom', t('Bottom'))}
+          ${marginInput('left', t('Left'))}
+          ${marginInput('right', t('Right'))}
         </fieldset>
         <fieldset>
-          <legend>フォント</legend>
+          <legend>${t('Font')}</legend>
           <input id="font-family" data-page-field type="text">
         </fieldset>
         <p id="language-note" class="note"></p>
         <p id="derived" class="note"></p>
         <p id="layout-file" class="note"></p>
         <div class="buttons">
-          <button id="save-preset">プリセットとして保存…</button>
-          <button id="delete-preset">プリセットを削除</button>
+          <button id="save-preset">${t('Save as Preset…')}</button>
+          <button id="delete-preset">${t('Delete Preset')}</button>
         </div>
       </section>
     </aside>`;

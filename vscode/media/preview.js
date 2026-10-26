@@ -166,7 +166,7 @@
 
   /** 見ている位置。ページ表示はページ番号、スクロール表示は読んだ割合 */
   function positionText() {
-    if (!geometry.scroll) return `${currentPage()} / ${geometry.pages}頁`;
+    if (!geometry.scroll) return t('{0} / {1} pages', currentPage(), geometry.pages);
     const range = viewport.scrollHeight - viewport.clientHeight;
     return `${range > 0 ? Math.round((viewport.scrollTop / range) * 100) : 100}%`;
   }
@@ -585,7 +585,7 @@
 
     const preset = $('preset');
     preset.replaceChildren();
-    if (!presetName) preset.append(new Option('（カスタム）', ''));
+    if (!presetName) preset.append(new Option(t('(Custom)'), ''));
     for (const name of Object.keys(presets)) preset.append(new Option(name, name));
     preset.value = presetName ?? '';
 
@@ -593,7 +593,7 @@
     $('en-fields').hidden = !english;
     $('chars').value = layout.chars ?? '';
     $('lines').value = layout.lines ?? '';
-    $('lines').placeholder = `自動(${metrics.lines})`;
+    $('lines').placeholder = t('Auto ({0})', metrics.lines);
     $('font-size').value = english ? layout.fontSize : '';
     $('line-height').value = english ? layout.lineHeight : '';
 
@@ -685,10 +685,12 @@
     const note = (text) => Object.assign(document.createElement('div'), { className: 'note', textContent: text });
     menu.replaceChildren(
       item(
-        '現在のレイアウトでPDF',
+        t('PDF in the Current Layout'),
         'out/preview/',
         null,
-        '日本語: novel pdf でこの字数×行数のPDFを出力\nEnglish: novel pdf-en でこの判型のPDFを出力',
+        t(
+          'Japanese: export a PDF in this characters × lines grid with novel pdf\nEnglish: export a PDF in this trim size with novel pdf-en',
+        ),
       ),
       document.createElement('hr'),
       ...(outputs.length > 0
@@ -698,14 +700,14 @@
             ...(outputs.length > 1
               ? [
                   item(
-                    'すべての出力',
+                    t('All Outputs'),
                     '',
                     outputs.map((o) => o.name),
                   ),
                 ]
               : []),
           ]
-        : [note('novel.json の "outputs" に書いた出力もここから作れる')]),
+        : [note(t('The outputs listed in "outputs" of novel.json can also be made from here'))]),
     );
     // ツールバーは折り返すので、ボタンが右端に来ていればメニューを右に揃えて画面からはみ出さないようにする
     menu.classList.remove('align-right');

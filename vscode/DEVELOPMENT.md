@@ -1,6 +1,6 @@
 # 小説プレビュー（開発メモ）
 
-利用者向けの説明は README.md（Marketplace の拡張のページになる）。ここは開発・配布の手順。vsix には入らない。
+利用者向けの説明は README.md（英語。Marketplace の拡張のページになる）と README.ja.md（日本語）で、書き足すときは両方を揃える。ここは開発・配布の手順。vsix には入らない。
 
 ## 手元で試す
 
@@ -26,6 +26,14 @@ GitHub Release に置いた vsix を入れるときは:
 gh release download --repo omni-stove/novel-kit --pattern novel-preview.vsix --dir /tmp --clobber
 code --install-extension /tmp/novel-preview.vsix --force
 ```
+
+## 表示の言語
+
+拡張の表示は英語を原文にし、日本語の訳を添える（VS Code の表示言語が日本語なら日本語、それ以外は英語）。
+
+- `package.json` のコマンド名・設定の説明などは `%key%` にして、英語を `package.nls.json`、日本語を `package.nls.ja.json` に書く
+- 拡張と webview の文言は英語で `vscode.l10n.t('…')`（vscode を import しないモジュールは `src/l10n.mjs` の `t`、webview は `media/l10n.js` の `t`）に渡し、日本語の訳を `l10n/bundle.l10n.ja.json` に書く。訳の抜けと使わなくなった訳はテスト（`src/l10n.mjs`）が拾う
+- 作品の設定のフォームの項目の説明（`src/work-settings.mjs`）は、日本語の訳を `schemas/novel.schema.json` の description と同じ文にする（これもテストで確かめる）
 
 ## リリース
 

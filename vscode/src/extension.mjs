@@ -17,7 +17,6 @@ import {
   BUILTIN_ENGLISH_PRESETS,
   BUILTIN_PRESETS,
   computeMetrics,
-  describeLayout,
   enPdfPageSize,
   layoutsEqual,
   matchesPdfScriptPage,
@@ -25,7 +24,15 @@ import {
 } from '../../src/layout.mjs';
 import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
 import { parsePageSpec } from '../../src/pdf.mjs';
-import { buildDocument, buildOutline, computeStats, detectLanguageOfLines, listWorkFiles } from './document.mjs';
+import {
+  buildDocument,
+  buildOutline,
+  computeStats,
+  describeLayout,
+  detectLanguageOfLines,
+  listWorkFiles,
+} from './document.mjs';
+import { setBundle } from './l10n.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
 import { analyzeProse, createTokenizer, proseReport } from './prose.mjs';
 import { moveFiles, remapParts, renumberPlan } from './reorder.mjs';
@@ -96,7 +103,11 @@ function settingsFor(doc) {
       if (warnedLayoutFile !== file) {
         warnedLayoutFile = file;
         vscode.window.showWarningMessage(
-          `${vscode.workspace.asRelativePath(file)} を読めないため、既定の設定で表示します: ${err.message}`,
+          vscode.l10n.t(
+            'Cannot read {0}, so the default settings are used: {1}',
+            vscode.workspace.asRelativePath(file),
+            err.message,
+          ),
         );
       }
     }
@@ -148,7 +159,10 @@ function updateSettings(doc, patch) {
   const file = layoutFileFor(doc) ?? join(dirname(doc.uri.fsPath), CONFIG_FILENAME);
   if (file === warnedLayoutFile) {
     vscode.window.showErrorMessage(
-      `${vscode.workspace.asRelativePath(file)} が壊れているため、設定を保存できません。ファイルを直すか削除してください。`,
+      vscode.l10n.t(
+        'Cannot save the settings because {0} is broken. Fix or delete the file.',
+        vscode.workspace.asRelativePath(file),
+      ),
     );
     return;
   }
@@ -160,7 +174,7 @@ function updateSettings(doc, patch) {
       view: { ...current.view, ...patch.view },
     });
   } catch (err) {
-    vscode.window.showErrorMessage(`設定を保存できませんでした: ${err.message}`);
+    vscode.window.showErrorMessage(vscode.l10n.t('Could not save the settings: {0}', err.message));
   }
   refreshLayout();
 }
@@ -254,7 +268,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     if (!session.doc) {
       panel.webview.postMessage({
         type: 'message',
-        text: '原稿のテキストファイル（.txt）を開くとプレビューを表示します。',
+        text: vscode.l10n.t('Open a manuscript text file (.txt) to show the preview.'),
       });
       return;
     }
@@ -283,7 +297,10 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
       const initialReveal = takeInitialReveal();
       const layoutFile = layoutFileFor(session.doc);
       if (follow)
-        panel.title = `プレビュー: ${built.files.length > 1 ? basename(dirname(filePath)) : basename(filePath)}`;
+        panel.title = vscode.l10n.t(
+          'Preview: {0}',
+          built.files.length > 1 ? basename(dirname(filePath)) : basename(filePath),
+        );
       panel.webview.postMessage({
         type: 'render',
         css: built.css,
@@ -307,7 +324,10 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
       });
       session.externalChange = false;
     } catch (err) {
-      panel.webview.postMessage({ type: 'message', text: `プレビューを作れませんでした: ${err.message}` });
+      panel.webview.postMessage({
+        type: 'message',
+        text: vscode.l10n.t('Could not make the preview: {0}', err.message),
+      });
     }
   }
 
@@ -393,7 +413,9 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     if (!intact) {
       session.dropHistory(entry.filePath);
       vscode.window.showWarningMessage(
-        `${basename(entry.filePath)} がプレビューの外で変更されているため、${redo ? 'やり直せません' : '取り消せません'}。`,
+        redo
+          ? vscode.l10n.t('Cannot redo because {0} was changed outside the preview.', basename(entry.filePath))
+          : vscode.l10n.t('Cannot undo because {0} was changed outside the preview.', basename(entry.filePath)),
       );
       return;
     }
@@ -447,7 +469,9 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         // 入力のたびに届くので、適用順が前後しないよう直列にする
         editQueue = editQueue
           .then(() => applyPreviewEdit(msg))
-          .catch((err) => vscode.window.showErrorMessage(`プレビューでの編集を反映できませんでした: ${err.message}`));
+          .catch((err) =>
+            vscode.window.showErrorMessage(vscode.l10n.t('Could not apply the edit in the preview: {0}', err.message)),
+          );
         return editQueue;
       case 'undo':
       case 'redo':
@@ -456,7 +480,9 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
           .then(() => undoPreviewEdit(msg.type === 'redo'))
           .catch((err) =>
             vscode.window.showErrorMessage(
-              `プレビューでの編集を${msg.type === 'redo' ? 'やり直せ' : '取り消せ'}ませんでした: ${err.message}`,
+              msg.type === 'redo'
+                ? vscode.l10n.t('Could not redo the edit in the preview: {0}', err.message)
+                : vscode.l10n.t('Could not undo the edit in the preview: {0}', err.message),
             ),
           );
         return editQueue;
@@ -476,10 +502,11 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
   const uri = (name) => panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, name));
   panel.webview.html = renderWebviewHtml({
     cssUris: [uri('preview.css'), uri('panel.css'), uri('work-settings.css')],
-    jsUris: [uri('settings.js'), uri('panel.js'), uri('preview.js')],
+    jsUris: [uri('l10n.js'), uri('settings.js'), uri('panel.js'), uri('preview.js')],
     cspSource: panel.webview.cspSource,
     nonce: randomBytes(16).toString('hex'),
     panel: storedPanelState(),
+    language: vscode.env.language,
   });
   panel.webview.onDidReceiveMessage(onMessage);
   panel.onDidChangeViewState(updateStatusBar);
@@ -519,7 +546,7 @@ function openSidePreview() {
   }
   const panel = vscode.window.createWebviewPanel(
     'novelPreview',
-    'プレビュー',
+    vscode.l10n.t('Preview'),
     { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
     { retainContextWhenHidden: true, enableFindWidget: true },
   );
@@ -589,10 +616,12 @@ const presetTarget = () =>
 async function savePreset(doc) {
   const { layout, english } = resolvedSettingsFor(doc);
   const name = await vscode.window.showInputBox({
-    title: `レイアウトをプリセットとして保存${english ? '（English）' : ''}`,
-    prompt: 'プリセット名',
+    title: english
+      ? vscode.l10n.t('Save the Layout as a Preset (English)')
+      : vscode.l10n.t('Save the Layout as a Preset'),
+    prompt: vscode.l10n.t('Preset name'),
     value: describeLayout(layout, { english }),
-    validateInput: (v) => (v.trim() ? null : '名前を入力してください'),
+    validateInput: (v) => (v.trim() ? null : vscode.l10n.t('Enter a name')),
   });
   if (!name) return;
   const saved = english ? { ...layout, english: true } : layout;
@@ -618,9 +647,16 @@ async function selectLayout() {
   const { layout: current, english } = resolvedSettingsFor(doc);
   const presets = allPresets(english);
   const describePreset = (layout) => {
-    const paper = `${layout.paper}${layout.orientation === 'landscape' ? '横' : '縦'}`;
-    if (english) return `${paper}・${layout.fontSize}pt`;
-    return `${paper}・${layout.writingMode === 'vertical' ? '縦書き' : '横書き'}`;
+    const paper =
+      layout.orientation === 'landscape'
+        ? vscode.l10n.t('{0} landscape', layout.paper)
+        : vscode.l10n.t('{0} portrait', layout.paper);
+    if (english) return vscode.l10n.t('{0} · {1}', paper, `${layout.fontSize}pt`);
+    return vscode.l10n.t(
+      '{0} · {1}',
+      paper,
+      layout.writingMode === 'vertical' ? vscode.l10n.t('Vertical') : vscode.l10n.t('Horizontal'),
+    );
   };
   const picked = await vscode.window.showQuickPick(
     Object.entries(presets).map(([name, layout]) => ({
@@ -629,7 +665,9 @@ async function selectLayout() {
       picked: layoutsEqual(layout, current, { english }),
     })),
     {
-      title: `レイアウト（${basename(dirname(doc.uri.fsPath))}${english ? '・English' : ''}）`,
+      title: english
+        ? vscode.l10n.t('Layout ({0} · English)', basename(dirname(doc.uri.fsPath)))
+        : vscode.l10n.t('Layout ({0})', basename(dirname(doc.uri.fsPath))),
       placeHolder: describeLayout(current, { english }),
     },
   );
@@ -641,7 +679,7 @@ async function selectLayout() {
  * 成功したら true、失敗したら「ログを見る」付きのエラー（failure）を出して false を返す
  */
 function runNovelCli(args, { cwd, title, failure }) {
-  cliOutput ??= vscode.window.createOutputChannel('小説の出力');
+  cliOutput ??= vscode.window.createOutputChannel(vscode.l10n.t('Novel Outputs'));
   cliOutput.clear();
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title },
@@ -672,7 +710,7 @@ function runNovelCli(args, { cwd, title, failure }) {
           finished = true;
           resolve(ok);
           if (ok) return;
-          const picked = await vscode.window.showErrorMessage(failure, 'ログを見る');
+          const picked = await vscode.window.showErrorMessage(failure, vscode.l10n.t('Show Log'));
           if (picked) cliOutput.show(true);
         };
         child.on('error', (err) => {
@@ -713,7 +751,9 @@ function exportPdf(session = activeSession()) {
     const pageSize = enPdfPageSize(layout);
     if (!pageSize) {
       vscode.window.showWarningMessage(
-        '英語のPDF出力は 6×9in / 5×8in / A5（縦）のどれかで組みます。今の用紙はどれでもないため 6×9in で出力します。',
+        vscode.l10n.t(
+          'English PDFs are typeset in 6×9in, 5×8in or A5 (portrait). The current paper is none of these, so the PDF is 6×9in.',
+        ),
       );
     }
     out = `${name}-en-${pageSize ?? '6x9'}.pdf`;
@@ -721,7 +761,9 @@ function exportPdf(session = activeSession()) {
   } else {
     if (!matchesPdfScriptPage(layout)) {
       vscode.window.showWarningMessage(
-        'PDF出力は A4横・既定の余白で組みます。用紙・余白の設定はプレビューにだけ反映されます。',
+        vscode.l10n.t(
+          'PDFs are typeset in A4 landscape with the default margins. The paper and margin settings apply to the preview only.',
+        ),
       );
     }
     const size = `${metrics.chars}x${metrics.lines}`;
@@ -740,8 +782,8 @@ function exportPdf(session = activeSession()) {
 
   runNovelCli([command, ...options, '-o', outPath, whole ? dir : filePath], {
     cwd: root,
-    title: `PDFを出力しています（${out}）`,
-    failure: 'PDFを出力できませんでした。',
+    title: vscode.l10n.t('Exporting the PDF ({0})', out),
+    failure: vscode.l10n.t('Could not export the PDF.'),
   }).then((ok) => ok && shouldOpen() && vscode.env.openExternal(vscode.Uri.file(outPath)));
 }
 
@@ -765,14 +807,14 @@ async function workConfigFileFor(uri) {
   }
   const files = await vscode.workspace.findFiles(`**/${CONFIG_FILENAME}`, '**/node_modules/**');
   if (files.length <= 1) {
-    if (files.length === 0) vscode.window.showInformationMessage(`${CONFIG_FILENAME} が見つかりません。`);
+    if (files.length === 0) vscode.window.showInformationMessage(vscode.l10n.t('{0} not found.', CONFIG_FILENAME));
     return files[0]?.fsPath ?? null;
   }
   const picked = await vscode.window.showQuickPick(
     files
       .map((f) => ({ label: vscode.workspace.asRelativePath(dirname(f.fsPath)), file: f.fsPath }))
       .sort((a, b) => a.label.localeCompare(b.label)),
-    { title: '出力する作品' },
+    { title: vscode.l10n.t('Work to Build') },
   );
   return picked?.file ?? null;
 }
@@ -793,18 +835,20 @@ async function askBuildOptions(outputs, work) {
   };
 
   const pages = await ask('pages', '--pages', {
-    title: '抜き出す本文ページ（pdf）',
-    prompt: '例: 42,50-53',
-    validateInput: (v) => (!v.trim() || parsePageSpec(v) ? null : '42 / 42-45 / 42,50,60-62 の形で書いてください'),
+    title: vscode.l10n.t('Body pages to extract (pdf)'),
+    prompt: vscode.l10n.t('Example: {0}', '42,50-53'),
+    validateInput: (v) =>
+      !v.trim() || parsePageSpec(v) ? null : vscode.l10n.t('Write it as {0}', '42 / 42-45 / 42,50,60-62'),
   });
   if (pages === null) return null;
   const limit = await ask('limit', '--limit', {
-    title: '先頭から組むファイル数（pdf）',
-    validateInput: (v) => (!v.trim() || /^[1-9]\d*$/.test(v.trim()) ? null : '1 以上の整数を書いてください'),
+    title: vscode.l10n.t('Number of files to typeset from the start (pdf)'),
+    validateInput: (v) =>
+      !v.trim() || /^[1-9]\d*$/.test(v.trim()) ? null : vscode.l10n.t('Write an integer of 1 or more'),
   });
   if (limit === null) return null;
   const target = await ask('target', '--target', {
-    title: '想定読者（split / merge）',
+    title: vscode.l10n.t('Target readers (split / merge)'),
     placeHolder: work.target ?? undefined,
   });
   if (target === null) return null;
@@ -812,10 +856,10 @@ async function askBuildOptions(outputs, work) {
   if (keys.has('rubyParens') && outputs.some((o) => o.format === 'merge' && !o.rubyParens)) {
     const picked = await vscode.window.showQuickPick(
       [
-        { label: 'そのまま', parens: false },
-        { label: '括弧表記にする', description: '漢字（かんじ）', parens: true },
+        { label: vscode.l10n.t('Keep as Is'), parens: false },
+        { label: vscode.l10n.t('In Parentheses'), description: '漢字（かんじ）', parens: true },
       ],
-      { title: 'ルビ（merge）', ignoreFocusOut: true },
+      { title: vscode.l10n.t('Ruby (merge)'), ignoreFocusOut: true },
     );
     if (!picked) return null;
     if (picked.parens) args.push('--ruby-parens');
@@ -854,18 +898,18 @@ async function buildOutputs(uri, names = null) {
     work = readWorkConfig(file);
     outputs = normalizeOutputs(work.outputs, work.id);
   } catch (err) {
-    vscode.window.showErrorMessage(`${label} を読めません: ${err.message}`);
+    vscode.window.showErrorMessage(vscode.l10n.t('Cannot read {0}: {1}', label, err.message));
     return;
   }
   const available = Object.keys(outputs);
   if (available.length === 0) {
-    vscode.window.showInformationMessage(`${label} に outputs がありません。`);
+    vscode.window.showInformationMessage(vscode.l10n.t('{0} has no outputs.', label));
     return;
   }
 
   const missing = Array.isArray(names) ? names.filter((name) => !available.includes(name)) : [];
   if (missing.length > 0)
-    vscode.window.showWarningMessage(`${label} の outputs に ${missing.join(', ')} がありません。`);
+    vscode.window.showWarningMessage(vscode.l10n.t('The outputs of {0} have no {1}.', label, missing.join(', ')));
   const picked = Array.isArray(names)
     ? { names: names.filter((name) => available.includes(name)) }
     : await vscode.window.showQuickPick(
@@ -878,11 +922,11 @@ async function buildOutputs(uri, names = null) {
           ...(available.length > 1
             ? [
                 { label: '', kind: vscode.QuickPickItemKind.Separator, names: [] },
-                { label: 'すべての出力', description: available.join(', '), names: available },
+                { label: vscode.l10n.t('All Outputs'), description: available.join(', '), names: available },
               ]
             : []),
         ],
-        { title: `出力（${label}）` },
+        { title: vscode.l10n.t('Outputs ({0})', label) },
       );
   if (!picked?.names.length) return;
   const selected = picked.names.map((name) => outputs[name]);
@@ -893,8 +937,8 @@ async function buildOutputs(uri, names = null) {
   const outDir = resolve(base, config().get('outDir') || 'out');
   const ok = await runNovelCli(['build', file, ...picked.names, '--out-dir', outDir, ...options.args], {
     cwd: base,
-    title: `出力しています（${picked.names.join(', ')}）`,
-    failure: `${picked.names.join(', ')} を出力できませんでした。`,
+    title: vscode.l10n.t('Building ({0})', picked.names.join(', ')),
+    failure: vscode.l10n.t('Could not build {0}.', picked.names.join(', ')),
   });
   if (!ok) return;
 
@@ -907,8 +951,8 @@ async function buildOutputs(uri, names = null) {
   const rest = paths.filter((p) => !opened.includes(p));
   if (rest.length === 0) return;
   const action = await vscode.window.showInformationMessage(
-    `出力しました: ${rest.map((p) => vscode.workspace.asRelativePath(p.path)).join(', ')}`,
-    'フォルダを開く',
+    vscode.l10n.t('Built: {0}', rest.map((p) => vscode.workspace.asRelativePath(p.path)).join(', ')),
+    vscode.l10n.t('Open Folder'),
   );
   if (action) vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(rest[0].path));
 }
@@ -926,8 +970,12 @@ async function openWorkSettings(uri) {
   if (!file && target?.fsPath.endsWith('.txt')) {
     const created = join(dirname(target.fsPath), CONFIG_FILENAME);
     const picked = await vscode.window.showInformationMessage(
-      `${vscode.workspace.asRelativePath(dirname(target.fsPath))} から上に ${CONFIG_FILENAME} がありません。作りますか？`,
-      '作る',
+      vscode.l10n.t(
+        'There is no {1} in {0} or above. Create one?',
+        vscode.workspace.asRelativePath(dirname(target.fsPath)),
+        CONFIG_FILENAME,
+      ),
+      vscode.l10n.t('Create'),
     );
     if (!picked) return;
     writeFileSync(created, '{}\n');
@@ -952,14 +1000,14 @@ async function insertRuby() {
   const base = document.getText(range);
   if (!base || base.includes('\n')) {
     vscode.window.showInformationMessage(
-      base ? 'ルビは1行の中の語に振ってください。' : 'ルビを振る語を選んでください。',
+      base ? vscode.l10n.t('Add ruby to a word within one line.') : vscode.l10n.t('Select the word to add ruby to.'),
     );
     return;
   }
   const ruby = await vscode.window.showInputBox({
-    title: `ルビを振る（${base}）`,
-    prompt: '読み',
-    validateInput: (v) => (v.trim() ? null : '読みを入力してください'),
+    title: vscode.l10n.t('Add Ruby ({0})', base),
+    prompt: vscode.l10n.t('Reading'),
+    validateInput: (v) => (v.trim() ? null : vscode.l10n.t('Enter the reading')),
   });
   if (!ruby) return;
   await editor.edit((b) => b.replace(range, rubyMarkup(base, ruby.trim())));
@@ -988,7 +1036,9 @@ let outlineView;
 let outlineFile = null;
 
 const formatCount = (n, language) =>
-  language === 'en' ? `${n.toLocaleString('en-US')} words` : `${n.toLocaleString('ja-JP')}字`;
+  language === 'en'
+    ? vscode.l10n.t('{0} words', n.toLocaleString('en-US'))
+    : vscode.l10n.t('{0} chars', n.toLocaleString('ja-JP'));
 
 /**
  * 目次の項目。files: 項目のファイル（章なら章のファイルすべて）。siblings: 同じ階層の項目（上へ・下へ移動の相手を探す）
@@ -1011,7 +1061,7 @@ const outlineProvider = {
       item.description = formatCount(count, language);
       item.resourceUri = vscode.Uri.file(file);
       item.iconPath = new vscode.ThemeIcon(file === current ? 'edit' : 'file');
-      item.command = { command: 'novelPreview.openFromOutline', title: '開く', arguments: [file] };
+      item.command = { command: 'novelPreview.openFromOutline', title: vscode.l10n.t('Open'), arguments: [file] };
       item.contextValue = 'manuscript';
       item.files = [file];
       return item;
@@ -1029,7 +1079,7 @@ const outlineProvider = {
         : formatCount(ch.count, language);
       item.tooltip = ch.files.map((f) => basename(f.file)).join('\n');
       item.iconPath = new vscode.ThemeIcon(single && ch.file === current ? 'edit' : 'book');
-      item.command = { command: 'novelPreview.openFromOutline', title: '開く', arguments: [ch.file] };
+      item.command = { command: 'novelPreview.openFromOutline', title: vscode.l10n.t('Open'), arguments: [ch.file] };
       item.contextValue = 'manuscript';
       item.files = ch.files.map((f) => f.file);
       item.children = single ? [] : ch.files.map(fileItem);
@@ -1075,7 +1125,9 @@ async function moveOutlineItem(item, step) {
   const edge = step < 0 ? files[files.indexOf(item.files[0]) - 1] : files[files.indexOf(item.files.at(-1)) + 1];
   const target = neighbor?.files ?? (edge ? [edge] : null);
   if (!target) {
-    vscode.window.showInformationMessage(step < 0 ? '最初のファイルです。' : '最後のファイルです。');
+    vscode.window.showInformationMessage(
+      step < 0 ? vscode.l10n.t('This is the first file.') : vscode.l10n.t('This is the last file.'),
+    );
     return;
   }
   await renumberWork(files, moveFiles(files, item.files, target));
@@ -1101,13 +1153,13 @@ async function renumberWork(files, order) {
   const plan = renumberPlan(order);
   const moves = plan.filter((p) => p.from !== p.to);
   if (moves.length === 0) {
-    vscode.window.showInformationMessage('並びも番号も変わりません。');
+    vscode.window.showInformationMessage(vscode.l10n.t('Neither the order nor the numbers change.'));
     return;
   }
   const workFiles = new Set(files);
   const taken = moves.find((p) => !workFiles.has(p.to) && existsSync(p.to));
   if (taken) {
-    vscode.window.showErrorMessage(`${basename(taken.to)} がすでにあるため、並べ替えられません。`);
+    vscode.window.showErrorMessage(vscode.l10n.t('Cannot reorder because {0} already exists.', basename(taken.to)));
     return;
   }
 
@@ -1121,19 +1173,30 @@ async function renumberWork(files, order) {
       work = readWorkConfig(configFile);
     } catch (err) {
       vscode.window.showErrorMessage(
-        `${vscode.workspace.asRelativePath(configFile)} を読めないため、部の境界を書き換えられません。直してから並べ替えてください: ${err.message}`,
+        vscode.l10n.t(
+          'Cannot rewrite the part boundaries because {0} cannot be read. Fix it and reorder again: {1}',
+          vscode.workspace.asRelativePath(configFile),
+          err.message,
+        ),
       );
       return;
     }
     const englishDirs = work.en.input.map((p) => resolve(work.dir, String(p)));
     if (englishDirs.includes(dir)) {
-      if (work.parts) notes.push('英語の原稿なので、novel.json の部の境界（日本語の原稿の番号）は書き換えません。');
+      if (work.parts)
+        notes.push(
+          vscode.l10n.t(
+            'This is the English manuscript, so the part boundaries in novel.json (numbers of the Japanese manuscript) are not rewritten.',
+          ),
+        );
     } else {
       const remapped = remapParts(work.parts, files, plan);
       if (remapped && remapped.join() !== work.parts.join()) newParts = remapped;
       if (englishDirs.some((d) => d !== dir && existsSync(d)))
         notes.push(
-          '英語の原稿のファイル名は変えません。番号を揃えるなら、英語の目次でも同じように並べ替えてください。',
+          vscode.l10n.t(
+            'The file names of the English manuscript are not changed. To keep the numbers in step, reorder the English outline the same way.',
+          ),
         );
     }
   }
@@ -1142,13 +1205,13 @@ async function renumberWork(files, order) {
   const renames = moves.map((p) => `${basename(p.from)} → ${basename(p.to)}`);
   const detail = [
     ...renames.slice(0, SHOWN),
-    ...(renames.length > SHOWN ? [`ほか ${renames.length - SHOWN} 件`] : []),
-    ...(newParts ? ['', `novel.json の部の境界: ${newParts.join(', ')}`] : []),
+    ...(renames.length > SHOWN ? [vscode.l10n.t('and {0} more', renames.length - SHOWN)] : []),
+    ...(newParts ? ['', vscode.l10n.t('Part boundaries in novel.json: {0}', newParts.join(', '))] : []),
     ...(notes.length > 0 ? ['', ...notes] : []),
   ].join('\n');
-  const ok = '並べ替える';
+  const ok = vscode.l10n.t('Reorder');
   const answer = await vscode.window.showWarningMessage(
-    `${moves.length} 個のファイルの名前を変えて、番号を振り直しますか？`,
+    vscode.l10n.t('Rename {0} files and renumber them?', moves.length),
     { modal: true, detail },
     ok,
   );
@@ -1158,7 +1221,7 @@ async function renumberWork(files, order) {
   try {
     const failure = await renameFiles(moves);
     if (failure) {
-      vscode.window.showErrorMessage(`ファイルの名前を変えられませんでした。${failure}`);
+      vscode.window.showErrorMessage(vscode.l10n.t('Could not rename the files. {0}', failure));
       return;
     }
     if (newParts) {
@@ -1166,7 +1229,12 @@ async function renumberWork(files, order) {
         writeParts(configFile, newParts);
       } catch (err) {
         vscode.window.showErrorMessage(
-          `ファイルの名前は変えましたが、${vscode.workspace.asRelativePath(configFile)} の部の境界を書き換えられませんでした。"parts" を ${JSON.stringify(newParts)} にしてください: ${err.message}`,
+          vscode.l10n.t(
+            'The files were renamed, but the part boundaries in {0} could not be rewritten. Set "parts" to {1}: {2}',
+            vscode.workspace.asRelativePath(configFile),
+            JSON.stringify(newParts),
+            err.message,
+          ),
         );
       }
     }
@@ -1204,8 +1272,8 @@ async function renameFiles(moves) {
     if (existsSync(p.from) || !(await apply([[p.temp, p.from]]))) left.push(basename(p.temp));
   }
   return left.length > 0
-    ? `次のファイルは元の名前に戻せなかったので、手で名前を直してください: ${left.join(', ')}`
-    : '一部のファイルだけ名前が変わっていることがあるので、目次で並びを確かめてください。';
+    ? vscode.l10n.t('These files could not get their names back, so rename them by hand: {0}', left.join(', '))
+    : vscode.l10n.t('Only some of the files may have been renamed, so check the order in the outline.');
 }
 
 /** 目次を作り直す。原稿を一度でも開いたら、エクスプローラーに目次を出す */
@@ -1216,8 +1284,12 @@ function refreshOutline() {
     outlineFile = doc.uri.fsPath;
   }
   if (!outlineView?.visible) return;
-  outlineView.message = outlineFile ? undefined : '原稿（.txt）を開くと、その作品の目次を出します。';
-  outlineView.title = outlineFile ? `目次: ${basename(dirname(outlineFile))}` : '小説の目次';
+  outlineView.message = outlineFile
+    ? undefined
+    : vscode.l10n.t('Open a manuscript (.txt) to show the outline of its work.');
+  outlineView.title = outlineFile
+    ? vscode.l10n.t('Outline: {0}', basename(dirname(outlineFile)))
+    : vscode.l10n.t('Novel Outline');
   outlineChanged.fire();
 }
 
@@ -1337,7 +1409,9 @@ function createNovelPanel(session) {
     // 隠れている間は novel.json と原稿を見張らなくてよいので、作品設定のフォームを閉じる
     if (!open || !session.panel.visible) return closeWork();
     const file = fileOf();
-    post('message', { text: file ? '' : '原稿（.txt）を開くと、その文章の傾向・作品設定・ページ設定を出します。' });
+    post('message', {
+      text: file ? '' : vscode.l10n.t('Open a manuscript (.txt) to show its prose, work settings and page setup.'),
+    });
     if (!file) return;
     if (tab !== 'work') closeWork();
     try {
@@ -1346,7 +1420,10 @@ function createNovelPanel(session) {
       else syncWork(file);
     } catch (err) {
       post('message', {
-        text: `${basename(file)} の${tab === 'prose' ? '文章の傾向' : '設定'}を出せませんでした: ${err.message}`,
+        text:
+          tab === 'prose'
+            ? vscode.l10n.t('Could not show the prose of {0}: {1}', basename(file), err.message)
+            : vscode.l10n.t('Could not show the settings of {0}: {1}', basename(file), err.message),
       });
     }
   }
@@ -1472,7 +1549,9 @@ async function openNeighborFile(step) {
   const files = listWorkFiles(doc.uri.fsPath);
   const target = files[files.indexOf(doc.uri.fsPath) + step];
   if (!target) {
-    vscode.window.showInformationMessage(step > 0 ? '最後のファイルです。' : '最初のファイルです。');
+    vscode.window.showInformationMessage(
+      step > 0 ? vscode.l10n.t('This is the last file.') : vscode.l10n.t('This is the first file.'),
+    );
     return;
   }
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
@@ -1505,12 +1584,18 @@ function updateStatusBar() {
     const selectedWords = selectedText.split(/\s+/).filter(Boolean).length;
     const parts = [
       selectedWords > 0
-        ? `選択 ${selectedWords.toLocaleString('en-US')} / ${stats.words.toLocaleString('en-US')} words`
-        : `${stats.words.toLocaleString('en-US')} words`,
+        ? vscode.l10n.t(
+            'Selected {0} / {1} words',
+            selectedWords.toLocaleString('en-US'),
+            stats.words.toLocaleString('en-US'),
+          )
+        : vscode.l10n.t('{0} words', stats.words.toLocaleString('en-US')),
       describeLayout(layout, { english: true }),
     ];
     statusBar.text = `$(book) ${parts.join(' ・ ')}`;
-    statusBar.tooltip = '語数（メタ行を除く）・現在のレイアウト（English）\nクリックでレイアウトを選ぶ';
+    statusBar.tooltip = vscode.l10n.t(
+      'Words (excluding meta lines) · current layout (English)\nClick to choose a layout',
+    );
     statusBar.show();
     return;
   }
@@ -1518,14 +1603,15 @@ function updateStatusBar() {
   const selected = countTextChars(stripInlineMarkup(selectedText));
   const parts = [
     selected > 0
-      ? `選択 ${selected.toLocaleString('ja-JP')}字 / ${stats.chars.toLocaleString('ja-JP')}字`
-      : `${stats.chars.toLocaleString('ja-JP')}字`,
-    `400字詰め ${formatPages(stats.genkoPages)}枚`,
-    `${describeLayout(layout)} ${formatPages(stats.gridPages)}枚`,
+      ? vscode.l10n.t('Selected {0} / {1} chars', selected.toLocaleString('ja-JP'), stats.chars.toLocaleString('ja-JP'))
+      : vscode.l10n.t('{0} chars', stats.chars.toLocaleString('ja-JP')),
+    vscode.l10n.t('{0} sheets of 400 chars', formatPages(stats.genkoPages)),
+    vscode.l10n.t('{0}: {1} pages', describeLayout(layout), formatPages(stats.gridPages)),
   ];
   statusBar.text = `$(book) ${parts.join(' ・ ')}`;
-  statusBar.tooltip =
-    '文字数（ルビ・メタ行を除く）・400字詰め原稿用紙換算・現在のレイアウトでの換算枚数\nクリックでレイアウトを選ぶ';
+  statusBar.tooltip = vscode.l10n.t(
+    'Characters (excluding ruby and meta lines) · sheets of 400-character manuscript paper · pages in the current layout\nClick to choose a layout',
+  );
   statusBar.show();
 }
 
@@ -1567,6 +1653,7 @@ function reloadOnRebuild(ctx) {
 
 export function activate(ctx) {
   context = ctx;
+  setBundle(vscode.l10n.bundle);
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 200);
   statusBar.command = 'novelPreview.selectLayout';
   outlineView = vscode.window.createTreeView('novelPreview.outline', {
