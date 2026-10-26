@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900">
+  <title>三度の灯</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1530"/>
+      <stop offset="1" stop-color="#2b3d66"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffe9a8" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#ffe9a8" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#sky)"/>
+  <g fill="#fff">
+    <circle cx="80" cy="90" r="2"/><circle cx="190" cy="160" r="1.5"/><circle cx="520" cy="70" r="2"/>
+    <circle cx="440" cy="190" r="1.5"/><circle cx="300" cy="60" r="1.2"/><circle cx="60" cy="300" r="1.5"/>
+  </g>
+  <polygon points="300,250 0,170 0,330" fill="url(#beam)"/>
+  <rect y="660" width="600" height="240" fill="#14223f"/>
+  <path d="M0 700 Q75 690 150 700 T300 700 T450 700 T600 700" stroke="#3a5285" stroke-width="3" fill="none"/>
+  <path d="M0 760 Q75 750 150 760 T300 760 T450 760 T600 760" stroke="#2f4573" stroke-width="3" fill="none"/>
+  <path d="M330 680 L560 680 L600 700 L600 900 L360 900 Z" fill="#1b1b24"/>
+  <polygon points="370,680 470,680 450,300 390,300" fill="#e8e4da"/>
+  <polygon points="376,580 464,580 460,520 380,520" fill="#b23a3a"/>
+  <polygon points="384,430 456,430 453,370 387,370" fill="#b23a3a"/>
+  <rect x="385" y="250" width="70" height="50" fill="#ffd36b"/>
+  <polygon points="375,250 465,250 420,210" fill="#2a2a33"/>
+  <rect x="380" y="296" width="80" height="8" fill="#2a2a33"/>
+  <rect x="408" y="620" width="24" height="60" fill="#4a3b2f"/>
+</svg>

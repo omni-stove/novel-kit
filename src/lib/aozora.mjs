@@ -13,7 +13,8 @@
  *   それ以外の注記（外字の説明など）は出力しない（本文はそのまま残す）
  * 行の単位で効く注記は、そのまま残して parseAozoraLine で読む:
  *   ［＃改ページ］（改丁・改見開き・改段も同じ）、［＃ここからN字下げ］〜［＃ここで字下げ終わり］、
- *   行頭の［＃N字下げ］・［＃地付き］・［＃地からN字上げ］、見出し
+ *   行頭の［＃N字下げ］・［＃地付き］・［＃地からN字上げ］、見出し、
+ *   挿絵 ［＃説明（ファイル名）入る］（ファイル名の後ろの「、横N×縦M」などは読まない）
  */
 
 /** 太字・縦中横の内部の記法。原稿の文字と衝突しないよう、私用領域の文字で挟む */
@@ -57,6 +58,7 @@ const BLOCK_INDENT_END_RE = /^［＃ここで字下げ終わり］$/;
 const LINE_PREFIX_RE = new RegExp(`^(［＃(?:${NUM}字下げ|地付き|地から${NUM}字上げ)］)+`);
 const HEADING_LEVELS = { 大: 'large', 中: 'medium', 小: 'small' };
 const HEADING_RE = /^［＃([大中小])見出し］(.*)［＃\1見出し終わり］$/;
+const ILLUST_RE = /^［＃(.*?)（([^（）、]+\.(?:png|jpe?g|gif|svg|webp))(?:、[^（）]*)?）入る］$/i;
 
 const EMPHASIS_KINDS = /^(白ゴマ|丸|白丸|黒三角|白三角|二重丸|蛇の目|ばつ)?傍点$/;
 const SIDELINE_KINDS = { 傍線: 'solid', 二重傍線: 'double', 鎖線: 'chain', 破線: 'dashed', 波線: 'wavy' };
@@ -79,7 +81,12 @@ function wrapperOf(kind) {
 export function normalizeAozoraInline(line) {
   if (!line.includes('［＃') && !line.includes('《') && !line.includes('｜')) return line;
   const trimmed = line.trim();
-  if (PAGE_BREAK_RE.test(trimmed) || BLOCK_INDENT_START_RE.test(trimmed) || BLOCK_INDENT_END_RE.test(trimmed))
+  if (
+    PAGE_BREAK_RE.test(trimmed) ||
+    BLOCK_INDENT_START_RE.test(trimmed) ||
+    BLOCK_INDENT_END_RE.test(trimmed) ||
+    ILLUST_RE.test(trimmed)
+  )
     return trimmed;
 
   const prefix = line.match(LINE_PREFIX_RE)?.[0] ?? '';
@@ -121,18 +128,32 @@ export function normalizeAozoraInline(line) {
 /**
  * 行の単位の注記を読む（normalizeAozoraInline のあとの行）。
  *   { kind: 'pageBreak' } / { kind: 'indentStart', indent } / { kind: 'indentEnd' }
+ *   { kind: 'illust', src, alt } — src は注記に書いたファイル名（原稿からの相対パス）。
+ *   alt は「X」のキャプション付きの… なら X、それ以外は説明の部分
  *   { kind: 'text', text, indent, alignEnd, raise, heading } — text は注記を除いた本文。
  *   indent は字下げの字数、alignEnd は地付き（地から上げでも true）、raise は地からの字上げの字数、
  *   heading は 'large' / 'medium' / 'small'（見出しでなければ null）
  */
 export function parseAozoraLine(line) {
   const trimmed = line.trim();
-  if (PAGE_BREAK_RE.test(trimmed)) return { kind: 'pageBreak' };
+  if (PAGE_BREAK_RE.test(trimmed)) return { kind: /** @type {const} */ ('pageBreak') };
   const start = trimmed.match(BLOCK_INDENT_START_RE);
-  if (start) return { kind: 'indentStart', indent: toNumber(start[1]) };
-  if (BLOCK_INDENT_END_RE.test(trimmed)) return { kind: 'indentEnd' };
+  if (start) return { kind: /** @type {const} */ ('indentStart'), indent: toNumber(start[1]) };
+  if (BLOCK_INDENT_END_RE.test(trimmed)) return { kind: /** @type {const} */ ('indentEnd') };
+  const illust = trimmed.match(ILLUST_RE);
+  if (illust) {
+    const caption = illust[1].match(/^「(.+)」のキャプション付きの/);
+    return { kind: /** @type {const} */ ('illust'), src: illust[2], alt: caption ? caption[1] : illust[1] };
+  }
 
-  const result = { kind: 'text', text: line, indent: 0, alignEnd: false, raise: 0, heading: null };
+  const result = {
+    kind: /** @type {const} */ ('text'),
+    text: line,
+    indent: 0,
+    alignEnd: false,
+    raise: 0,
+    heading: null,
+  };
   const prefix = line.match(LINE_PREFIX_RE)?.[0];
   if (prefix) {
     result.text = line.slice(prefix.length);
@@ -229,6 +250,7 @@ if (import.meta.vitest) {
       expect(normalizeAozoraInline('［＃改ページ］')).toBe('［＃改ページ］');
       expect(normalizeAozoraInline('［＃ここから２字下げ］')).toBe('［＃ここから２字下げ］');
       expect(normalizeAozoraInline('［＃３字下げ］覚悟［＃「覚悟」に傍点］')).toBe('［＃３字下げ］《《覚悟》》');
+      expect(normalizeAozoraInline('［＃挿絵（images/a.png）入る］')).toBe('［＃挿絵（images/a.png）入る］');
       expect(normalizeAozoraInline('第一章［＃「第一章」は大見出し］')).toBe(
         '［＃大見出し］第一章［＃大見出し終わり］',
       );
@@ -244,6 +266,19 @@ if (import.meta.vitest) {
       expect(parseAozoraLine('［＃ここから2字下げ］')).toEqual({ kind: 'indentStart', indent: 2 });
       expect(parseAozoraLine('［＃ここから２字下げ］')).toEqual({ kind: 'indentStart', indent: 2 });
       expect(parseAozoraLine('［＃ここで字下げ終わり］')).toEqual({ kind: 'indentEnd' });
+    });
+    test('挿絵', () => {
+      expect(parseAozoraLine('［＃挿絵（images/a.png）入る］')).toEqual({
+        kind: 'illust',
+        src: 'images/a.png',
+        alt: '挿絵',
+      });
+      expect(parseAozoraLine('［＃「駅のホーム」のキャプション付きの図（fig1.JPG、横321×縦123）入る］')).toEqual({
+        kind: 'illust',
+        src: 'fig1.JPG',
+        alt: '駅のホーム',
+      });
+      expect(parseAozoraLine('［＃図（fig1.txt）入る］').kind).toBe('text');
     });
     test('行頭の字下げ・地付き・地から上げ、見出し', () => {
       expect(parseAozoraLine('［＃３字下げ］本文')).toMatchObject({
@@ -270,6 +305,7 @@ if (import.meta.vitest) {
     test('本文だけを返し、改ページなどの行は null', () => {
       expect(aozoraBodyText('［＃２字下げ］覚悟［＃「覚悟」に傍点］')).toBe('《《覚悟》》');
       expect(aozoraBodyText('［＃改ページ］')).toBeNull();
+      expect(aozoraBodyText('［＃挿絵（a.png）入る］')).toBeNull();
     });
   });
 }

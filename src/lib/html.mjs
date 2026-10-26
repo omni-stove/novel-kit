@@ -2,6 +2,33 @@
  * Vivliostyle で PDF 化する HTML の共通部品
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { extname } from 'node:path';
+
+/** 挿絵に使える画像の拡張子と media type（EPUB の manifest と data URI に使う） */
+export const IMAGE_MEDIA_TYPES = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+};
+
+/** 挿絵の画像が無ければ、どの画像かわかるメッセージで投げる */
+export function requireImage(path) {
+  if (!existsSync(path)) throw new Error(`挿絵の画像が見つかりません: ${path}`);
+}
+
+/**
+ * 画像を data URI にする。Vivliostyle が組む HTML は書き出した場所から原稿の画像を参照できるとは限らないので、HTML に埋め込む
+ */
+export function imageDataUri(path) {
+  requireImage(path);
+  const mediaType = IMAGE_MEDIA_TYPES[extname(path).toLowerCase()];
+  return `data:${mediaType};base64,${readFileSync(path).toString('base64')}`;
+}
+
 /**
  * Google Fonts の読み込みタグを返す。
  * family は css2 API のクエリ形式（例: 'Noto+Serif+JP:wght@400'）。

@@ -19,13 +19,15 @@
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
  *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
  *   --scene-break-indent <字数>  区切りの行を中央でなく行頭から字数分下げて置く（既定: 中央）
+ *
+ * 挿絵の注記（［＃挿絵（images/a.png）入る］）の画像は、1ページに1枚、版面に収まる大きさで組む。
  */
 
 import { execSync } from 'node:child_process';
 import { readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { PDFDocument, PDFName, rgb, StandardFonts } from 'pdf-lib';
 import { ARG, buildPdfFromHtml, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
-import { AOZORA_CSS, googleFontsLinks, separatorPlacementCss, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
+import { AOZORA_CSS, googleFontsLinks, imageDataUri, separatorPlacementCss, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
 import { logSections, parseWithSectionNumbering, requireInputFiles, startsNewChapter } from './lib/manuscript.mjs';
 import { escapeHtml, parseTextFile, SCENE_BREAK_MARK } from './lib/text-parser.mjs';
 
@@ -190,6 +192,22 @@ ${
     .dash {
       text-orientation: sideways;
     }
+
+    .illust {
+      break-before: page;
+      break-after: page;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: ${size.width - m.left - m.right}mm;
+      /* 版面の高さちょうどだと丸めで次のページにあふれて白紙のページができるため */
+      height: ${size.height - m.top - m.bottom - 1}mm;
+      text-indent: 0;
+    }
+    .illust img {
+      max-width: 100%;
+      max-height: 100%;
+    }
 ${VERTICAL_GLYPH_CSS}${AOZORA_CSS}
     .title-page {
       display: flex;
@@ -314,6 +332,7 @@ export async function main(argv = process.argv.slice(2)) {
   const sections = parseWithSectionNumbering(inputFiles, parseTextFile, {
     blankAfterHeading: args.blankAfterHeading,
     sceneBreak: args.sceneBreak,
+    illustSrc: imageDataUri,
   });
   const totalChars = logSections(sections, inputFiles);
 
