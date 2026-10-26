@@ -1,7 +1,7 @@
 {
   "name": "novel-preview",
-  "displayName": "小説プレビュー",
-  "description": "原稿テキスト（.txt）を PDF 出力と同じ組版でページ表示する。字数×行数などのレイアウトは Word のページ設定のように定義できる。英語原稿は自動判定してペーパーバック風の組版にする。",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "version": "0.0.0",
   "publisher": "omnistove",
   "icon": "media/icon.png",
@@ -27,6 +27,7 @@
     "Other"
   ],
   "main": "./dist/extension.cjs",
+  "l10n": "./l10n",
   "activationEvents": [
     "onLanguage:plaintext",
     "workspaceContains:**/novel.json"
@@ -35,7 +36,7 @@
     "customEditors": [
       {
         "viewType": "novelPreview.editor",
-        "displayName": "小説プレビュー",
+        "displayName": "%customEditor.preview%",
         "selector": [
           {
             "filenamePattern": "*.txt"
@@ -45,7 +46,7 @@
       },
       {
         "viewType": "novelPreview.workSettings",
-        "displayName": "作品の設定",
+        "displayName": "%customEditor.workSettings%",
         "selector": [
           {
             "filenamePattern": "novel.json"
@@ -57,93 +58,93 @@
     "commands": [
       {
         "command": "novelPreview.open",
-        "title": "小説プレビューを横に開く",
-        "category": "小説",
+        "title": "%command.open%",
+        "category": "%category%",
         "icon": "$(open-preview)"
       },
       {
         "command": "novelPreview.reopenAsPreview",
-        "title": "小説プレビューに切り替える",
-        "category": "小説",
+        "title": "%command.reopenAsPreview%",
+        "category": "%category%",
         "icon": "$(book)"
       },
       {
         "command": "novelPreview.selectLayout",
-        "title": "レイアウト（字数×行数）を選ぶ",
-        "category": "小説"
+        "title": "%command.selectLayout%",
+        "category": "%category%"
       },
       {
         "command": "novelPreview.exportPdf",
-        "title": "現在のレイアウトでPDFを出力",
-        "category": "小説"
+        "title": "%command.exportPdf%",
+        "category": "%category%"
       },
       {
         "command": "novelPreview.openWorkSettings",
-        "title": "作品の設定を開く",
-        "category": "小説",
+        "title": "%command.openWorkSettings%",
+        "category": "%category%",
         "icon": "$(settings-gear)"
       },
       {
         "command": "novelPreview.showPanel",
-        "title": "小説パネルを開く",
-        "category": "小説",
+        "title": "%command.showPanel%",
+        "category": "%category%",
         "icon": "$(graph)"
       },
       {
         "command": "novelPreview.build",
-        "title": "novel.json の出力を作る",
-        "category": "小説",
+        "title": "%command.build%",
+        "category": "%category%",
         "icon": "$(package)"
       },
       {
         "command": "novelPreview.insertRuby",
-        "title": "ルビを振る",
-        "category": "小説"
+        "title": "%command.insertRuby%",
+        "category": "%category%"
       },
       {
         "command": "novelPreview.insertEmphasis",
-        "title": "傍点を打つ",
-        "category": "小説"
+        "title": "%command.insertEmphasis%",
+        "category": "%category%"
       },
       {
         "command": "novelPreview.nextFile",
-        "title": "次のファイルを開く",
-        "category": "小説",
+        "title": "%command.nextFile%",
+        "category": "%category%",
         "icon": "$(arrow-down)"
       },
       {
         "command": "novelPreview.previousFile",
-        "title": "前のファイルを開く",
-        "category": "小説",
+        "title": "%command.previousFile%",
+        "category": "%category%",
         "icon": "$(arrow-up)"
       },
       {
         "command": "novelPreview.openFromOutline",
-        "title": "目次から開く",
-        "category": "小説"
+        "title": "%command.openFromOutline%",
+        "category": "%category%"
       },
       {
         "command": "novelPreview.moveUp",
-        "title": "上へ移動",
-        "category": "小説",
+        "title": "%command.moveUp%",
+        "category": "%category%",
         "icon": "$(arrow-up)"
       },
       {
         "command": "novelPreview.moveDown",
-        "title": "下へ移動",
-        "category": "小説",
+        "title": "%command.moveDown%",
+        "category": "%category%",
         "icon": "$(arrow-down)"
       },
       {
         "command": "novelPreview.renumberFiles",
-        "title": "ファイル名の番号を振り直す",
-        "category": "小説",
+        "title": "%command.renumberFiles%",
+        "category": "%category%",
         "icon": "$(list-ordered)"
       },
       {
         "command": "novelPreview.revealLine",
-        "title": "原稿の行を開く",
-        "category": "小説"
+        "title": "%command.revealLine%",
+        "category": "%category%"
       }
     ],
     "menus": {
@@ -328,30 +329,30 @@
       }
     ],
     "configuration": {
-      "title": "小説プレビュー",
+      "title": "%configuration.title%",
       "properties": {
         "novelPreview.defaultPreset": {
           "type": "string",
           "default": "標準（30字・行数自動）",
-          "description": "原稿から上へたどっても novel.json が見つからないときに使うプリセット名。"
+          "description": "%config.defaultPreset%"
         },
         "novelPreview.presets": {
           "type": "object",
           "default": {},
-          "markdownDescription": "追加のレイアウトプリセット（名前 → 定義）。プレビューの「ページ設定 > プリセットとして保存」でも追加できる。`\"english\": true` のものは英語の原稿用。",
+          "markdownDescription": "%config.presets%",
           "additionalProperties": {
             "type": "object",
             "properties": {
               "english": {
                 "type": "boolean",
-                "description": "英語のレイアウト（用紙・余白・fontSize・lineHeight）。英語の原稿のときだけ出す"
+                "description": "%config.presets.english%"
               },
               "writingMode": {
                 "enum": [
                   "vertical",
                   "horizontal"
                 ],
-                "description": "文字方向（縦書き / 横書き。英語は横書き固定）"
+                "description": "%config.presets.writingMode%"
               },
               "paper": {
                 "enum": [
@@ -363,18 +364,18 @@
                   "6x9in",
                   "5x8in"
                 ],
-                "description": "用紙サイズ（6x9in / 5x8in は英語ペーパーバックの判型）"
+                "description": "%config.presets.paper%"
               },
               "orientation": {
                 "enum": [
                   "landscape",
                   "portrait"
                 ],
-                "description": "用紙の向き"
+                "description": "%config.presets.orientation%"
               },
               "margin": {
                 "type": "object",
-                "description": "余白（mm）",
+                "description": "%config.presets.margin%",
                 "properties": {
                   "top": {
                     "type": "number"
@@ -392,26 +393,26 @@
               },
               "chars": {
                 "type": "integer",
-                "description": "1行の文字数"
+                "description": "%config.presets.chars%"
               },
               "lines": {
                 "type": [
                   "integer",
                   "null"
                 ],
-                "description": "1ページの行数（null で行送り自動）"
+                "description": "%config.presets.lines%"
               },
               "fontSize": {
                 "type": "number",
-                "description": "英語のレイアウトの本文の文字サイズ（pt）"
+                "description": "%config.presets.fontSize%"
               },
               "lineHeight": {
                 "type": "number",
-                "description": "英語のレイアウトの行送り（倍率）"
+                "description": "%config.presets.lineHeight%"
               },
               "fontFamily": {
                 "type": "string",
-                "description": "本文フォント（空なら PDF 出力と同じ。日本語は明朝、英語は EB Garamond）"
+                "description": "%config.presets.fontFamily%"
               }
             }
           }
@@ -419,17 +420,17 @@
         "novelPreview.prose": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "小説パネルの「文章の傾向」で、地の文の文末の分布などを形態素解析で数える。形態素解析の辞書はそのタブを初めて見せたときに読み込み、メモリを約250MB使うので、重いときはオフにする（使っていたメモリは、ウィンドウを再読み込みすると戻る）。オフでも文字数は出す"
+          "markdownDescription": "%config.prose%"
         },
         "novelPreview.outDir": {
           "type": "string",
           "default": "out",
-          "markdownDescription": "「novel.json の出力を作る」の出力先。ワークスペースのフォルダから（絶対パスも可）。`novel build` の `--out-dir` と同じ"
+          "markdownDescription": "%config.outDir%"
         },
         "novelPreview.openAfterExport": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "出力した PDF・RTF を開く（「現在のレイアウトでPDFを出力」も同じ。EPUB と split / merge の txt は `novel build` と同じく開かない）。環境変数 `AUTO_OPEN=0` のときは開かない"
+          "markdownDescription": "%config.openAfterExport%"
         }
       }
     },
@@ -437,7 +438,7 @@
       "explorer": [
         {
           "id": "novelPreview.outline",
-          "name": "小説の目次",
+          "name": "%view.outline%",
           "when": "novelPreview.hasManuscript",
           "icon": "$(book)"
         }

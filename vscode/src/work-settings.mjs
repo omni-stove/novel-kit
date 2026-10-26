@@ -17,6 +17,7 @@ import {
 import { readLines } from '../../src/lib/text-parser.mjs';
 import schema from '../schemas/novel.schema.json' with { type: 'json' };
 import { headingOf } from './document.mjs';
+import { t } from './l10n.mjs';
 
 /**
  * 設定の input（無ければ ["."]）の原稿ファイルを、novel pdf と同じ並びと章番号（parts があれば「部-章」）で返す。
@@ -75,33 +76,103 @@ export function manuscriptDirs(configDir, depth = 3) {
 }
 
 /** 項目名 → 画面に出す名前 */
-const FIELD_LABELS = {
-  id: 'ID',
-  title: 'タイトル',
-  author: '著者名',
-  genre: 'ジャンル',
-  target: '想定読者',
-  input: '原稿',
-  parts: '部の境界',
-  sceneBreak: '場面区切りの記号',
-  sceneBreakIndent: '区切りの字下げ（字数）',
-  writingMode: '文字方向',
-  chars: '1行の字数',
-  lines: '1ページの行数',
-  coverless: '表紙なし',
-  chapterBreak: '章ごとに改ページ',
-  pageBreak: '章ごとに改ページ（chapterBreak と同じ）',
-  synopsis: '梗概を入れる',
-  synopsisOnTitle: '梗概をタイトルページに出す',
-  blankAfterHeading: '章見出しの後に空行',
-  review: '下読み用（先頭の約2万字）',
-  recto: '章を右ページから',
-  smartQuotes: 'カーリー引用符にする',
-  size: '判型',
-  dark: '黒背景・白文字',
-  rubyParens: 'ルビを括弧表記に',
-  contact: '連絡先（1行ずつ）',
-};
+const fieldLabels = () => ({
+  id: t('ID'),
+  title: t('Title'),
+  author: t('Author'),
+  genre: t('Genre'),
+  target: t('Target readers'),
+  input: t('Manuscript'),
+  parts: t('Part boundaries'),
+  sceneBreak: t('Scene break mark'),
+  sceneBreakIndent: t('Separator indent (characters)'),
+  writingMode: t('Writing direction'),
+  chars: t('Characters per line'),
+  lines: t('Lines per page'),
+  coverless: t('No cover'),
+  chapterBreak: t('New page for each chapter'),
+  pageBreak: t('New page for each chapter (same as chapterBreak)'),
+  synopsis: t('Include the synopsis'),
+  synopsisOnTitle: t('Synopsis on the title page'),
+  blankAfterHeading: t('Blank line after chapter headings'),
+  review: t('For first readers (about the first 20,000 characters)'),
+  recto: t('Chapters start on a right-hand page'),
+  smartQuotes: t('Curly quotes'),
+  size: t('Trim size'),
+  dark: t('White on black'),
+  rubyParens: t('Ruby in parentheses'),
+  contact: t('Contact (one per line)'),
+});
+
+/**
+ * 入力欄の説明（work: トップレベル、english: "english" の中、output: 出力の項目）。
+ * スキーマの description の英訳で、日本語の訳はスキーマの description と同じ文にする（テストで確かめる）
+ */
+const fieldDescriptions = () => ({
+  work: {
+    id: t('Base of output file names (defaults to title). novel build names the outputs without out after it'),
+    title: t('Title of the work (used on the PDF title page and running heads)'),
+    author: t('Author name'),
+    genre: t('Genre (put at the top of the split / merge outputs)'),
+    target: t('Target readers (put at the top of the split / merge outputs)'),
+    input: t(
+      'Manuscript files or directories (relative to the directory of this settings file, joined in order. Defaults to ["."])',
+    ),
+    sceneBreak: t(
+      'Mark set in Japanese outputs for scene breaks (lines of * / *** / * * * in the manuscript) and for the seams of files that end mid-chapter (default ＊). Example: "＊　＊　＊"',
+    ),
+    sceneBreakIndent: t(
+      'In Japanese outputs, place separator lines (scene breaks and lines of marks only, such as ◇◇◇) this many characters from the line start instead of centered (centered by default; the split / merge text puts them at the line start). Centering is half a character off the grid when (characters per line − characters of the mark) is odd, so use this to keep to the grid. Example: 19 to put ＊ in the center cell of a 40-character line',
+    ),
+  },
+  english: {
+    title: t('Title of the English outputs (pdf-en / rtf-en) (defaults to the title of the work)'),
+    author: t('Author name of the English outputs (pdf-en / rtf-en) (defaults to the author of the work)'),
+    input: t(
+      'Manuscript of the English outputs (pdf-en / rtf-en) (relative to the directory of this settings file. Defaults to ["en"])',
+    ),
+    sceneBreak: t(
+      'Mark set for scene breaks in English outputs (pdf-en and the preview) (default * * *; spaces become letter spacing)',
+    ),
+  },
+  output: {
+    title: t(
+      'Title for this output only (defaults to the title of the work — for pdf-en / rtf-en, that of english if any; null leaves it out)',
+    ),
+    author: t(
+      'Author name for this output only (defaults to the author of the work — for pdf-en / rtf-en, that of english if any; null leaves it out)',
+    ),
+    input: t(
+      'Manuscript for this output only (defaults to the input of the work — for pdf-en / rtf-en, that of english if any)',
+    ),
+    writingMode: t('Writing direction (vertical / horizontal)'),
+    chars: t('Number of characters per line'),
+    lines: t('Lines per page (null for automatic leading)'),
+    coverless: t('Make no cover, and put the title and author at body size at the head of the synopsis and the body'),
+    chapterBreak: t('false to not start a new page for each chapter (pdf / rtf / rtf-en / docx)'),
+    pageBreak: t('Same as chapterBreak. false to not start a new page for each chapter (pdf)'),
+    synopsis: t('false to leave out the synopsis (synopsis.txt)'),
+    synopsisOnTitle: t('Put the synopsis on the title page'),
+    blankAfterHeading: t('Add a blank line between chapter headings (viewpoint lines) and the body'),
+    review: t(
+      'For first readers. Ignore the cover, synopsis, character list and parts, and typeset about the first 20,000 characters',
+    ),
+    recto: t('Always start chapters on a right-hand page'),
+    smartQuotes: t('false to not turn straight quotes into curly quotes'),
+    genre: t('Genre for this output only (split / merge)'),
+    target: t('Target readers for this output only (split / merge)'),
+    size: t('Trim size of novel-pdf (default a6)'),
+    dark: t('Make novel-pdf white text on black'),
+    rubyParens: t('Write ruby in parentheses, as 漢字（かんじ）, in rtf / merge'),
+    contact: t('Contact details at the top left of the first page of rtf-en (one line per item)'),
+    sceneBreak: t(
+      'Scene break mark for this output only (defaults to sceneBreak; english.sceneBreak for pdf-en, # for rtf-en)',
+    ),
+    sceneBreakIndent: t(
+      'Indent of separator lines for this output only (in characters; null to center; defaults to sceneBreakIndent). pdf / novel-pdf / epub / rtf / docx / split / merge',
+    ),
+  },
+});
 
 /** 作品の項目（トップレベル）と、英語の出力の項目（"english" の中）の名前 */
 const WORK_KEYS = ['id', 'title', 'author', 'genre', 'target', 'input', 'sceneBreak', 'sceneBreakIndent'];
@@ -112,12 +183,17 @@ const typesOf = (prop) => (Array.isArray(prop.type) ? prop.type : prop.type ? [p
 /**
  * スキーマの1項目を、画面の入力欄の種類にする。
  * kind: 'boolean' / 'enum'（options から選ぶ）/ 'integer' / 'number' / 'list'（文字列の配列）/ 'string'。
- * label: 画面に出す名前、nullable: null（その出力では使わない）を書けるか
+ * label: 画面に出す名前、description: 説明（section の fieldDescriptions）、nullable: null（その出力では使わない）を書けるか
  */
-function fieldOf(key, prop) {
+function fieldOf(key, prop, section) {
   const types = typesOf(prop);
   const nullable = types.includes('null');
-  const base = { key, label: FIELD_LABELS[key] ?? key, description: prop.description ?? '', nullable };
+  const base = {
+    key,
+    label: fieldLabels()[key] ?? key,
+    description: fieldDescriptions()[section][key] ?? '',
+    nullable,
+  };
   if (prop.enum) return { ...base, kind: 'enum', options: prop.enum };
   if (types.includes('boolean')) return { ...base, kind: 'boolean' };
   if (types.includes('array')) return { ...base, kind: 'list' };
@@ -134,7 +210,7 @@ export function outputFields() {
       format,
       outputKeys(format)
         .filter((key) => key !== 'format' && key !== 'out')
-        .map((key) => fieldOf(key, props[key])),
+        .map((key) => fieldOf(key, props[key], 'output')),
     ]),
   );
 }
@@ -142,18 +218,23 @@ export function outputFields() {
 /** 作品の項目 { work: トップレベル, english: "english" の中 } の入力欄 */
 export function workFields() {
   return {
-    work: WORK_KEYS.map((key) => fieldOf(key, schema.properties[key])),
-    english: ENGLISH_KEYS.map((key) => fieldOf(key, schema.properties.english.properties[key])),
+    work: WORK_KEYS.map((key) => fieldOf(key, schema.properties[key], 'work')),
+    english: ENGLISH_KEYS.map((key) => fieldOf(key, schema.properties.english.properties[key], 'english')),
   };
 }
 
-/** format の説明（スキーマの format の description から、「pdf: …」の部分を抜き出したもの） */
-export function formatDescriptions() {
-  const text = schema.definitions.output.properties.format.description;
-  return Object.fromEntries(
-    OUTPUT_FORMATS.map((format) => [format, text.match(new RegExp(`[、。]${format}: ([^、）]+)`))?.[1] ?? '']),
-  );
-}
+/** format の説明。日本語の訳は、スキーマの format の description の「pdf: …」の部分と同じ文にする（テストで確かめる） */
+export const formatDescriptions = () => ({
+  pdf: t('Vertical/horizontal PDF'),
+  'pdf-en': t('English paperback-style PDF'),
+  'novel-pdf': t('Bunko-style two-page spread PDF'),
+  epub: '',
+  rtf: t('RTF of a Japanese manuscript'),
+  'rtf-en': t('RTF in Shunn format'),
+  docx: t('Vertical Word document'),
+  split: t('One txt per chapter'),
+  merge: t('All in one txt'),
+});
 
 /**
  * 出力名 → out を省いたときの出力先（novel build と同じ決め方）。決められない出力（id も title も無いなど）は null。
@@ -187,7 +268,8 @@ export const serializeWork = (raw) => `${JSON.stringify(raw, null, 2)}\n`;
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
-  const { mkdirSync, mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } = await import('node:fs');
+  const { setBundle } = await import('./l10n.mjs');
   const { tmpdir } = await import('node:os');
   const { dirname, join } = await import('node:path');
 
@@ -253,8 +335,28 @@ if (import.meta.vitest) {
       expect(all.filter((f) => f.label === f.key).map((f) => f.key)).toEqual([]);
       expect(workFields().work.find((f) => f.key === 'input').kind).toBe('list');
     });
-    test('format の説明をスキーマから取る', () => {
-      expect(formatDescriptions()).toMatchObject({ pdf: '縦書き/横書き PDF', 'pdf-en': '英語のペーパーバック風 PDF' });
+    test('format の説明は、すべての形式にある', () => {
+      expect(Object.keys(formatDescriptions())).toEqual(OUTPUT_FORMATS);
+    });
+    test('日本語の表示では、入力欄と format の説明がスキーマの description と同じ', () => {
+      setBundle(JSON.parse(readFileSync(new URL('../l10n/bundle.l10n.ja.json', import.meta.url), 'utf8')));
+      try {
+        const props = { output: schema.definitions.output.properties, work: schema.properties };
+        const english = schema.properties.english.properties;
+        const shown = [
+          ...Object.values(outputFields())
+            .flat()
+            .map((f) => [f.description, props.output[f.key].description]),
+          ...workFields().work.map((f) => [f.description, props.work[f.key].description]),
+          ...workFields().english.map((f) => [f.description, english[f.key].description]),
+        ];
+        expect(shown.filter(([a, b]) => a !== b)).toEqual([]);
+        const formats = props.output.format.description;
+        const fromSchema = (format) => formats.match(new RegExp(`[、。]${format}: ([^、）]+)`))?.[1] ?? '';
+        expect(formatDescriptions()).toEqual(Object.fromEntries(OUTPUT_FORMATS.map((f) => [f, fromSchema(f)])));
+      } finally {
+        setBundle(undefined);
+      }
     });
   });
 

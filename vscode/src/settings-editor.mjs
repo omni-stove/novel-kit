@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import * as vscode from 'vscode';
 import { OUTPUT_FORMATS } from '../../src/build.mjs';
+import { l10nScript } from './l10n.mjs';
 import {
   describeOutputs,
   describeWorkFiles,
@@ -32,7 +33,7 @@ function renderHtml({ cssUris, jsUris, cspSource, nonce }) {
     `script-src 'nonce-${nonce}'`,
   ].join('; ');
   return `<!DOCTYPE html>
-<html lang="ja">
+<html lang="${vscode.env.language}">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -41,6 +42,7 @@ function renderHtml({ cssUris, jsUris, cspSource, nonce }) {
 </head>
 <body>
   <div id="root"></div>
+  ${l10nScript()}
   ${jsUris.map((uri) => `<script nonce="${nonce}" src="${uri}"></script>`).join('\n  ')}
 </body>
 </html>`;
@@ -65,9 +67,9 @@ export function createWorkSettingsController(document, { post, build, linesOf, o
     let raw;
     try {
       raw = JSON.parse(document.getText() || '{}');
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('JSON のオブジェクトではありません');
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(vscode.l10n.t('Not a JSON object'));
     } catch (err) {
-      post({ file, error: `${file} を読めません: ${err.message}` });
+      post({ file, error: vscode.l10n.t('Cannot read {0}: {1}', file, err.message) });
       return;
     }
     post({
@@ -103,7 +105,9 @@ export function createWorkSettingsController(document, { post, build, linesOf, o
         // 入力のたびに届くので、適用順が前後しないよう直列にする
         editQueue = editQueue
           .then(() => update(msg.raw))
-          .catch((err) => vscode.window.showErrorMessage(`設定を書き込めませんでした: ${err.message}`));
+          .catch((err) =>
+            vscode.window.showErrorMessage(vscode.l10n.t('Could not write the settings: {0}', err.message)),
+          );
         return editQueue;
       case 'build':
         // build はディスク上の novel.json を読むので、未保存の編集を先に保存する
@@ -169,7 +173,7 @@ export function createSettingsEditorProvider(context, { build, linesOf }) {
       panel.webview.options = { enableScripts: true, localResourceRoots: [mediaRoot] };
       panel.webview.html = renderHtml({
         cssUris: [uri('settings.css'), uri('work-settings.css')],
-        jsUris: [uri('settings.js'), uri('settings-page.js')],
+        jsUris: [uri('l10n.js'), uri('settings.js'), uri('settings-page.js')],
         cspSource: panel.webview.cspSource,
         nonce: randomBytes(16).toString('hex'),
       });

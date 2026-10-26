@@ -6,7 +6,7 @@
 
 import { basename, dirname } from 'node:path';
 import { buildChapters, generateHtml as generateEnglishHtml, parseEnglishLines } from '../../src/en-pdf.mjs';
-import { detectLanguage } from '../../src/layout.mjs';
+import { computeMetrics, detectLanguage } from '../../src/layout.mjs';
 import {
   CHARACTERS_FILENAME,
   computeSectionLabels,
@@ -24,6 +24,7 @@ import {
   readLines,
 } from '../../src/lib/text-parser.mjs';
 import { generateHtml } from '../../src/pdf.mjs';
+import { t } from './l10n.mjs';
 
 /** 原稿の行列から組版の言語（'ja' / 'en'）を判定する（メタ行は数えない） */
 export const detectLanguageOfLines = (lines) => detectLanguage(lines, isMetaLine);
@@ -243,6 +244,14 @@ export function buildOutline(filePath, { linesOf = readLines, parts = null } = {
   return { language, chapters };
 }
 
+/** レイアウトの表記。日本語は字数×行数、英語は文字サイズ・行送りと、そこから決まるおよその字数×行数 */
+export function describeLayout(layout, { english = false } = {}) {
+  const m = computeMetrics(layout, { english });
+  if ('charsApprox' in m)
+    return t('{0}pt · leading {1} (about {2} chars × {3} lines)', m.fontSizePt, m.lineHeight, m.charsApprox, m.lines);
+  return t('{0} chars × {1} lines', m.chars, m.lines);
+}
+
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
   const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
@@ -418,6 +427,26 @@ if (import.meta.vitest) {
         expect(doc.files).toEqual([join(dir, 'synopsis.txt')]);
         expect(doc.body).toContain('梗概');
       });
+    });
+  });
+
+  describe('describeLayout', () => {
+    test('英語では文字サイズと行送りを出し、日本語の表示では日本語で出す', async () => {
+      const { readFileSync } = await import('node:fs');
+      const { setBundle } = await import('./l10n.mjs');
+      expect(describeLayout(DEFAULT_LAYOUT)).toBe('30 chars × 41 lines');
+      expect(describeLayout(BUILTIN_ENGLISH_PRESETS.A5, { english: true })).toMatch(
+        /^11pt · leading 1\.4 \(about \d+ chars × \d+ lines\)$/,
+      );
+      setBundle(JSON.parse(readFileSync(new URL('../l10n/bundle.l10n.ja.json', import.meta.url), 'utf8')));
+      try {
+        expect(describeLayout(DEFAULT_LAYOUT)).toBe('30字×41行');
+        expect(describeLayout(BUILTIN_ENGLISH_PRESETS.A5, { english: true })).toMatch(
+          /^11pt・行送り1\.4（約\d+字×\d+行）$/,
+        );
+      } finally {
+        setBundle(undefined);
+      }
     });
   });
 

@@ -11,13 +11,13 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
   root.classList.add('work-settings');
   const fileLabel = h('span', { className: 'work-file' });
   const buildButton = h('button', {
-    textContent: '出力を作る…',
-    title: 'novel.json の outputs から選んで出力を作る（novel build と同じ）',
+    textContent: t('Build Outputs…'),
+    title: t('Choose from the outputs in novel.json and make them (same as novel build)'),
     onclick: () => post({ type: 'build' }),
   });
   const openTextButton = h('button', {
-    textContent: 'テキストで開く',
-    title: 'novel.json をテキストエディタで開く',
+    textContent: t('Open as Text'),
+    title: t('Open novel.json in the text editor'),
     onclick: () => post({ type: 'openText' }),
   });
   const errorBox = h('p', { className: 'work-error', hidden: true });
@@ -26,7 +26,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
     h(
       'header',
       { className: 'work-head' },
-      h('strong', { textContent: '作品の設定' }),
+      h('strong', { textContent: t('Work Settings') }),
       fileLabel,
       buildButton,
       openTextButton,
@@ -118,9 +118,9 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
       input = h(
         'select',
         { dataset, title },
-        h('option', { value: '', textContent: '既定' }),
-        h('option', { value: 'true', textContent: 'する' }),
-        h('option', { value: 'false', textContent: 'しない' }),
+        h('option', { value: '', textContent: t('Default') }),
+        h('option', { value: 'true', textContent: t('Yes') }),
+        h('option', { value: 'false', textContent: t('No') }),
       );
       input.value = value === true ? 'true' : value === false ? 'false' : '';
       input.addEventListener('change', () => write(input.value === '' ? undefined : input.value === 'true'));
@@ -128,7 +128,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
       input = h(
         'select',
         { dataset, title },
-        h('option', { value: '', textContent: '既定' }),
+        h('option', { value: '', textContent: t('Default') }),
         field.options.map((o) => h('option', { value: o, textContent: o })),
       );
       input.value = typeof value === 'string' ? value : '';
@@ -156,7 +156,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
       input = h(
         'select',
         { dataset, title, disabled: isNull },
-        h('option', { value: '', textContent: placeholder ? `既定（${placeholder}）` : '既定' }),
+        h('option', { value: '', textContent: placeholder ? t('Default ({0})', placeholder) : t('Default') }),
         state.dirs.map((d) => h('option', { value: d, textContent: d })),
         custom && h('option', { value: '\0', textContent: current }),
       );
@@ -170,7 +170,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
         title,
         rows: Math.max(1, Array.isArray(value) ? value.length : 1),
         value: listText(value),
-        placeholder: placeholder || '1行に1つ',
+        placeholder: placeholder || t('One per line'),
         disabled: isNull,
       });
       input.addEventListener('change', () => {
@@ -193,14 +193,17 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
       field.nullable &&
       h(
         'label',
-        { className: 'null-toggle', title: 'null を書く（その出力では使わない。行数は行送り自動）' },
+        {
+          className: 'null-toggle',
+          title: t('Write null (not used in this output; for lines, the leading is automatic)'),
+        },
         h('input', {
           type: 'checkbox',
           checked: isNull,
           dataset: { field: `${id}#null` },
           onchange: (e) => write(e.target.checked ? null : undefined),
         }),
-        'なし',
+        t('None'),
       );
     return h(
       'label',
@@ -224,8 +227,10 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
   function workSection() {
     const { raw, fields } = state;
     return section(
-      '作品',
-      'PDF の扉・柱や出力ファイル名に使う。原稿は novel.json のディレクトリから',
+      t('Work Information'),
+      t(
+        'Used for the PDF title page and running heads, and for output file names. Manuscript paths are relative to the directory of novel.json',
+      ),
       h(
         'div',
         { className: 'grid' },
@@ -235,7 +240,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
             raw[f.key],
             (v) => commit((r) => assign(r, f.key, v)),
             `work.${f.key}`,
-            { id: raw.title ?? '', input: '.', sceneBreak: '＊', sceneBreakIndent: '中央' }[f.key] ?? '',
+            { id: raw.title ?? '', input: '.', sceneBreak: '＊', sceneBreakIndent: t('Centered') }[f.key] ?? '',
           ),
         ),
       ),
@@ -247,8 +252,8 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
     const english = raw.english && typeof raw.english === 'object' ? raw.english : {};
     const placeholders = { title: raw.title ?? '', author: raw.author ?? '', input: 'en', sceneBreak: '* * *' };
     return section(
-      '英語の出力',
-      'pdf-en / rtf-en に使う',
+      t('English Outputs'),
+      t('Used for pdf-en / rtf-en'),
       h(
         'div',
         { className: 'grid' },
@@ -299,18 +304,19 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
         dataset: { field: 'parts#enabled' },
         onchange: (e) => commit((r) => assign(r, 'parts', e.target.checked ? [] : undefined)),
       }),
-      '部に分ける',
+      t('Divide into parts'),
     );
-    const description =
-      'チェックしたファイルから新しい部になり、章番号が「部-章」（部に章が1つなら「部」）になる。PDF・プレビュー・目次・split / merge で同じ番号を使う';
-    if (!enabled) return section('部の境界', null, toggle);
+    const description = t(
+      'A new part starts at each checked file, and chapters are numbered "part-chapter" (just "part" when a part has one chapter). The PDF, the preview, the outline and split / merge use the same numbers',
+    );
+    if (!enabled) return section(t('Part Boundaries'), null, toggle);
     const tokens = partTokens(raw);
     const rows = [];
     let part = 1;
     work.files.forEach((file, i) => {
       if (file.startsPart) part++;
       if (tokens.length > 0 && (i === 0 || file.startsPart))
-        rows.push(h('tr', { className: 'part-row' }, h('td', { colSpan: 4, textContent: `第${part}部` })));
+        rows.push(h('tr', { className: 'part-row' }, h('td', { colSpan: 4, textContent: t('Part {0}', part) })));
       rows.push(
         h(
           'tr',
@@ -324,36 +330,36 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
               disabled: i === 0 || file.token === null,
               title:
                 i === 0
-                  ? '先頭のファイルは常に第1部の頭'
+                  ? t('The first file always starts part 1')
                   : file.token === null
-                    ? 'ファイル名が番号で始まらないため、境界にできません'
-                    : 'このファイルから新しい部にする',
+                    ? t('This file cannot start a part because its name does not begin with a number')
+                    : t('Start a new part at this file'),
               dataset: { field: `part.${file.name}` },
               onchange: (e) => togglePart(i, e.target.checked),
             }),
           ),
           h('td', {}, h('a', { href: '#', textContent: file.name, onclick: (e) => openFile(e, file.name) })),
-          h('td', { className: 'label', textContent: file.label === null ? '（続き）' : `【${file.label}】` }),
+          h('td', { className: 'label', textContent: file.label === null ? t('(continued)') : `【${file.label}】` }),
           h('td', { className: 'heading', textContent: file.title || '' }),
         ),
       );
     });
 
     return section(
-      '部の境界',
+      t('Part Boundaries'),
       description,
       toggle,
-      work.error && h('p', { className: 'warning', textContent: `原稿を読めません: ${work.error}` }),
+      work.error && h('p', { className: 'warning', textContent: t('Cannot read the manuscript: {0}', work.error) }),
       work.missing.length > 0 &&
         h(
           'p',
           { className: 'warning' },
-          `どのファイルにも当たらない境界: ${work.missing.join(', ')} `,
+          t('Boundaries that match no file: {0} ', work.missing.join(', ')),
           h('button', {
-            textContent: '外す',
+            textContent: t('Remove'),
             onclick: () =>
               commit((r) => {
-                r.parts = partTokens(r).filter((t) => !work.missing.includes(t));
+                r.parts = partTokens(r).filter((tok) => !work.missing.includes(tok));
               }),
           }),
         ),
@@ -367,15 +373,15 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
               h(
                 'tr',
                 {},
-                h('th', { textContent: '部の頭' }),
-                h('th', { textContent: 'ファイル' }),
-                h('th', { textContent: '章' }),
-                h('th', { textContent: '見出し' }),
+                h('th', { textContent: t('Starts part') }),
+                h('th', { textContent: t('File') }),
+                h('th', { textContent: t('Chapter') }),
+                h('th', { textContent: t('Heading') }),
               ),
             ),
             h('tbody', {}, rows),
           )
-        : !work.error && h('p', { className: 'note', textContent: '原稿（.txt）がありません。' }),
+        : !work.error && h('p', { className: 'note', textContent: t('There is no manuscript (.txt).') }),
     );
   }
 
@@ -387,8 +393,8 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
   const formatLabel = (f) => (f.description ? `${f.format}（${f.description}）` : f.format);
 
   const LANGUAGES = [
-    ['ja', '日本語'],
-    ['en', '英語'],
+    ['ja', t('Japanese')],
+    ['en', t('English')],
   ];
 
   /** format の言語ごとの形式 { ja, en }（英語の形式 <format>-en が無ければ ja だけ） */
@@ -431,8 +437,8 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
       return typeof raw.sceneBreakIndent === 'number'
         ? String(raw.sceneBreakIndent)
         : ['split', 'merge'].includes(format)
-          ? '行頭'
-          : '中央';
+          ? t('Line start')
+          : t('Centered');
     if (['title', 'author', 'input'].includes(key) && ['pdf-en', 'rtf-en'].includes(format))
       return shown(english[key] ?? (key === 'input' ? ['en'] : raw[key]));
     if (key === 'input') return shown(raw.input ?? ['.']);
@@ -451,14 +457,14 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
     const nameLabel = h('span', {
       className: 'output-name',
       textContent: name === format ? family : `${name}（${family}）`,
-      title: known ? `novel build <作品> ${name} で作る` : `${format} は未対応の形式`,
+      title: known ? t('Made by novel build <work> {0}', name) : t('{0} is not a supported format', format),
     });
     const taken = (f) => f !== format && name === format && f in outputsObject(clone(state.raw));
     const languageSelect =
       variants.en &&
       h(
         'select',
-        { dataset: { field: `output.${name}.language` }, title: '言語' },
+        { dataset: { field: `output.${name}.language` }, title: t('Language') },
         LANGUAGES.map(([lang, label]) =>
           h('option', { value: lang, textContent: label, disabled: taken(variants[lang]) }),
         ),
@@ -470,10 +476,10 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
 
     const outField = {
       key: 'out',
-      label: '出力先',
+      label: t('Output path'),
       kind: 'string',
       nullable: false,
-      description: '出力先ディレクトリから',
+      description: t('Relative to the output directory'),
     };
     const used = new Set(['format', 'out', ...(known ?? []).map((f) => f.key)]);
     const unused = Object.keys(output).filter((k) => !used.has(k));
@@ -487,12 +493,12 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
         nameLabel,
         languageSelect,
         h('button', {
-          textContent: '作る',
-          title: 'この出力を作る（novel build と同じ）',
+          textContent: t('Build'),
+          title: t('Make this output (same as novel build)'),
           onclick: () => post({ type: 'build', names: [name] }),
         }),
         h('button', {
-          textContent: '削除',
+          textContent: t('Delete'),
           className: 'danger',
           onclick: () =>
             commit((r) => {
@@ -509,7 +515,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
           output.out,
           (v) => commit((r) => assignOutput(r, name, 'out', v)),
           `output.${name}.out`,
-          outputs.defaultOut[name] ?? '（id か title を書くと決まる）',
+          outputs.defaultOut[name] ?? t('(set by writing id or title)'),
         ),
         (known ?? []).map((f) =>
           fieldInput(
@@ -522,7 +528,10 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
         ),
       ),
       unused.length > 0 &&
-        h('p', { className: 'note', textContent: `この形式では使わない項目（そのまま残す）: ${unused.join(', ')}` }),
+        h('p', {
+          className: 'note',
+          textContent: t('Fields this format does not use (kept as they are): {0}', unused.join(', ')),
+        }),
     );
   }
 
@@ -552,14 +561,14 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
     const addSelect = h(
       'select',
       { dataset: { field: 'output.add' } },
-      h('option', { value: '', textContent: '出力を追加…' }),
+      h('option', { value: '', textContent: t('Add Output…') }),
       formats
         .filter((f) => !f.format.endsWith('-en'))
         .filter((f) => Object.values(languageVariants(f.format)).some((v) => !used.has(v)))
         .map((f) =>
           h('option', {
             value: f.format,
-            textContent: languageVariants(f.format).en ? `${f.format}（日本語 / 英語）` : formatLabel(f),
+            textContent: languageVariants(f.format).en ? t('{0} (Japanese / English)', f.format) : formatLabel(f),
           }),
         ),
     );
@@ -571,8 +580,8 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
       addOutput(family, used);
     });
     return section(
-      '出力',
-      '「出力を作る」や novel build で作るもの',
+      t('Outputs'),
+      t('What "Build Outputs" and novel build make'),
       outputs.error && h('p', { className: 'warning', textContent: outputs.error }),
       entries.map(([name, value]) => outputCard(name, value)),
       h('div', { className: 'output-add' }, addSelect),
@@ -591,9 +600,9 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
   /** novel.json が無いとき（小説パネルのタブだけ）。dir: 作る場所 */
   function missingSection(dir) {
     return section(
-      'novel.json がありません',
-      `${dir} から上に novel.json が無いため、作品の設定はまだありません。`,
-      h('button', { textContent: `${dir} に novel.json を作る`, onclick: () => post({ type: 'create' }) }),
+      t('No novel.json'),
+      t('There are no work settings yet because there is no novel.json in {0} or above.', dir),
+      h('button', { textContent: t('Create novel.json in {0}', dir), onclick: () => post({ type: 'create' }) }),
     );
   }
 

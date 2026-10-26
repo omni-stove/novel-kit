@@ -1,6 +1,10 @@
 **
 !package.json
+!package.nls.json
+!package.nls.ja.json
+!l10n/**
 !README.md
+!README.ja.md
 !LICENSE
 !dist/extension.cjs
 !dist/novel-cli.cjs

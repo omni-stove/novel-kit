@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { initSync, loadDictionaryFromBytes, TokenizerBuilder } from 'lindera-wasm';
 import { getBodyLines, isSeparator, isViewpointLine, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
+import { t } from './l10n.mjs';
 
 /** loadDictionaryFromBytes に渡す順の、辞書のファイル */
 export const IPADIC_FILES = [
@@ -22,14 +23,14 @@ export const IPADIC_FILES = [
   'unk.bin',
 ];
 
-/** 文末の種類。表示の順に並べる */
+/** 文末の種類。表示の順に並べる。label は表示の言語の名前を返す */
 const ENDINGS = [
-  { key: 'past', label: '〜た' },
-  { key: 'present', label: '〜る・う・い' },
-  { key: 'copula', label: '〜だ・である' },
-  { key: 'negative', label: '〜ない' },
-  { key: 'noun', label: '体言止め' },
-  { key: 'other', label: 'その他' },
+  { key: 'past', label: () => t('〜た (past)') },
+  { key: 'present', label: () => t('〜る・う・い (present)') },
+  { key: 'copula', label: () => t('〜だ・である (copula)') },
+  { key: 'negative', label: () => t('〜ない (negative)') },
+  { key: 'noun', label: () => t('Noun ending (体言止め)') },
+  { key: 'other', label: () => t('Other') },
 ];
 
 /** 長い文とみなす字数（ルビを除く） */
@@ -255,8 +256,8 @@ const percent = (n, total) => (total === 0 ? 0 : Math.round((n / total) * 100));
  */
 export function proseReport(r) {
   const total = r.sentences.length;
-  const labelOf = Object.fromEntries(ENDINGS.map(({ key, label }) => [key, label]));
-  const lineNote = (line) => `${line + 1}行`;
+  const labelOf = Object.fromEntries(ENDINGS.map(({ key, label }) => [key, label()]));
+  const lineNote = (line) => t('Line {0}', line + 1);
   const sentenceItem = (s, note = lineNote(s.line)) => ({ line: s.line, text: s.text, note });
   return {
     sentences: total,
@@ -267,14 +268,14 @@ export function proseReport(r) {
     },
     average: total === 0 ? 0 : Math.round(r.sentences.reduce((n, s) => n + s.length, 0) / total),
     longest: r.sentences.reduce((n, s) => Math.max(n, s.length), 0),
-    endings: ENDINGS.map(({ key, label }) => ({
-      label,
+    endings: ENDINGS.map(({ key }) => ({
+      label: labelOf[key],
       count: r.endings[key],
       percent: percent(r.endings[key], total),
     })),
     lists: [
       {
-        title: `同じ文末の連続（${RUN_MIN}文以上）`,
+        title: t('Same ending in a row ({0}+ sentences)', RUN_MIN),
         items: r.runs.map((run) => ({
           line: run.line,
           text: `${labelOf[run.ending]} ×${run.count}`,
@@ -282,7 +283,7 @@ export function proseReport(r) {
         })),
       },
       {
-        title: `近くの同じ語（${REPEAT_WINDOW}文以内）`,
+        title: t('Same word nearby (within {0} sentences)', REPEAT_WINDOW),
         items: r.repeats.map((repeat) => ({
           line: repeat.line,
           text: `「${repeat.word}」×${repeat.count}`,
@@ -291,11 +292,11 @@ export function proseReport(r) {
         })),
       },
       {
-        title: `長い文（${LONG_SENTENCE_CHARS}字超）`,
-        items: r.longSentences.map((s) => sentenceItem(s, `${s.length}字・${lineNote(s.line)}`)),
+        title: t('Long sentences (over {0} chars)', LONG_SENTENCE_CHARS),
+        items: r.longSentences.map((s) => sentenceItem(s, t('{0} chars · {1}', s.length, lineNote(s.line)))),
       },
-      { title: '〜だった。', items: r.datta.map((s) => sentenceItem(s)) },
-      { title: '〜ような・ように・みたい', items: r.similes.map((s) => sentenceItem(s)) },
+      { title: t('Ending in 〜だった。'), items: r.datta.map((s) => sentenceItem(s)) },
+      { title: t('Similes (〜ような・ように・みたい)'), items: r.similes.map((s) => sentenceItem(s)) },
     ],
   };
 }
@@ -305,6 +306,7 @@ if (import.meta.vitest) {
   const { dirname, resolve } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const { ensureIpadic } = await import('./ipadic.mjs');
+  const { setBundle } = await import('./l10n.mjs');
 
   let tokenizer;
   beforeAll(async () => {
@@ -421,7 +423,7 @@ if (import.meta.vitest) {
     test('割合・長さ・一覧を出す形にする', () => {
       const a = { line: 0, text: 'あいうえお。', length: 6, ending: 'past' };
       const b = { line: 2, text: 'かきく。', length: 4, ending: 'past' };
-      const report = proseReport({
+      const input = {
         sentences: [a, b],
         narrationChars: 30,
         dialogueChars: 10,
@@ -431,15 +433,39 @@ if (import.meta.vitest) {
         longSentences: [a],
         datta: [],
         similes: [b],
-      });
+      };
+      const report = proseReport(input);
       expect(report.dialogue.percent).toBe(25);
       expect(report.average).toBe(5);
       expect(report.longest).toBe(6);
-      expect(report.endings[0]).toEqual({ label: '〜た', count: 2, percent: 100 });
+      expect(report.endings[0]).toEqual({ label: '〜た (past)', count: 2, percent: 100 });
       expect(report.lists.map((l) => l.items.length)).toEqual([1, 1, 1, 0, 1]);
-      expect(report.lists[0].items[0]).toEqual({ line: 0, text: '〜た ×3', note: '1行' });
+      expect(report.lists[0].items[0]).toEqual({ line: 0, text: '〜た (past) ×3', note: 'Line 1' });
       expect(report.lists[1].items[0].children.map((c) => c.line)).toEqual([0, 2]);
-      expect(report.lists[2].items[0].note).toBe('6字・1行');
+      expect(report.lists[2].items[0].note).toBe('6 chars · Line 1');
+
+      setBundle(JSON.parse(readFileSync(new URL('../l10n/bundle.l10n.ja.json', import.meta.url), 'utf8')));
+      try {
+        const ja = proseReport(input);
+        expect(ja.endings.map((e) => e.label)).toEqual([
+          '〜た',
+          '〜る・う・い',
+          '〜だ・である',
+          '〜ない',
+          '体言止め',
+          'その他',
+        ]);
+        expect(ja.lists.map((l) => l.title)).toEqual([
+          '同じ文末の連続（3文以上）',
+          '近くの同じ語（3文以内）',
+          '長い文（80字超）',
+          '〜だった。',
+          '〜ような・ように・みたい',
+        ]);
+        expect(ja.lists[0].items[0]).toEqual({ line: 0, text: '〜た ×3', note: '1行' });
+      } finally {
+        setBundle(undefined);
+      }
     });
 
     test('文が無ければ割合と長さは 0', () => {

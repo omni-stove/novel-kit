@@ -1,69 +1,73 @@
-# 小説プレビュー
+# Novel Preview
 
-原稿テキスト（`.txt`）を、提出する PDF と同じ組版でページ表示する VS Code 拡張。
+English | [日本語](README.ja.md)
 
-![42字×34行で組んだ原稿のページ表示と、エクスプローラーの小説の目次](images/page.png)
+A VS Code extension that shows a manuscript text file (`.txt`) as pages typeset the same way as the PDF you submit.
 
-- **字数×行数で組む**: Word の「ページ設定」と同じ考え方で用紙・余白・字数×行数を決めると、そのとおりのページで縦書き（横書き）に組む。新人賞の規定書式（例: 42字×34行）で、提出物と同じ見た目を確かめながら書ける
-- **スクロール表示**: ツールバーの「スクロール」で、カクヨム・小説家になろうのようにページを区切らない横書きで縦に流して読める（縦書きのレイアウトでも横書きで流す）。「ページ」で用紙の表示に戻る
-- **プレビューのまま直せる**: ページ表示の段落をクリックすると、その場で編集できる。入力はそのまま原稿ファイルに入る
-- **PDF と同じ組版**: プレビューと PDF 出力は同じパーサ・同じスタイルで組む。PDF は拡張だけで出せる
-- **英語原稿にも対応**: 英訳など英語の原稿は自動で判定して、ペーパーバック風（6×9in など）に組む
-- **原稿用紙換算**: ステータスバーと小説パネルの「文章の傾向」に、文字数・400字詰め換算・いまのレイアウトでの枚数を出す（パネルは作品全体の分も出す）。エクスプローラーに章ごとの目次と文字数を出す
-- **並べ替え**: エクスプローラーの「小説の目次」で章やファイルをドラッグするか、右クリックの「上へ移動」「下へ移動」で順番を入れ替えると、その順にファイル名の先頭の番号を `010_`・`020_`… と振り直す（番号の後ろはそのまま。番号の無いファイルには付ける）。`novel.json` の部の境界（`"parts"`）も部の頭のファイルに付いていく。名前を変える前に、変わるファイル名を出して確かめる。目次のタイトルバーの「…」→「ファイル名の番号を振り直す」で、並びを変えずに番号だけ振り直せる。英語の原稿のファイル名と、英語の目次で並べ替えたときの部の境界は変えない
-- **小説パネル**: プレビューの右に、「文章の傾向」「作品設定」「ページ設定」のタブを出す。プレビューに出している原稿が対象で、プレビューを開いていないときは出ない。幅は境目をドラッグして変える
-- **文章の傾向**: 小説パネルの「文章の傾向」のタブに、開いている原稿の地の文の文末の分布（〜た・〜る・〜だ・〜ない・体言止め）、台詞の割合、文の長さを出す。同じ文末の連続・近くで繰り返す同じ語（基本形で数え、3文以内に続けて出たもの）・長い文・「だった」・「ような」の箇所はクリックでその行を開く。文末の種類と語は Lindera と IPA 辞書の形態素解析で決める。タブを初めて見せるまで辞書は読み込まない（読み込むとメモリを約250MB使う）。設定 `novelPreview.prose` をオフにすると数えない（文字数は出す）
+![A manuscript typeset at 42 characters × 34 lines, with the novel outline in the Explorer](images/page.png)
 
-ルビ（`|漢字《かんじ》`）・傍点（`《《強調》》`）はカクヨム・小説家になろうと同じ書き方。[青空文庫の注記](https://www.aozora.gr.jp/annotation/)の主なものでも書ける。章見出し（`【】`）・場面区切り・梗概のファイルなど、書ける記法と出力ごとの組み方は「[原稿の記法](https://github.com/omni-stove/novel-kit/blob/main/vscode/docs/notation.md)」にまとめた。
+- **Typeset by characters × lines**: Set the paper, margins and characters × lines the way you set up a page in Word, and the manuscript is typeset on exactly those pages, vertically (or horizontally). Write while checking that it looks the same as what you submit in a contest's required format (for example, 42 characters × 34 lines)
+- **Scroll view**: "Scroll" on the toolbar shows the text horizontally, flowing down without page breaks as on Kakuyomu or Shōsetsuka ni Narō (even for a vertical layout). "Page" goes back to the paper view
+- **Edit in the preview**: Click a paragraph in the page view to edit it in place. What you type goes straight into the manuscript file
+- **Same typesetting as the PDF**: The preview and the PDF export use the same parser and the same styles. The extension exports PDFs on its own
+- **English manuscripts**: Manuscripts in English, such as translations, are detected automatically and typeset like a paperback (6×9in and others)
+- **Manuscript paper counts**: The status bar and "Prose" in the novel panel show the character count, the count in sheets of 400-character manuscript paper, and the number of pages in the current layout (the panel also shows them for the whole work). The Explorer shows an outline by chapter with character counts
+- **Reordering**: Drag chapters or files in "Novel Outline" in the Explorer, or right-click "Move Up" / "Move Down", and the numbers at the start of the file names are renumbered `010_`, `020_`… in that order (the rest of the name stays; files without a number get one). The part boundaries in `novel.json` (`"parts"`) follow the file that starts each part. Before renaming, the new file names are shown for you to confirm. "…" → "Renumber the File Names" in the outline's title bar renumbers without changing the order. File names of the English manuscript, and part boundaries when reordering the English outline, are not changed
+- **Novel panel**: Tabs for "Prose", "Work" and "Page Setup" to the right of the preview. They are about the manuscript shown in the preview, and do not appear without a preview. Drag the border to change the width
+- **Prose**: The "Prose" tab of the novel panel shows, for the open manuscript, the distribution of sentence endings in the narration (〜た, 〜る, 〜だ, 〜ない, noun endings), the share of dialogue, and sentence lengths. Click a run of the same ending, the same word repeated nearby (counted by base form, within 3 sentences), a long sentence, or a sentence with 「だった」 or 「ような」 to open its line. Sentence endings and words are determined by morphological analysis with Lindera and the IPA dictionary. The dictionary is not loaded until the tab is first shown (it then uses about 250 MB of memory). Turning off the setting `novelPreview.prose` stops the analysis (character counts are still shown). The analysis is for Japanese manuscripts
 
-## 入れ方
+Ruby (`|漢字《かんじ》`) and emphasis dots (`《《強調》》`) are written the same way as on Kakuyomu and Shōsetsuka ni Narō. The main [Aozora Bunko annotations](https://www.aozora.gr.jp/annotation/) also work. Chapter headings (`【】`), scene breaks, the synopsis file and the rest of the notation, and how each output typesets them, are described in "[Manuscript notation](https://github.com/omni-stove/novel-kit/blob/main/vscode/docs/notation.md)" (in Japanese).
 
-VS Code の拡張機能ビューで「小説プレビュー」を検索して入れる。
+The extension's interface follows the display language of VS Code (English or Japanese).
 
-PDF 出力に使う Chrome は、初回の PDF 出力のときにダウンロードする（約180MB）。ほかに入れるものはない。
+## Installation
 
-## 使い方
+Search for "Novel Preview" in the Extensions view of VS Code and install it.
 
-`.txt` のタブを右クリック →「エディターを指定して開く…」で「小説プレビュー」を選ぶ。作品のフォルダの `.vscode/settings.json` に `"workbench.editorAssociations": { "*.txt": "novelPreview.editor" }` と書けば既定になる。
+Chrome, which is used for PDF export, is downloaded the first time you export a PDF (about 180 MB). Nothing else needs installing.
 
-レイアウトは作品の `novel.json` に保存される。
+## Usage
 
-ページ表示の段落をクリックすると、その場で編集できる。ルビなどの記法は編集中だけ書いたとおりに見え、段落の外をクリックするか Esc を押すと組み直される。
+Right-click a `.txt` tab → "Reopen Editor With…" and choose "Novel Preview". To make it the default, write `"workbench.editorAssociations": { "*.txt": "novelPreview.editor" }` in `.vscode/settings.json` of the work's folder.
 
-![ページ表示の段落をクリックして書き足し、確定するとルビつきで組み直される](images/edit.gif)
+The layout is saved in the work's `novel.json`.
 
-## 小説パネル
+Click a paragraph in the page view to edit it in place. Notation such as ruby shows as written only while editing, and the paragraph is typeset again when you click outside it or press Esc.
 
-![小説パネルの「文章の傾向」のタブ。文字数・換算枚数、文末の分布、「〜だった。」の箇所の一覧](images/panel.png)
+![Clicking a paragraph in the page view, typing, and confirming typesets it again with ruby](images/edit.gif)
 
-プレビューの右に出る。ツールバーの右端の「文章の傾向」「作品設定」「ページ設定」でそのタブを開き、選んでいるものをもう一度押すか、パネルの「×」で閉じる。開け閉め・タブ・幅は覚えていて、次に開くプレビューも同じ状態で始める。コマンド「小説パネルを開く」（コマンドパレット・`.txt` のタブのタイトルバーの「…」）でも開く（プレビューが無ければ横に出す）。
+## Novel panel
 
-- **文章の傾向**（既定のタブ）: このファイルと作品全体の文字数・換算枚数と、文章の傾向
-- **作品設定**: `novel.json` のフォーム（下の「作品の設定」）
-- **ページ設定**: レイアウト（プリセット・字数×行数）・文字方向・用紙・余白・フォントと、プリセットの保存・削除
+!["Prose" in the novel panel: character counts, sheets, the distribution of sentence endings, and a list of sentences ending in 〜だった。](images/panel.png)
 
-## 作品の設定
+It appears to the right of the preview. "Prose", "Work" and "Page Setup" at the right end of the toolbar open that tab; press the selected one again, or "×" on the panel, to close it. The panel remembers whether it is open, the tab and the width, and the next preview you open starts the same way. The command "Open the Novel Panel" (Command Palette, or "…" in the title bar of a `.txt` tab) also opens it (with a preview to the side if there is none).
 
-小説パネルの「作品設定」のタブで、原稿から一番近い `novel.json` を編集する。変更はすぐ保存されてプレビューにも効く（`novel.json` がまだ無ければ、タブから作れる）。`novel.json` を開いたとき（コマンド「作品の設定を開く」、エクスプローラーで `novel.json` を右クリックからも）は、同じフォームが1枚の画面で開く。タイトル・著者名などの作品情報、部の境界、出力（`"outputs"`）、英語の出力の項目をフォームで編集でき、変更はそのまま `novel.json` に入る。JSON のまま直したいときは「テキストで開く」。
+- **Prose** (the default tab): character counts and sheets for this file and the whole work, and the tendencies of the prose
+- **Work**: the form for `novel.json` (see "Work settings" below)
+- **Page Setup**: the layout (preset, characters × lines), writing direction, paper, margins and font, and saving and deleting presets
 
-- **原稿**: `novel.json` のディレクトリと、その下で `.txt` を含むディレクトリから選ぶ（作品・英語の出力・出力ごとの原稿のどれも同じ）
-- **部の境界**: 「部に分ける」をオンにすると原稿ファイルの一覧が出るので、新しい部を始めるファイルにチェックを入れる（`"parts"` に書かれる）。章番号は PDF と同じく「部-章」（部に章が1つなら「部」）になり、プレビュー・目次の番号も同じになる。部の境界は作品で1つだけで、すべての出力に効く
-- **出力**: 出力ごとに形式と、その形式に効く項目だけを出す。pdf と rtf は言語（日本語 / 英語）を選ぶ（英語にすると pdf-en / rtf-en になる）。「作る」でその出力だけを作る
+## Work settings
 
-## 出力
+The "Work" tab of the novel panel edits the `novel.json` nearest to the manuscript. Changes are saved right away and take effect in the preview (if there is no `novel.json` yet, you can create one from the tab). When you open `novel.json` (also with the command "Open Work Settings", or by right-clicking `novel.json` in the Explorer), the same form opens as a page of its own. The form edits the work information such as the title and the author, the part boundaries, the outputs (`"outputs"`) and the fields of the English outputs, and the changes go straight into `novel.json`. To edit the JSON as it is, use "Open as Text".
 
-「novel.json の出力を作る」（コマンドパレット・エディタのタイトルバーの「…」・エクスプローラーで `novel.json` を右クリック）で、`novel.json` の `"outputs"` に書いた出力を選んで作る。`novel build` と同じ処理で、出力ごとの設定もそのまま効く。形式は pdf / pdf-en / novel-pdf / epub / rtf / rtf-en / docx / split / merge。
+- **Manuscript**: choose from the directory of `novel.json` and the directories under it that contain `.txt` files (the same for the work, the English outputs and each output)
+- **Part boundaries**: turning on "Divide into parts" lists the manuscript files; check the files that start a new part (written to `"parts"`). Chapters are numbered "part-chapter" as in the PDF ("part" when a part has one chapter), and the preview and the outline use the same numbers. A work has one set of part boundaries, which applies to every output
+- **Outputs**: each output shows its format and only the fields that apply to that format. pdf and rtf have a language (Japanese / English; English makes them pdf-en / rtf-en). "Build" makes just that output
 
-- pdf はその場で抜き出すページ（`--pages`）と先頭から組むファイル数（`--limit`）、split / merge は想定読者（`--target`）、merge はルビの括弧表記（`--ruby-parens`）を聞く
-- 出力先は設定 `novelPreview.outDir`（ワークスペースのフォルダから。既定は `out`）
-- docx は縦書きの Word 文書。用紙・余白・字数×行数はページ設定のレイアウトのまま Word の「ページ設定」に入るので、Word で開いても同じ字詰めになる。表紙・梗概にはページ番号を振らず、本文の1ページ目から振る
-- PDF・RTF・docx は出力後に開く。設定 `novelPreview.openAfterExport` を false にするか、環境変数 `AUTO_OPEN=0` で開かない
-- novel-pdf は Ghostscript（`gs`）、epub は `zip` を使う
+## Outputs
 
-「現在のレイアウトでPDFを出力」は、プレビューで見ているレイアウトのまま確かめるための PDF を `out/preview/` に出す。
+"Build the Outputs of novel.json" (Command Palette, "…" in the editor title bar, or right-click `novel.json` in the Explorer) lets you choose from the outputs in `"outputs"` of `novel.json` and makes them. It does the same as `novel build`, and the settings of each output apply as they are. The formats are pdf / pdf-en / novel-pdf / epub / rtf / rtf-en / docx / split / merge.
 
-プレビューのツールバーの「出力」を押すと、作るものをメニューから選べる。「現在のレイアウトでPDF」と、原稿から一番近い `novel.json` の `"outputs"` の出力（2つ以上あれば「すべての出力」も）が並ぶ。
+- pdf asks for pages to extract (`--pages`) and the number of files to typeset from the start (`--limit`), split / merge ask for the target readers (`--target`), and merge asks whether to write ruby in parentheses (`--ruby-parens`)
+- Outputs are written to the setting `novelPreview.outDir` (relative to the workspace folder; `out` by default)
+- docx is a vertical Word document. The paper, margins and characters × lines of the layout go into Word's Page Setup, so the text fits the same grid when opened in Word. The cover and synopsis have no page numbers, and numbering starts on the first page of the body
+- PDFs, RTFs and docx files are opened after export. Set `novelPreview.openAfterExport` to false, or the environment variable `AUTO_OPEN=0`, to not open them
+- novel-pdf uses Ghostscript (`gs`), and epub uses `zip`
 
-## PDF との差
+"Export a PDF in the Current Layout" writes a PDF to `out/preview/` in the layout you see in the preview, for checking.
 
-プレビューは Chromium の段組みでページを割る近似で、PDF とは数ページ単位でずれることがある。提出前の確認は PDF を出力して行う。
+"Export" on the preview toolbar lets you choose what to make from a menu: "PDF in the Current Layout" and the outputs in `"outputs"` of the `novel.json` nearest to the manuscript ("All Outputs" too, if there are two or more).
+
+## Differences from the PDF
+
+The preview approximates page breaks with Chromium's multi-column layout, so it can be off from the PDF by a few pages. Export a PDF to check before you submit.
