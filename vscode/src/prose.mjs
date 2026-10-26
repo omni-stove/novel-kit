@@ -39,8 +39,14 @@ const LONG_SENTENCE_CHARS = 80;
 /** 同じ種類の文末がこの数以上続いたら「連続」として拾う */
 const RUN_MIN = 3;
 
-/** 同じ語がこの文数の範囲に2回以上出たら「近くの繰り返し」として拾う */
+/** 同じ語が前に出た文からこの文数の範囲に続けて出たら、ひと続きの繰り返しとして数える */
 const REPEAT_WINDOW = 3;
+
+/**
+ * ひと続きの繰り返しをこの回数以上で拾う。1つの文の中なら2回で拾う。
+ * 2回でも拾うと、隣の文で同じ名詞を受け直すような普通の書き方まで並んで、くどい箇所が埋もれる
+ */
+const REPEAT_MIN = 3;
 
 /**
  * lindera-wasm の形態素解析器を作る。wasm: lindera_wasm_bg.wasm のパス、dictDir: IPA 辞書のディレクトリ。
@@ -116,15 +122,31 @@ const COMMON_WORDS = new Set([
   'どこ',
 ]);
 const CONTENT_POS = ['名詞', '動詞', '形容詞', '副詞'];
-const FUNCTION_SUBTYPES = ['非自立', '接尾', '数', '特殊'];
+// 代名詞（私・誰・彼女…）と固有名詞は言い換えの先なので、繰り返しても直しようがない
+const FUNCTION_SUBTYPES = ['非自立', '接尾', '数', '特殊', '代名詞', '固有名詞'];
 
 /** 繰り返しを見る語（名詞・動詞・形容詞・副詞）なら、その基本形を返す。ほかは null */
 function contentWord(token) {
   if (!CONTENT_POS.includes(pos(token)) || FUNCTION_SUBTYPES.includes(token.details[1])) return null;
   // 未知語は基本形が * になる
-  const base = baseForm(token) && baseForm(token) !== '*' ? baseForm(token) : token.surface;
+  const unknown = !baseForm(token) || baseForm(token) === '*';
+  const base = unknown ? token.surface : baseForm(token);
+  // 辞書に無いカタカナ語は、作品の中で作った人名・地名がほとんど
+  if (unknown && /^[\p{scx=Katakana}ー]+$/u.test(base)) return null;
   if (!/\p{L}/u.test(base) || COMMON_WORDS.has(base)) return null;
   return base;
+}
+
+/** text の中で names のどれかに当たる範囲 [start, end]。lindera の語の byteStart・byteEnd と比べるので UTF-8 のバイト位置で返す */
+function nameRanges(text, names) {
+  const ranges = [];
+  for (const name of names) {
+    for (let i = text.indexOf(name); i !== -1; i = text.indexOf(name, i + name.length)) {
+      const start = Buffer.byteLength(text.slice(0, i));
+      ranges.push([start, start + Buffer.byteLength(name)]);
+    }
+  }
+  return ranges;
 }
 
 const CLOSE = { '「': '」', '『': '』', '（': '）', '(': ')', '〈': '〉', '《': '》', '【': '】', '［': '］' };
@@ -153,19 +175,21 @@ const isDialogueLine = (line) => /^[「『]/.test(line);
 
 /**
  * 原稿1ファイル分の行から、文章の傾向を数える。tokenizer は createTokenizer で作ったもの。
+ * names は作中の名前（novel.json の names）で、繰り返しとして数えない。
  * メタ行・視点行【】・区切りの行は数えない。
  * 返り値:
  *   sentences: 地の文の文 { line（元の行番号。0始まり）, text, length, ending（ENDINGS の key） }
  *   narrationChars / dialogueChars: 地の文・台詞の字数（台詞は 「 か 『 で始まる行）
  *   endings: 文末の種類ごとの文の数
  *   runs: 同じ種類の文末が RUN_MIN 文以上続いたところ { line, ending, count }。台詞と区切りで数え直す
- *   repeats: 同じ語（基本形）が、前に出た文から REPEAT_WINDOW 文の範囲に続けて出たところ
- *     { word, line（最初に出た行）, count（出た回数）, sentences（出た文） }。出た順。台詞と区切りで数え直す
+ *   repeats: 同じ語（基本形）が、前に出た文から REPEAT_WINDOW 文の範囲に続けて REPEAT_MIN 回以上出たところと、
+ *     1つの文に2回以上出たところ { word, line（最初に出た行）, count（出た回数）, sentences（出た文） }。
+ *     出た順。台詞と区切りで数え直す。代名詞・固有名詞・names と、辞書に無いカタカナ語（作中の名前）は数えない
  *   longSentences: LONG_SENTENCE_CHARS 字を超える文（長い順）
  *   datta: 「だった」で終わる文
  *   similes: 「ような・ように・みたい」を含む文
  */
-export function analyzeProse(lines, tokenizer) {
+export function analyzeProse(lines, tokenizer, { names = [] } = {}) {
   const { lines: body, indices } = getBodyLines(lines);
   const sentences = [];
   const runs = [];
@@ -176,7 +200,7 @@ export function analyzeProse(lines, tokenizer) {
   /** 語ごとの、いま続いている繰り返し。first・last は最初と最後に出た文の番号 */
   let open = new Map();
   const closeRepeat = (repeat) => {
-    if (repeat.count >= 2) repeats.push(repeat);
+    if (repeat.count >= REPEAT_MIN || (repeat.count >= 2 && repeat.sentences.length === 1)) repeats.push(repeat);
   };
   const endRun = () => {
     if (run && run.count >= RUN_MIN) runs.push(run);
@@ -208,7 +232,12 @@ export function analyzeProse(lines, tokenizer) {
       const ending = classifyEnding(tokens);
       const sentence = { line: indices[i], text: s, length: [...s].length, ending };
       const index = sentences.push(sentence) - 1;
-      for (const word of tokens.map(contentWord).filter(Boolean)) {
+      // 辞書が名前を1字ずつの語に分けることがあるので、語の基本形ではなく原文の位置で名前を除く
+      const ranges = nameRanges(s, names);
+      const outsideNames = tokens.filter(
+        (tk) => !ranges.some(([start, end]) => tk.byteStart < end && tk.byteEnd > start),
+      );
+      for (const word of outsideNames.map(contentWord).filter(Boolean)) {
         const repeat = open.get(word);
         if (repeat && index - repeat.last < REPEAT_WINDOW) {
           repeat.count++;
@@ -283,7 +312,7 @@ export function proseReport(r) {
         })),
       },
       {
-        title: t('Same word nearby (within {0} sentences)', REPEAT_WINDOW),
+        title: t('Same word nearby ({0}+ times within {1} sentences, or twice in one)', REPEAT_MIN, REPEAT_WINDOW),
         items: r.repeats.map((repeat) => ({
           line: repeat.line,
           text: `「${repeat.word}」×${repeat.count}`,
@@ -387,9 +416,9 @@ if (import.meta.vitest) {
       expect(r.runs).toEqual([{ line: 0, ending: 'past', count: 4 }]);
     });
 
-    test('同じ語が REPEAT_WINDOW 文の範囲に続けて出たところを、基本形でまとめて拾う。離れて出た語は拾わない', () => {
+    test('同じ語が REPEAT_WINDOW 文の範囲に続けて REPEAT_MIN 回出たところを、基本形でまとめて拾う。離れて出た語は拾わない', () => {
       const r = analyzeProse(
-        ['　彼は扉を見た。窓は暗い。', '　空は青い。扉を見ている。', '　海を見る。山を見る。'],
+        ['　扉を見た。窓は暗い。', '　空は青い。扉を見ている。', '　海を見る。山を見る。'],
         tokenizer,
       );
       expect(r.repeats.map(({ word, line, count, sentences }) => [word, line, count, sentences.length])).toEqual([
@@ -397,16 +426,37 @@ if (import.meta.vitest) {
       ]);
     });
 
+    test('固有名詞と、辞書に無いカタカナ語は拾わない', () => {
+      const r = analyzeProse(['　オスカーはオスカーを、ザネリはザネリを、田中は田中を呼び、呼んだ。'], tokenizer);
+      expect(r.repeats.map((repeat) => repeat.word)).toEqual(['呼ぶ']);
+    });
+
+    test('names に書いた名前は、辞書が分けてしまう名前でも拾わない', () => {
+      const r = analyzeProse(['　鷹宮は鷹宮を、エールはエールを呼ぶ。'], tokenizer, { names: ['鷹宮', 'エール'] });
+      expect(r.repeats).toEqual([]);
+      expect(analyzeProse(['　エールはエールを呼ぶ。'], tokenizer).repeats.map((repeat) => repeat.word)).toEqual([
+        'エール',
+      ]);
+    });
+
+    test('別の文に2回だけ出た語と、代名詞は拾わない', () => {
+      const r = analyzeProse(['　扉が開く。扉が閉じる。', '　私は誰かが私を呼ぶ声を聞いた。'], tokenizer);
+      expect(r.repeats).toEqual([]);
+    });
+
     test('同じ文の中の繰り返しも拾い、する・いる・こと などの語は拾わない', () => {
-      const r = analyzeProse(['　音がしていることにした。', '　雨の音、雨の匂い。'], tokenizer);
+      const r = analyzeProse(['　音がしていることにした。音がした。', '　雨の音、雨の匂い。'], tokenizer);
       expect(r.repeats.map(({ word, count, sentences }) => [word, count, sentences.length])).toEqual([
-        ['音', 2, 2],
+        ['音', 3, 3],
         ['雨', 2, 1],
       ]);
     });
 
     test('近くの繰り返しは台詞と区切りで数え直す', () => {
-      const r = analyzeProse(['　扉が開く。', '「誰だ」', '　扉が閉じる。', '', '*', '', '　扉が鳴る。'], tokenizer);
+      const r = analyzeProse(
+        ['　扉が開く。扉が軋む。', '「誰だ」', '　扉が閉じる。', '', '*', '', '　扉が鳴る。扉が揺れる。'],
+        tokenizer,
+      );
       expect(r.repeats).toEqual([]);
     });
 
@@ -457,7 +507,7 @@ if (import.meta.vitest) {
         ]);
         expect(ja.lists.map((l) => l.title)).toEqual([
           '同じ文末の連続（3文以上）',
-          '近くの同じ語（3文以内）',
+          '近くの同じ語（3文以内に3回以上か、1文に2回）',
           '長い文（80字超）',
           '〜だった。',
           '〜ような・ように・みたい',

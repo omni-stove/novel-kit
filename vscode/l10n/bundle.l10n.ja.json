@@ -173,7 +173,7 @@
   "Other": "その他",
   "Line {0}": "{0}行",
   "Same ending in a row ({0}+ sentences)": "同じ文末の連続（{0}文以上）",
-  "Same word nearby (within {0} sentences)": "近くの同じ語（{0}文以内）",
+  "Same word nearby ({0}+ times within {1} sentences, or twice in one)": "近くの同じ語（{1}文以内に{0}回以上か、1文に2回）",
   "Long sentences (over {0} chars)": "長い文（{0}字超）",
   "{0} chars · {1}": "{0}字・{1}",
   "Ending in 〜だった。": "〜だった。",
