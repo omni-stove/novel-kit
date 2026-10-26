@@ -128,8 +128,11 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
       input = h(
         'select',
         { dataset, title },
-        h('option', { value: '', textContent: t('Default') }),
-        field.options.map((o) => h('option', { value: o, textContent: o })),
+        h('option', {
+          value: '',
+          textContent: field.trims ? t('Default ({0})', field.trims[field.default].label) : t('Default'),
+        }),
+        field.options.map((o) => h('option', { value: o, textContent: field.trims?.[o]?.label ?? o })),
       );
       input.value = typeof value === 'string' ? value : '';
       input.addEventListener('change', () => write(input.value || undefined));
@@ -207,10 +210,69 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
       );
     return h(
       'label',
-      { className: `field field-${field.kind}` },
+      { className: `field field-${field.kind}${field.trims ? ' field-trim' : ''}` },
       h('span', { textContent: field.label, title }),
       input,
       nullToggle,
+    );
+  }
+
+  /** SVG の要素を作る。attrs は属性 */
+  function svg(tag, attrs = {}, ...children) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
+    el.append(...children);
+    return el;
+  }
+
+  /**
+   * novel-pdf の判型 trim（work-settings.mjs の describeTrims）の見開きの図と寸法。
+   * 用紙・版面と、行ごとに字数ぶんのマス目を mm の座標で描く。縦書きなので行は右のページの右端から並ぶ
+   */
+  function trimSpread(trim) {
+    const { width, height, margin, chars, lines, fontSizePt, linePitchMm } = trim;
+    const fontMm = (fontSizePt * 25.4) / 72;
+    const page = (x0) => {
+      const columns = Array.from(
+        { length: lines },
+        (_, i) => x0 + width - margin.side - (i + 1) * linePitchMm + (linePitchMm - fontMm) / 2,
+      );
+      const cells = columns
+        .flatMap((x) => Array.from({ length: chars - 1 }, (_, j) => `M${x} ${margin.top + (j + 1) * fontMm}h${fontMm}`))
+        .join('');
+      return svg(
+        'g',
+        {},
+        svg('rect', { class: 'trim-paper', x: x0, y: 0, width, height }),
+        svg('path', { class: 'trim-cells', d: cells }),
+        ...columns.map((x) =>
+          svg('rect', { class: 'trim-line', x, y: margin.top, width: fontMm, height: chars * fontMm }),
+        ),
+      );
+    };
+    return h(
+      'figure',
+      { className: 'trim-spread' },
+      svg(
+        'svg',
+        {
+          viewBox: `-1 -1 ${width * 2 + 2} ${height + 2}`,
+          role: 'img',
+          'aria-label': t('Two-page spread of novel-pdf at this trim size'),
+        },
+        page(0),
+        page(width),
+      ),
+      h('figcaption', {
+        textContent: `${trim.caption}　${t(
+          '{0}pt type, {1}mm leading, margins: top {2}, bottom {3}, sides {4}mm',
+          fontSizePt,
+          linePitchMm.toFixed(2),
+          margin.top,
+          margin.bottom,
+          margin.side,
+        )}`,
+      }),
     );
   }
 
@@ -517,7 +579,7 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
           `output.${name}.out`,
           outputs.defaultOut[name] ?? t('(set by writing id or title)'),
         ),
-        (known ?? []).map((f) =>
+        (known ?? []).flatMap((f) => [
           fieldInput(
             f,
             output[f.key],
@@ -525,7 +587,8 @@ function createWorkSettingsForm(root, post, { scroller = document.scrollingEleme
             `output.${name}.${f.key}`,
             inheritedValue(format, f.key),
           ),
-        ),
+          f.trims && trimSpread(f.trims[output[f.key]] ?? f.trims[f.default]),
+        ]),
       ),
       unused.length > 0 &&
         h('p', {

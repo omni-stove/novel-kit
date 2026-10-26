@@ -196,3 +196,47 @@
 .work-settings .output-add {
   padding-top: 10px;
 }
+
+/* novel-pdf の判型の見開きの図（settings.js の trimSpread）。座標は mm なので、線の太さは縮尺によらず px で決める */
+/* 選択肢の「四六判・文芸の単行本」が欄の幅で切れないよう、判型の欄は図と同じく1行を使う */
+.work-settings .field-trim {
+  grid-column: 1 / -1;
+  grid-template-columns: 9em auto;
+  justify-content: start;
+}
+
+.work-settings .trim-spread {
+  grid-column: 1 / -1;
+  margin: 2px 0 6px;
+}
+
+.work-settings .trim-spread svg {
+  display: block;
+  height: 240px;
+  max-width: 100%;
+}
+
+.work-settings .trim-spread :is(rect, path) {
+  vector-effect: non-scaling-stroke;
+  stroke: currentColor;
+  stroke-width: 1px;
+}
+
+.work-settings .trim-paper {
+  fill: var(--vscode-editor-background);
+  stroke-opacity: 0.6;
+}
+
+.work-settings .trim-line {
+  fill: none;
+  stroke-opacity: 0.8;
+}
+
+.work-settings .trim-cells {
+  stroke-opacity: 0.3;
+}
+
+.work-settings .trim-spread figcaption {
+  margin-top: 4px;
+  color: var(--vscode-descriptionForeground);
+}

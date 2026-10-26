@@ -319,8 +319,8 @@
           "description": "この出力だけの想定読者（split / merge）"
         },
         "size": {
-          "enum": ["a6", "b6", "a5"],
-          "description": "novel-pdf の判型（既定は a6）"
+          "enum": ["a6", "shinsho", "shiroku", "b6", "a5"],
+          "description": "novel-pdf の判型と、その判型で出る本の形式。判型ごとに字数×行数が決まっている（a6: A6・文庫本 40字×17行、shinsho: 新書判・新書 42字×16行、shiroku: 四六判・文芸の単行本 42字×18行、b6: B6・ソフトカバーの単行本 42字×17行、a5: A5・同人誌・大判の本 45字×20行。既定は a6）"
         },
         "dark": {
           "type": "boolean",

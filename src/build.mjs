@@ -38,7 +38,7 @@
  *              pageBreak（chapterBreak と同じ）, synopsis（false で梗概を入れない）,
  *              synopsisOnTitle, blankAfterHeading, review
  *   pdf-en     英語のペーパーバック風 PDF。recto, smartQuotes（false でカーリー引用符にしない）。判型は英語のレイアウトの用紙から選ぶ
- *   novel-pdf  文庫本見開きの縦書き PDF。size（"a6" / "b6" / "a5"）, dark, blankAfterHeading
+ *   novel-pdf  文庫本見開きの縦書き PDF。size（"a6" / "shinsho" / "shiroku" / "b6" / "a5"。src/layout.mjs の TRIM_SIZES）, dark, blankAfterHeading
  *   epub       EPUB。縦書きか横書きかはレイアウトの writingMode
  *   rtf        日本語原稿の RTF。rubyParens, chapterBreak, contact
  *   rtf-en     英語投稿用（Shunn 形式）の RTF。rubyParens, chapterBreak, contact
