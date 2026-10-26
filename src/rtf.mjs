@@ -40,6 +40,8 @@
  *   《《text》》     傍点（\accdot）
  *   *text*           イタリック（英語原稿用）
  *   <<text>>         縦書き用の横倒し指定。RTFは横書きなので中身のみ出力
+ *   青空文庫の注記   傍点・太字・斜体は上と同じ書式、傍線は下線（種類ごとに \ul・\uldb など）、
+ *                    左ルビは親文字の下に付けるEQフィールド（--ruby-parensで括弧表記）
  *   * / * * *        場面区切り。Shunn形式では #、--jaでは ＊（中央寄せか --scene-break-indent の字下げ。記号は --scene-break で変えられる）
  *   ◇◇◇ など         記号だけの行。--jaでは書いた記号のまま場面区切りと同じ位置（Shunn形式では # の場面区切り）
  */
@@ -127,26 +129,42 @@ export function rtfEscapeText(text) {
   return out;
 }
 
-/** WordのEQフィールドによるルビ。フィールド非対応ソフトでは fldrslt の親文字が表示される */
-export function rubyField(base, ruby) {
+/**
+ * WordのEQフィールドによるルビ。left なら親文字の下（縦書きでは左）に付ける。
+ * フィールド非対応ソフトでは fldrslt の親文字が表示される
+ */
+export function rubyField(base, ruby, { left = false } = {}) {
   const b = rtfEscapeText(base);
   const r = rtfEscapeText(ruby);
-  return `{\\field{\\*\\fldinst EQ \\\\* jc2 \\\\* "Font:MS Mincho" \\\\* hps${RUBY_HPS} \\\\o\\\\ad(\\\\s\\\\up ${RUBY_UP}(${r}),${b})}{\\fldrslt ${b}}}`;
+  const shift = left ? `\\\\do ${RUBY_UP}` : `\\\\up ${RUBY_UP}`;
+  return `{\\field{\\*\\fldinst EQ \\\\* jc2 \\\\* "Font:MS Mincho" \\\\* hps${RUBY_HPS} \\\\o\\\\ad(\\\\s${shift}(${r}),${b})}{\\fldrslt ${b}}}`;
 }
+
+/** 傍線の種類ごとの RTF の下線の制御語。鎖線は RTF の一点鎖線にする */
+const SIDELINE_RTF = { solid: '\\ul', double: '\\uldb', chain: '\\uldashd', dashed: '\\uldash', wavy: '\\ulwave' };
 
 export function formatInlineRtf(text, { rubyParens = false } = {}) {
   return tokenizeInlineMarkup(text)
     .map((token) => {
       switch (token.type) {
         case 'emphasis':
-          return `{\\accdot ${rtfEscapeText(token.text)}}`;
+          return `{\\accdot ${rtfEscapeText(stripInlineMarkup(token.text, { rubyParens }))}}`;
         case 'ruby':
           return rubyParens ? rtfEscapeText(`${token.base}（${token.ruby}）`) : rubyField(token.base, token.ruby);
+        case 'leftRuby':
+          return rubyParens
+            ? rtfEscapeText(`${token.base}（${token.ruby}）`)
+            : rubyField(token.base, token.ruby, { left: true });
         case 'italic':
-          return `{\\i ${rtfEscapeText(token.text)}}`;
+          return `{\\i ${formatInlineRtf(token.text, { rubyParens })}}`;
         case 'bold':
-          return `{\\b ${rtfEscapeText(token.text)}}`;
+          return `{\\b ${formatInlineRtf(token.text, { rubyParens })}}`;
+        case 'sideline':
+          return `{${SIDELINE_RTF[token.style]} ${formatInlineRtf(token.text, { rubyParens })}}`;
         // 横倒し <<text>> はRTFが横書きなので中身のみ
+        case 'sideways':
+        case 'tcy':
+          return rtfEscapeText(stripInlineMarkup(token.text, { rubyParens }));
         default:
           return rtfEscapeText(token.text);
       }
@@ -340,6 +358,7 @@ if (import.meta.vitest) {
   const { writeFileSync: wf, unlinkSync: ul } = await import('node:fs');
   const { join } = await import('node:path');
   const { tmpdir } = await import('node:os');
+  const { normalizeAozoraInline } = await import('./lib/aozora.mjs');
 
   describe('rtfEscapeText', () => {
     test('ASCIIはそのまま、RTF特殊文字はエスケープ', () => {
@@ -373,6 +392,21 @@ if (import.meta.vitest) {
     test('*text* をイタリックに変換', () => {
       expect(formatInlineRtf('*May I stay?*')).toBe('{\\i May I stay?}');
       expect(formatInlineRtf('a *b* c')).toBe('a {\\i b} c');
+    });
+    test('青空文庫の傍線は種類ごとの下線にし、中のルビも組む', () => {
+      const line = (s) => formatInlineRtf(normalizeAozoraInline(s));
+      expect(line('ab［＃「ab」に傍線］')).toBe('{\\ul ab}');
+      expect(line('ab［＃「ab」に二重傍線］')).toBe('{\\uldb ab}');
+      expect(line('ab［＃「ab」に鎖線］')).toBe('{\\uldashd ab}');
+      expect(line('ab［＃「ab」に破線］')).toBe('{\\uldash ab}');
+      expect(line('ab［＃「ab」に波線］')).toBe('{\\ulwave ab}');
+      expect(line('［＃傍線］|漢《かん》［＃傍線終わり］')).toContain('{\\ul {\\field');
+    });
+    test('青空文庫の斜体はイタリック、左ルビは親文字の下に付ける', () => {
+      expect(formatInlineRtf(normalizeAozoraInline('ab［＃「ab」は斜体］'))).toBe('{\\i ab}');
+      const leftRuby = normalizeAozoraInline('漢字［＃「漢字」の左に「かんじ」のルビ］');
+      expect(formatInlineRtf(leftRuby)).toContain(`\\\\s\\\\do ${RUBY_UP}(${rtfEscapeText('かんじ')})`);
+      expect(formatInlineRtf(leftRuby, { rubyParens: true })).toBe(rtfEscapeText('漢字（かんじ）'));
     });
     test('記法がなければエスケープのみ', () => {
       expect(formatInlineRtf('plain text')).toBe('plain text');

@@ -43,7 +43,20 @@
 import { readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { PDFArray, PDFDocument, PDFRawStream, rgb, StandardFonts } from 'pdf-lib';
-import { BOLD_CLOSE, BOLD_OPEN, parseAozoraLine, TCY_CLOSE, TCY_OPEN } from './lib/aozora.mjs';
+import {
+  BOLD_CLOSE,
+  BOLD_OPEN,
+  ITALIC_CLOSE,
+  ITALIC_OPEN,
+  LEFT_RUBY_CLOSE,
+  LEFT_RUBY_OPEN,
+  LEFT_RUBY_SEP,
+  parseAozoraLine,
+  SIDELINE_CLOSE,
+  SIDELINE_OPEN,
+  TCY_CLOSE,
+  TCY_OPEN,
+} from './lib/aozora.mjs';
 import { ARG, buildPdfFromHtml, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
 import { chapterNumberWord } from './lib/english.mjs';
 import { googleFontsLinks } from './lib/html.mjs';
@@ -124,18 +137,26 @@ export function smartQuotes(text) {
     .replace(/'/g, '’');
 }
 
+const LEFT_RUBY_RE = new RegExp(`${LEFT_RUBY_OPEN}(.+?)${LEFT_RUBY_SEP}.+?${LEFT_RUBY_CLOSE}`, 'g');
+const SIDELINE_MARK_RE = new RegExp(`[${Object.values(SIDELINE_OPEN).join('')}${SIDELINE_CLOSE}]`, 'g');
+
 export function formatInline(text, { curly = true } = {}) {
   let t = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   // 引用符の開閉判定が<em>タグを文脈にできるよう、イタリック変換を先に行う
-  t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  t = t
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replaceAll(ITALIC_OPEN, '<em>')
+    .replaceAll(ITALIC_CLOSE, '</em>');
   if (curly) t = smartQuotes(t);
   t = t.replace(/《《(.+?)》》/g, '<span class="emphasis">$1</span>');
-  // 縦中横は横組では意味を持たないので、印だけ外して中身を残す
+  // 縦中横は横組では意味を持たないので、印だけ外して中身を残す。傍線・左ルビはこの組版では組まず、本文だけを残す
   return t
     .replaceAll(BOLD_OPEN, '<strong>')
     .replaceAll(BOLD_CLOSE, '</strong>')
     .replaceAll(TCY_OPEN, '')
-    .replaceAll(TCY_CLOSE, '');
+    .replaceAll(TCY_CLOSE, '')
+    .replace(LEFT_RUBY_RE, '$1')
+    .replace(SIDELINE_MARK_RE, '');
 }
 
 /** 英語原稿のファイルを読み、parseEnglishLines で解釈する */
@@ -906,6 +927,12 @@ if (import.meta.vitest) {
   describe('formatInline（青空文庫の注記）', () => {
     test('太字は strong にし、縦中横は印を外して中身だけ残す', () => {
       expect(formatInline(`${BOLD_OPEN}bold${BOLD_CLOSE} ${TCY_OPEN}12${TCY_CLOSE}`)).toBe('<strong>bold</strong> 12');
+    });
+    test('斜体は em にし、傍線は印を外し、左ルビは親文字だけ残す', () => {
+      const italic = `${ITALIC_OPEN}it${ITALIC_CLOSE}`;
+      const sideline = `${SIDELINE_OPEN.wavy}line${SIDELINE_CLOSE}`;
+      const leftRuby = `${LEFT_RUBY_OPEN}base${LEFT_RUBY_SEP}ruby${LEFT_RUBY_CLOSE}`;
+      expect(formatInline(`${italic} ${sideline} ${leftRuby}`)).toBe('<em>it</em> line base');
     });
   });
 

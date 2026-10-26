@@ -43,7 +43,7 @@ export function resolveTemplatePath(override = null) {
 /** 本文の文字サイズの既定（半ポイント単位。21 = 10.5pt） */
 export const DEFAULT_FONT_HALF_PT = 21;
 
-/** props はランの書式（w:rPr の中身。w:rFonts の後ろに置く。w:b → w:i → w:sz → w:em → w:eastAsianLayout の順に並べる） */
+/** props はランの書式（w:rPr の中身。w:rFonts の後ろに置く。w:b → w:i → w:sz → w:u → w:em → w:eastAsianLayout の順に並べる） */
 const rPr = (props = '') => `<w:rPr><w:rFonts w:hint="eastAsia"/>${props}</w:rPr>`;
 
 function runXml(text, props = '') {
@@ -89,8 +89,13 @@ function rubyRunXml(base, ruby, fontHalfPt, props) {
   );
 }
 
+/** 傍線の種類ごとの w:u の値。鎖線は Word の一点鎖線にする */
+const SIDELINE_UNDERLINE = { solid: 'single', double: 'double', chain: 'dotDash', dashed: 'dash', wavy: 'wave' };
+
 /**
- * 1行の記法（ルビ・傍点・イタリック・太字・縦中横・横倒し）をランの XML にする。
+ * 1行の記法（ルビ・傍点・イタリック・太字・縦中横・横倒し・傍線）をランの XML にする。
+ * 縦書きの Word では下線が字の右に付くので、傍線は下線にする。
+ * 左ルビは Word のルビを親文字の左に置けないため、親文字だけを組む。
  * fontHalfPt: 本文の文字サイズ（半ポイント単位。ルビの大きさを決める）、bold: 行全体を太字にする（青空文庫の見出し）
  */
 export function lineToRunsXml(line, { fontHalfPt = DEFAULT_FONT_HALF_PT, bold = false } = {}) {
@@ -99,15 +104,19 @@ export function lineToRunsXml(line, { fontHalfPt = DEFAULT_FONT_HALF_PT, bold = 
     .map((token) => {
       switch (token.type) {
         case 'emphasis':
-          return runXml(toVerticalText(token.text), `${b}<w:em w:val="dot"/>`);
+          return runXml(toVerticalText(stripInlineMarkup(token.text)), `${b}<w:em w:val="dot"/>`);
         case 'ruby':
           return rubyRunXml(token.base, token.ruby, fontHalfPt, b);
+        case 'leftRuby':
+          return textRunXml(token.base, b);
         case 'italic':
-          return runXml(toVerticalText(token.text), `${b}<w:i/>`);
+          return runXml(toVerticalText(stripInlineMarkup(token.text)), `${b}<w:i/>`);
         case 'bold':
-          return textRunXml(token.text, '<w:b/>');
+          return textRunXml(stripInlineMarkup(token.text), '<w:b/>');
+        case 'sideline':
+          return textRunXml(stripInlineMarkup(token.text), `${b}<w:u w:val="${SIDELINE_UNDERLINE[token.style]}"/>`);
         case 'tcy':
-          return tcyRunXml(toVerticalBase(token.text), b);
+          return tcyRunXml(toVerticalBase(stripInlineMarkup(token.text)), b);
         // Wordの縦書きでは半角英数がそのまま横倒しになるので、全角化せずに出す
         case 'sideways':
           return runXml(toVerticalBase(stripInlineMarkup(token.text)), b);
@@ -402,6 +411,7 @@ export function applyFontSize(stylesXml, halfPt) {
 
 if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
+  const { normalizeAozoraInline } = await import('./aozora.mjs');
 
   const texts = (xml) => [...xml.matchAll(/<w:t [^>]*>(.*?)<\/w:t>/g)].map((m) => m[1]);
 
@@ -433,6 +443,24 @@ if (import.meta.vitest) {
     test('傍点はw:em、イタリックはw:i', () => {
       expect(lineToRunsXml('《《強調》》')).toContain('<w:em w:val="dot"/>');
       expect(lineToRunsXml('*word*')).toContain('<w:i/>');
+    });
+    test('青空文庫の傍線は種類ごとの w:u、斜体は w:i、左ルビは親文字だけにする', () => {
+      const runs = (s) => lineToRunsXml(normalizeAozoraInline(s));
+      expect(runs('運命［＃「運命」に傍線］')).toContain('<w:u w:val="single"/>');
+      expect(runs('運命［＃「運命」に二重傍線］')).toContain('<w:u w:val="double"/>');
+      expect(runs('運命［＃「運命」に鎖線］')).toContain('<w:u w:val="dotDash"/>');
+      expect(runs('運命［＃「運命」に破線］')).toContain('<w:u w:val="dash"/>');
+      expect(runs('運命［＃「運命」に波線］')).toContain('<w:u w:val="wave"/>');
+      expect(texts(runs('［＃傍線］|運命《さだめ》［＃傍線終わり］'))).toEqual(['運命']);
+      expect(runs('ここ［＃「ここ」は斜体］')).toContain('<w:i/>');
+      const leftRuby = runs('英雄［＃「英雄」の左に「ヒーロー」のルビ］');
+      expect(leftRuby).not.toContain('<w:ruby>');
+      expect(texts(leftRuby)).toEqual(['英雄']);
+    });
+    test('見出しの太字の中の傍線は w:b を w:u の前に置く', () => {
+      expect(lineToRunsXml(normalizeAozoraInline('［＃傍線］運命［＃傍線終わり］'), { bold: true })).toContain(
+        '<w:b/><w:u w:val="single"/>',
+      );
     });
     test('横倒しは半角のまま出す', () => {
       expect(texts(lineToRunsXml('<<ABC>>'))).toEqual(['ABC']);
