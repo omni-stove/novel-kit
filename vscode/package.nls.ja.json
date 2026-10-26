@@ -20,6 +20,7 @@
   "command.moveDown": "下へ移動",
   "command.renumberFiles": "ファイル名の番号を振り直す",
   "command.revealLine": "原稿の行を開く",
+  "command.backup": "リモートのリポジトリにバックアップ",
   "configuration.title": "小説プレビュー",
   "config.defaultPreset": "原稿から上へたどっても novel.json が見つからないときに使うプリセット名。",
   "config.presets": "追加のレイアウトプリセット（名前 → 定義）。プレビューの「ページ設定 > プリセットとして保存」でも追加できる。`\"english\": true` のものは英語の原稿用。",
@@ -36,5 +37,9 @@
   "config.prose": "小説パネルの「文章の傾向」で、地の文の文末の分布などを形態素解析で数える。形態素解析の辞書はそのタブを初めて見せたときに読み込み、メモリを約250MB使うので、重いときはオフにする（使っていたメモリは、ウィンドウを再読み込みすると戻る）。オフでも文字数は出す",
   "config.outDir": "「novel.json の出力を作る」の出力先。ワークスペースのフォルダから（絶対パスも可）。`novel build` の `--out-dir` と同じ",
   "config.openAfterExport": "出力した PDF・RTF を開く（「現在のレイアウトでPDFを出力」も同じ。EPUB と split / merge の txt は `novel build` と同じく開かない）。環境変数 `AUTO_OPEN=0` のときは開かない",
-  "view.outline": "小説の目次"
+  "view.outline": "小説の目次",
+  "config.show.backup": "「リモートのリポジトリにバックアップ」のボタン（「小説の目次」とエディタのタイトルバー）とコマンドを出す。Git でバックアップしないならオフにする",
+  "config.show.statusBar": "ステータスバーに原稿の文字数・換算枚数・レイアウトを出す",
+  "config.show.outline": "エクスプローラーに「小説の目次」を出す",
+  "config.show.editorButtons": "`.txt`・`novel.json` のエディタのタイトルバーにボタン（小説プレビューを横に開く・小説プレビューに切り替える・作品の設定を開く）を出す"
 }

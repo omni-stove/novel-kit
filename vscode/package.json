@@ -145,23 +145,29 @@
         "command": "novelPreview.revealLine",
         "title": "%command.revealLine%",
         "category": "%category%"
+      },
+      {
+        "command": "novelPreview.backup",
+        "title": "%command.backup%",
+        "category": "%category%",
+        "icon": "$(cloud-upload)"
       }
     ],
     "menus": {
       "editor/title": [
         {
           "command": "novelPreview.open",
-          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor",
+          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor && config.novelPreview.show.editorButtons",
           "group": "navigation"
         },
         {
           "command": "novelPreview.reopenAsPreview",
-          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor",
+          "when": "resourceExtname == .txt && activeCustomEditorId != novelPreview.editor && config.novelPreview.show.editorButtons",
           "group": "navigation"
         },
         {
           "command": "novelPreview.openWorkSettings",
-          "when": "resourceFilename == novel.json && activeCustomEditorId != novelPreview.workSettings",
+          "when": "resourceFilename == novel.json && activeCustomEditorId != novelPreview.workSettings && config.novelPreview.show.editorButtons",
           "group": "navigation"
         },
         {
@@ -183,6 +189,11 @@
           "command": "novelPreview.exportPdf",
           "when": "resourceExtname == .txt",
           "group": "2_novel@3"
+        },
+        {
+          "command": "novelPreview.backup",
+          "when": "(resourceExtname == .txt || resourceFilename == novel.json) && config.novelPreview.show.backup",
+          "group": "2_novel@4"
         }
       ],
       "editor/title/context": [
@@ -252,6 +263,10 @@
         {
           "command": "novelPreview.showPanel",
           "when": "novelPreview.hasManuscript"
+        },
+        {
+          "command": "novelPreview.backup",
+          "when": "(novelPreview.hasManuscript || workspaceFolderCount > 0) && config.novelPreview.show.backup"
         }
       ],
       "editor/context": [
@@ -276,6 +291,11 @@
           "command": "novelPreview.nextFile",
           "when": "view == novelPreview.outline",
           "group": "navigation@2"
+        },
+        {
+          "command": "novelPreview.backup",
+          "when": "view == novelPreview.outline && config.novelPreview.show.backup",
+          "group": "navigation@3"
         },
         {
           "command": "novelPreview.renumberFiles",
@@ -431,6 +451,26 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.openAfterExport%"
+        },
+        "novelPreview.show.backup": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.show.backup%"
+        },
+        "novelPreview.show.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.show.statusBar%"
+        },
+        "novelPreview.show.outline": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.show.outline%"
+        },
+        "novelPreview.show.editorButtons": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.show.editorButtons%"
         }
       }
     },
@@ -439,7 +479,7 @@
         {
           "id": "novelPreview.outline",
           "name": "%view.outline%",
-          "when": "novelPreview.hasManuscript",
+          "when": "novelPreview.hasManuscript && config.novelPreview.show.outline",
           "icon": "$(book)"
         }
       ]

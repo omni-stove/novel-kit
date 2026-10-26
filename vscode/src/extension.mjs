@@ -24,6 +24,7 @@ import {
 } from '../../src/layout.mjs';
 import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
 import { parsePageSpec } from '../../src/pdf.mjs';
+import { backupMessage, backupPlan } from './backup.mjs';
 import {
   buildDocument,
   buildOutline,
@@ -453,12 +454,6 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
     switch (msg.type) {
       case 'ready':
         return render();
-      case 'layout':
-        return session.doc && setLayout(session.doc, msg.layout);
-      case 'preset': {
-        const preset = session.doc && allPresets(isEnglishManuscript(session.doc))[msg.name];
-        return preset && setLayout(session.doc, preset);
-      }
       case 'view':
         return session.doc && updateSettings(session.doc, { view: msg.view });
       case 'jump':
@@ -986,6 +981,146 @@ async function openWorkSettings(uri) {
   }
   file ??= await workConfigFileFor(uri);
   if (file) await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(file), SETTINGS_VIEW_TYPE);
+}
+
+/** VS Code に組み込みの Git 拡張の API（vscode.git の getAPI(1)）。Git 拡張が無いか無効なら null */
+async function gitApi() {
+  const ext = vscode.extensions.getExtension('vscode.git');
+  if (!ext) return null;
+  const git = ext.isActive ? ext.exports : await ext.activate();
+  if (!git?.enabled) return null;
+  const api = git.getAPI(1);
+  if (api.state !== 'initialized')
+    await new Promise((resolve) => {
+      const listener = api.onDidChangeState((state) => {
+        if (state !== 'initialized') return;
+        listener.dispose();
+        resolve(undefined);
+      });
+    });
+  return api;
+}
+
+/** バックアップの失敗を、Git のログを開くボタン付きで出す */
+async function showBackupError(message) {
+  const picked = await vscode.window.showErrorMessage(message, vscode.l10n.t('Show Log'));
+  if (picked) vscode.commands.executeCommand('git.showOutput');
+}
+
+/**
+ * コミットする名前とメールアドレスが Git に無いとき、聞いてこのリポジトリの設定に書く。
+ * 聞くのをやめたら false
+ */
+async function askCommitIdentity(repo) {
+  const name = await vscode.window.showInputBox({
+    title: vscode.l10n.t('Backup'),
+    prompt: vscode.l10n.t('Enter the name recorded with each backup (a pen name is fine).'),
+    ignoreFocusOut: true,
+  });
+  if (!name) return false;
+  const email = await vscode.window.showInputBox({
+    title: vscode.l10n.t('Backup'),
+    prompt: vscode.l10n.t('Enter the email address recorded with each backup (the one of your GitHub account).'),
+    ignoreFocusOut: true,
+  });
+  if (!email) return false;
+  await repo.setConfig('user.name', name);
+  await repo.setConfig('user.email', email);
+  return true;
+}
+
+/**
+ * 作品のリポジトリの変更をすべてコミットし、リモートへ push する（git を知らなくても押すだけでバックアップできるように）。
+ * 先に未保存のファイルを保存する。リポジトリが無ければ GitHub に公開するか、リモートが無ければブランチを発行するかを Git 拡張に任せる。
+ * 手順は backupPlan、操作は VS Code の Git 拡張の API で、GitHub へのサインインも Git 拡張がする
+ */
+async function backup() {
+  await vscode.workspace.saveAll(false);
+  const api = await gitApi();
+  if (!api) {
+    vscode.window.showErrorMessage(vscode.l10n.t('Turn on the Git extension of VS Code to back up.'));
+    return;
+  }
+  const uri =
+    activeManuscript()?.uri ??
+    (outlineFile ? vscode.Uri.file(outlineFile) : null) ??
+    vscode.workspace.workspaceFolders?.[0]?.uri;
+  const repo = (uri && api.getRepository(uri)) ?? (api.repositories.length === 1 ? api.repositories[0] : null);
+  if (!repo) {
+    const publish = vscode.l10n.t('Publish to GitHub');
+    const picked = await vscode.window.showInformationMessage(
+      vscode.l10n.t('This work is not in a Git repository yet. Publish it to GitHub to back it up?'),
+      publish,
+    );
+    if (picked === publish) vscode.commands.executeCommand('github.publish');
+    return;
+  }
+  if (repo.state.mergeChanges.length > 0) {
+    showBackupError(
+      vscode.l10n.t(
+        'Cannot back up because changes made elsewhere conflict with this copy. Resolve the conflicts in Source Control first.',
+      ),
+    );
+    return;
+  }
+  const branch = repo.state.HEAD?.name ?? null;
+  if (!branch) {
+    showBackupError(vscode.l10n.t('Cannot back up because no branch is checked out.'));
+    return;
+  }
+
+  const done = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: vscode.l10n.t('Backing up…') },
+    async (progress) => {
+      try {
+        // repository.add([]) は git add -A。untracked を数えない設定（git.untrackedChanges: hidden）でも新しい原稿を入れる
+        await repo.add([]);
+        await repo.status();
+        const plan = backupPlan({
+          staged: repo.state.indexChanges.length,
+          remotes: repo.state.remotes.map((r) => r.name),
+          branch,
+          upstream: !!repo.state.HEAD.upstream,
+          ahead: repo.state.HEAD.ahead ?? 0,
+        });
+        if (plan.nothingNew) return 'nothingNew';
+        if (plan.commit) {
+          progress.report({ message: vscode.l10n.t('Saving the changes') });
+          const message = backupMessage(new Date());
+          try {
+            await repo.commit(message);
+          } catch (err) {
+            if (!['NoUserNameConfigured', 'NoUserEmailConfigured'].includes(err.gitErrorCode)) throw err;
+            if (!(await askCommitIdentity(repo))) return 'cancelled';
+            await repo.commit(message);
+          }
+        }
+        if (plan.publish) return 'publish';
+        if (plan.pull) {
+          progress.report({ message: vscode.l10n.t('Fetching the changes made elsewhere') });
+          await repo.pull();
+        }
+        progress.report({ message: vscode.l10n.t('Sending to {0}', plan.push.remote) });
+        await repo.push(plan.push.remote, plan.push.branch, plan.push.setUpstream);
+        return 'pushed';
+      } catch (err) {
+        const detail = String(err.stderr || err.message || err).trim();
+        showBackupError(
+          err.gitErrorCode === 'Conflict'
+            ? vscode.l10n.t(
+                'Changes made elsewhere conflict with this copy. Resolve the conflicts in Source Control, then back up again.',
+              )
+            : vscode.l10n.t('Could not back up. {0}', detail),
+        );
+        return 'failed';
+      }
+    },
+  );
+  if (done === 'nothingNew')
+    vscode.window.showInformationMessage(vscode.l10n.t('Nothing new to back up. The backup is up to date.'));
+  else if (done === 'pushed') vscode.window.showInformationMessage(vscode.l10n.t('Backed up.'));
+  // リモートの作り方（GitHub に公開するか、どのリモートか）は Git 拡張が聞く
+  else if (done === 'publish') vscode.commands.executeCommand('git.publish');
 }
 
 /** 選択範囲に |親《るび》 を振る。選択が無ければカーソルの前後に続く漢字に振る */
@@ -1575,7 +1710,7 @@ function updateStatusBar() {
   const doc = activeManuscript();
   const showing =
     doc && (isManuscript(vscode.window.activeTextEditor?.document) || [...sessions].some((s) => s.panel.active));
-  if (!showing) {
+  if (!showing || !config().get('show.statusBar')) {
     statusBar.hide();
     return;
   }
@@ -1717,6 +1852,7 @@ export function activate(ctx) {
     outlineView.onDidChangeVisibility(refreshOutline),
     vscode.commands.registerCommand('novelPreview.revealLine', revealLine),
     vscode.commands.registerCommand('novelPreview.showPanel', showPanel),
+    vscode.commands.registerCommand('novelPreview.backup', backup),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       updateStatusBar();
       if (!isManuscript(editor?.document)) return;

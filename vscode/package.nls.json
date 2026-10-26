@@ -20,6 +20,7 @@
   "command.moveDown": "Move Down",
   "command.renumberFiles": "Renumber the File Names",
   "command.revealLine": "Open the Manuscript Line",
+  "command.backup": "Back Up to the Remote Repository",
   "configuration.title": "Novel Preview",
   "config.defaultPreset": "Name of the preset to use when no novel.json is found above the manuscript.",
   "config.presets": "Additional layout presets (name → definition). You can also add one with \"Page Setup > Save as Preset\" in the preview. Those with `\"english\": true` are for English manuscripts.",
@@ -36,5 +37,9 @@
   "config.prose": "Count the distribution of sentence endings in the narration and more with morphological analysis, under \"Prose\" in the novel panel. The dictionary is loaded the first time that tab is shown and uses about 250 MB of memory, so turn this off if it is heavy (the memory comes back when you reload the window). Character counts are shown even when this is off",
   "config.outDir": "Where \"Build the Outputs of novel.json\" writes, relative to the workspace folder (an absolute path also works). Same as `--out-dir` of `novel build`",
   "config.openAfterExport": "Open exported PDFs and RTFs (also for \"Export a PDF in the Current Layout\"; like `novel build`, EPUBs and split / merge txt files are not opened). They are not opened when the environment variable `AUTO_OPEN=0` is set",
-  "view.outline": "Novel Outline"
+  "view.outline": "Novel Outline",
+  "config.show.backup": "Show the \"Back Up to the Remote Repository\" button (in the title bars of \"Novel Outline\" and the editor) and command. Turn it off if you do not back up with Git",
+  "config.show.statusBar": "Show the character count, sheets of manuscript paper and layout of the manuscript in the status bar",
+  "config.show.outline": "Show \"Novel Outline\" in the Explorer",
+  "config.show.editorButtons": "Show the buttons in the title bar of the editor of a `.txt` / `novel.json` (open the preview on the side, switch to the preview, open the work settings)"
 }

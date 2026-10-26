@@ -68,6 +68,24 @@ The "Work" tab of the novel panel edits the `novel.json` nearest to the manuscri
 
 "Export" on the preview toolbar lets you choose what to make from a menu: "PDF in the Current Layout" and the outputs in `"outputs"` of the `novel.json` nearest to the manuscript ("All Outputs" too, if there are two or more).
 
+## Backup
+
+The cloud button in the title bar of "Novel Outline" in the Explorer (command "Back Up to the Remote Repository", also in "…" of the editor title bar) saves unsaved manuscripts, records every change in the work's folder with Git, and sends it to the remote repository such as GitHub. One click keeps a copy of the manuscript elsewhere, without knowing git commands.
+
+- It works through the Git extension built into VS Code, which also asks you to sign in to GitHub
+- If the work's folder is not a Git repository yet, it offers "Publish to GitHub"; if there is no remote, the Git extension's "Publish Branch"
+- Each record is named automatically with the date and time it was made, like "2026-10-27 14:05". If Git has no name and email address, it asks for them the first time and sets them in that repository
+- Backups made on another computer are fetched first, then sent. If the same place was changed on both and they conflict, it stops; resolve it in the Source Control view and press it again
+
+## Showing and hiding
+
+Buttons and displays you do not use can be hidden in the settings (search for `novelPreview.show` in Settings). All are on by default.
+
+- `novelPreview.show.backup`: the backup button and command
+- `novelPreview.show.statusBar`: the character count, sheets of manuscript paper and layout in the status bar
+- `novelPreview.show.outline`: "Novel Outline" in the Explorer
+- `novelPreview.show.editorButtons`: the buttons in the title bar of the editor of a `.txt` / `novel.json`
+
 ## Differences from the PDF
 
 The preview approximates page breaks with Chromium's multi-column layout, so it can be off from the PDF by a few pages. Export a PDF to check before you submit.

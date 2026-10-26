@@ -30,11 +30,6 @@ body {
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 }
 
-/* display を指定した要素でも hidden 属性で隠せるようにする（言語で切り替える入力欄など） */
-#toolbar label[hidden] {
-  display: none;
-}
-
 #toolbar label {
   display: inline-flex;
   align-items: center;

@@ -5,6 +5,7 @@ export default defineConfig({
     include: [],
     includeSource: [
       'src/**/*.mjs',
+      'vscode/src/backup.mjs',
       'vscode/src/document.mjs',
       'vscode/src/ipadic.mjs',
       'vscode/src/l10n.mjs',
