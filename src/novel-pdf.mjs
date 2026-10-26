@@ -11,59 +11,29 @@
  *   -o, --output <file>  出力ファイル名（必須）
  *   --title <title>      タイトル
  *   --author <author>    著者名
- *   --a6                 A6文庫本サイズ（デフォルト）
- *   --b6                 B6単行本サイズ
- *   --a5                 A5サイズ
+ *   --a6                 A6・文庫本（40字×17行。デフォルト）
+ *   --shinsho            新書判・新書（42字×16行）
+ *   --shiroku            四六判・文芸の単行本（42字×18行）
+ *   --b6                 B6・ソフトカバーの単行本（42字×17行）
+ *   --a5                 A5・同人誌・大判の本（45字×20行）
  *   --dark               ダークモード（黒背景・白文字）
  *   --open               生成後にプレビューを開く
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
  *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
  *   --scene-break-indent <字数>  区切りの行を中央でなく行頭から字数分下げて置く（既定: 中央）
  *
+ * 判型ごとに字数×行数が決まっていて（src/layout.mjs の TRIM_SIZES）、文字サイズと行送りはそこから決まる。
  * 挿絵の注記（［＃挿絵（images/a.png）入る］）の画像は、1ページに1枚、版面に収まる大きさで組む。
  */
 
 import { execSync } from 'node:child_process';
 import { readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { PDFDocument, PDFName, rgb, StandardFonts } from 'pdf-lib';
+import { TRIM_SIZES, trimMetrics } from './layout.mjs';
 import { ARG, buildPdfFromHtml, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
 import { AOZORA_CSS, googleFontsLinks, imageDataUri, separatorPlacementCss, VERTICAL_GLYPH_CSS } from './lib/html.mjs';
 import { logSections, parseWithSectionNumbering, requireInputFiles, startsNewChapter } from './lib/manuscript.mjs';
 import { escapeHtml, parseTextFile, SCENE_BREAK_MARK } from './lib/text-parser.mjs';
-
-/** 単ページの判型定義（寸法は mm・縦長）。見開きはこの2ページを横に並べて作る */
-export const PAGE_SIZES = {
-  a6: {
-    width: 105,
-    height: 148,
-    name: 'A6文庫本',
-    fontSize: '8.5pt',
-    lineHeight: '1.6',
-    charsPerLine: 43,
-    linesPerPage: 18,
-    margin: { top: 9, bottom: 9, left: 9, right: 9 },
-  },
-  b6: {
-    width: 128,
-    height: 182,
-    name: 'B6単行本',
-    fontSize: '9pt',
-    lineHeight: '1.6',
-    charsPerLine: 42,
-    linesPerPage: 17,
-    margin: { top: 13, bottom: 13, left: 13, right: 13 },
-  },
-  a5: {
-    width: 148,
-    height: 210,
-    name: 'A5',
-    fontSize: '9.5pt',
-    lineHeight: '1.65',
-    charsPerLine: 44,
-    linesPerPage: 20,
-    margin: { top: 15, bottom: 15, left: 15, right: 15 },
-  },
-};
 
 function mmToPt(mm) {
   return (mm * 72) / 25.4;
@@ -76,9 +46,7 @@ export function parseArgs(argv) {
       ARG.output,
       ARG.title,
       ARG.author,
-      { key: 'pageSize', flags: ['--a6'], value: 'a6' },
-      { key: 'pageSize', flags: ['--b6'], value: 'b6' },
-      { key: 'pageSize', flags: ['--a5'], value: 'a5' },
+      ...Object.keys(TRIM_SIZES).map((key) => ({ key: 'pageSize', flags: [`--${key}`], value: key })),
       { key: 'dark', flags: ['--dark'] },
       ARG.open,
       { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
@@ -90,7 +58,7 @@ export function parseArgs(argv) {
 }
 
 function generateHtml(sections, size, options) {
-  const m = size.margin;
+  const m = { top: size.margin.top, bottom: size.margin.bottom, left: size.margin.side, right: size.margin.side };
 
   const sectionHtmls = sections.map((s, i) => {
     const needsPageBreak = startsNewChapter(sections, i);
@@ -131,7 +99,7 @@ ${
 }
     body {
       font-family: "Noto Serif JP", "游明朝", "Yu Mincho", "Hiragino Mincho Pro", serif;
-      font-size: ${size.fontSize};
+      font-size: ${size.fontSizePt}pt;
       line-height: ${size.lineHeight};
       writing-mode: vertical-rl;
       text-orientation: upright;
@@ -323,9 +291,9 @@ export async function main(argv = process.argv.slice(2)) {
 
   requireOutput(args, 'output.pdf');
 
-  const size = PAGE_SIZES[args.pageSize];
-  console.log(`判型: ${size.name} (${size.width}×${size.height}mm) 見開き`);
-  console.log(`目安: ${size.charsPerLine}字×${size.linesPerPage}行/頁\n`);
+  const size = trimMetrics(args.pageSize);
+  console.log(`判型: ${size.name}・${size.use} (${size.width}×${size.height}mm) 見開き`);
+  console.log(`${size.chars}字×${size.lines}行/頁・文字 ${size.fontSizePt}pt\n`);
 
   const inputFiles = requireInputFiles(args.files);
 
@@ -404,11 +372,10 @@ if (import.meta.vitest) {
         files: ['a.txt', 'dir/'],
       });
     });
-    test('判型フラグで PAGE_SIZES のキーを選ぶ', () => {
-      expect(parseArgs(['--b6']).pageSize).toBe('b6');
+    test('判型フラグで TRIM_SIZES のキーを選ぶ', () => {
+      expect(parseArgs(['--shiroku']).pageSize).toBe('shiroku');
       expect(parseArgs(['--a5']).pageSize).toBe('a5');
       expect(parseArgs(['--a5', '--a6']).pageSize).toBe('a6');
-      for (const key of ['a6', 'b6', 'a5']) expect(PAGE_SIZES[key]).toBeDefined();
     });
     test('値付きオプションとフラグを解釈する', () => {
       expect(

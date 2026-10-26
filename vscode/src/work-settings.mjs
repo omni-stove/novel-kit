@@ -7,6 +7,7 @@ import { readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { normalizeOutputs, OUTPUT_FORMATS, outputKeys } from '../../src/build.mjs';
 import { readParts } from '../../src/config.mjs';
+import { TRIM_SIZES, trimMetrics } from '../../src/layout.mjs';
 import {
   CHARACTERS_FILENAME,
   collectInputFiles,
@@ -161,7 +162,9 @@ const fieldDescriptions = () => ({
     smartQuotes: t('false to not turn straight quotes into curly quotes'),
     genre: t('Genre for this output only (split / merge)'),
     target: t('Target readers for this output only (split / merge)'),
-    size: t('Trim size of novel-pdf (default a6)'),
+    size: t(
+      'Trim size of novel-pdf, and the kind of book it is used for. Each trim size has its own characters × lines (a6: A6, bunko paperbacks, 40×17; shinsho: shinsho-ban, shinsho paperbacks, 42×16; shiroku: shiroku-ban, literary hardcovers, 42×18; b6: B6, softcover books, 42×17; a5: A5, doujinshi and large books, 45×20; default a6)',
+    ),
     dark: t('Make novel-pdf white text on black'),
     rubyParens: t('Write ruby in parentheses, as 漢字（かんじ）, in rtf / merge'),
     contact: t('Contact details at the top left of the first page of rtf-en (one line per item)'),
@@ -173,6 +176,43 @@ const fieldDescriptions = () => ({
     ),
   },
 });
+
+/** novel-pdf の判型の名前と、その判型で出る本の形式（日本語は TRIM_SIZES の name と use） */
+const trimNames = () => ({
+  a6: ['A6', t('Bunko paperbacks')],
+  shinsho: [t('Shinsho-ban'), t('Shinsho paperbacks')],
+  shiroku: [t('Shiroku-ban'), t('Literary hardcovers')],
+  b6: ['B6', t('Softcover books')],
+  a5: ['A5', t('Doujinshi and large books')],
+});
+
+/**
+ * novel-pdf の判型 → 選択肢に出す名前（label: 判型と本の形式）、見開きの図の説明（caption: それに寸法と字数×行数）と、
+ * 図に描く寸法（trimMetrics）。
+ * 判型を書かないときは src/novel-pdf.mjs の既定の a6 で組む
+ */
+function describeTrims() {
+  return {
+    default: 'a6',
+    trims: Object.fromEntries(
+      Object.keys(TRIM_SIZES).map((key) => {
+        const m = trimMetrics(key);
+        const [name, use] = trimNames()[key];
+        const label = t('{0} · {1}', name, use);
+        const caption = t(
+          '{0} · {1} ({2}×{3}mm, {4} chars × {5} lines)',
+          name,
+          use,
+          m.width,
+          m.height,
+          m.chars,
+          m.lines,
+        );
+        return [key, { ...m, label, caption }];
+      }),
+    ),
+  };
+}
 
 /** 作品の項目（トップレベル）と、英語の出力の項目（"english" の中）の名前 */
 const WORK_KEYS = ['id', 'title', 'author', 'genre', 'target', 'input', 'sceneBreak', 'sceneBreakIndent'];
@@ -194,6 +234,7 @@ function fieldOf(key, prop, section) {
     description: fieldDescriptions()[section][key] ?? '',
     nullable,
   };
+  if (key === 'size') return { ...base, kind: 'enum', options: prop.enum, ...describeTrims() };
   if (prop.enum) return { ...base, kind: 'enum', options: prop.enum };
   if (types.includes('boolean')) return { ...base, kind: 'boolean' };
   if (types.includes('array')) return { ...base, kind: 'list' };
@@ -329,6 +370,30 @@ if (import.meta.vitest) {
       expect(pdf.title).toMatchObject({ kind: 'string', nullable: true });
       expect(pdf.format).toBeUndefined();
       expect(fields['novel-pdf'].map((f) => f.key)).toContain('size');
+    });
+    test('novel-pdf の判型は TRIM_SIZES のすべてで、名前と見開きの図の寸法が付く', () => {
+      const size = outputFields()['novel-pdf'].find((f) => f.key === 'size');
+      expect(size.options).toEqual(Object.keys(TRIM_SIZES));
+      expect(size.trims[size.default]).toBeDefined();
+      expect(size.trims.a6).toMatchObject({ chars: 40, lines: 17, width: 105, height: 148 });
+      expect(size.trims.a6.label).toBe('A6 · Bunko paperbacks');
+      expect(size.trims.a6.caption).toBe('A6 · Bunko paperbacks (105×148mm, 40 chars × 17 lines)');
+      expect(Object.keys(trimNames())).toEqual(Object.keys(TRIM_SIZES));
+    });
+    test('日本語の判型の名前と本の形式は TRIM_SIZES の name と use', () => {
+      setBundle(JSON.parse(readFileSync(new URL('../l10n/bundle.l10n.ja.json', import.meta.url), 'utf8')));
+      try {
+        expect(trimNames()).toEqual(
+          Object.fromEntries(Object.entries(TRIM_SIZES).map(([key, trim]) => [key, [trim.name, trim.use]])),
+        );
+      } finally {
+        setBundle(undefined);
+      }
+    });
+    test('スキーマの判型の説明の名前・本の形式・字数×行数は TRIM_SIZES と同じ', () => {
+      const { description } = schema.definitions.output.properties.size;
+      for (const [key, trim] of Object.entries(TRIM_SIZES))
+        expect(description).toContain(`${key}: ${trim.name}・${trim.use} ${trim.chars}字×${trim.lines}行`);
     });
     test('出力と作品の項目には、すべて画面に出す名前がある', () => {
       const all = [...Object.values(outputFields()).flat(), ...workFields().work, ...workFields().english];

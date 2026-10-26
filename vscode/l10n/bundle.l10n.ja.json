@@ -272,7 +272,7 @@
   "false to not turn straight quotes into curly quotes": "false でストレート引用符をカーリー引用符にしない",
   "Genre for this output only (split / merge)": "この出力だけのジャンル（split / merge）",
   "Target readers for this output only (split / merge)": "この出力だけの想定読者（split / merge）",
-  "Trim size of novel-pdf (default a6)": "novel-pdf の判型（既定は a6）",
+  "Trim size of novel-pdf, and the kind of book it is used for. Each trim size has its own characters × lines (a6: A6, bunko paperbacks, 40×17; shinsho: shinsho-ban, shinsho paperbacks, 42×16; shiroku: shiroku-ban, literary hardcovers, 42×18; b6: B6, softcover books, 42×17; a5: A5, doujinshi and large books, 45×20; default a6)": "novel-pdf の判型と、その判型で出る本の形式。判型ごとに字数×行数が決まっている（a6: A6・文庫本 40字×17行、shinsho: 新書判・新書 42字×16行、shiroku: 四六判・文芸の単行本 42字×18行、b6: B6・ソフトカバーの単行本 42字×17行、a5: A5・同人誌・大判の本 45字×20行。既定は a6）",
   "Make novel-pdf white text on black": "novel-pdf を黒背景・白文字にする",
   "Write ruby in parentheses, as 漢字（かんじ）, in rtf / merge": "rtf / merge でルビを 漢字（かんじ） の括弧表記にする",
   "Contact details at the top left of the first page of rtf-en (one line per item)": "rtf-en の1ページ目左上に出す連絡先（1要素1行）",
@@ -285,5 +285,15 @@
   "RTF in Shunn format": "Shunn 形式の RTF",
   "Vertical Word document": "縦書きの Word 文書",
   "One txt per chapter": "章ごとの txt",
-  "All in one txt": "1つにまとめた txt"
+  "All in one txt": "1つにまとめた txt",
+  "Shinsho-ban": "新書判",
+  "Shiroku-ban": "四六判",
+  "Bunko paperbacks": "文庫本",
+  "Shinsho paperbacks": "新書",
+  "Literary hardcovers": "文芸の単行本",
+  "Softcover books": "ソフトカバーの単行本",
+  "Doujinshi and large books": "同人誌・大判の本",
+  "{0} · {1} ({2}×{3}mm, {4} chars × {5} lines)": "{0}・{1}（{2}×{3}mm・{4}字×{5}行）",
+  "{0}pt type, {1}mm leading, margins: top {2}, bottom {3}, sides {4}mm": "文字 {0}pt・行送り {1}mm・余白 天{2} 地{3} 左右{4}mm",
+  "Two-page spread of novel-pdf at this trim size": "この判型の novel-pdf の見開き"
 }

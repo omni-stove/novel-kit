@@ -49,19 +49,93 @@ export const DEFAULT_ENGLISH_LAYOUT = {
   fontFamily: '',
 };
 
+/** 1字のマスの大きさ（mm）に入る文字サイズ（pt）。PDF と字面を揃えるため、src/pdf.mjs と同じく 0.1pt 単位に切り捨てる */
+const fontSizeOfCell = (cellMm) => Math.floor((cellMm / MM_PER_PT) * 10) / 10;
+
+/**
+ * novel-pdf の判型。name は判型の名前、use はその判型で出る本の形式。判型ごとに字数×行数を1組に決め、文字サイズと行送りは版面（用紙から余白を除いた枠）を
+ * 字数と行数で割って決める（trimMetrics）。寸法は mm で、縦長の単ページ。
+ * 見開きの左右のページに同じ単ページを使うので、左右の余白は side の1つにする。地はノンブルを置く分を取る
+ */
+export const TRIM_SIZES = {
+  a6: {
+    name: 'A6',
+    use: '文庫本',
+    width: 105,
+    height: 148,
+    chars: 40,
+    lines: 17,
+    margin: { top: 14, bottom: 16, side: 11 },
+  },
+  shinsho: {
+    name: '新書判',
+    use: '新書',
+    width: 105,
+    height: 173,
+    chars: 42,
+    lines: 16,
+    margin: { top: 20, bottom: 20, side: 11 },
+  },
+  shiroku: {
+    name: '四六判',
+    use: '文芸の単行本',
+    width: 127,
+    height: 188,
+    chars: 42,
+    lines: 18,
+    margin: { top: 22, bottom: 22, side: 15 },
+  },
+  b6: {
+    name: 'B6',
+    use: 'ソフトカバーの単行本',
+    width: 128,
+    height: 182,
+    chars: 42,
+    lines: 17,
+    margin: { top: 20, bottom: 20, side: 15 },
+  },
+  a5: {
+    name: 'A5',
+    use: '同人誌・大判の本',
+    width: 148,
+    height: 210,
+    chars: 45,
+    lines: 20,
+    margin: { top: 22, bottom: 22, side: 16 },
+  },
+};
+
+/**
+ * 判型 key の組版寸法。TRIM_SIZES の値に、版面の幅と高さ（areaW / areaH・mm）、文字サイズ（fontSizePt）、
+ * 行送り（linePitchMm と、文字サイズに対する倍率 lineHeight）を足して返す
+ */
+export function trimMetrics(key) {
+  const trim = TRIM_SIZES[key];
+  const { top, bottom, side } = trim.margin;
+  const areaW = trim.width - side * 2;
+  const areaH = trim.height - top - bottom;
+  const cellMm = areaH / trim.chars;
+  const fontSizePt = fontSizeOfCell(cellMm);
+  const lineHeight = areaW / trim.lines / cellMm;
+  return { ...trim, areaW, areaH, fontSizePt, lineHeight, linePitchMm: fontSizePt * MM_PER_PT * lineHeight };
+}
+
+const bunko = TRIM_SIZES.a6;
+
 export const BUILTIN_PRESETS = {
   '標準（30字・行数自動）': DEFAULT_LAYOUT,
   '40字×40行': { ...DEFAULT_LAYOUT, chars: 40, lines: 40 },
   '40字×30行': { ...DEFAULT_LAYOUT, chars: 40, lines: 30 },
   '42字×34行': { ...DEFAULT_LAYOUT, chars: 42, lines: 34 },
   '原稿用紙（20字×20行）': { ...DEFAULT_LAYOUT, chars: 20, lines: 20 },
-  '文庫（A6・40字×17行）': {
+  // novel-pdf の文庫と同じ版面にして、プレビューの行の折り返しを novel-pdf と揃える
+  [`文庫（A6・${bunko.chars}字×${bunko.lines}行）`]: {
     ...DEFAULT_LAYOUT,
     paper: 'A6',
     orientation: 'portrait',
-    margin: { top: 15, right: 12, bottom: 17, left: 12 },
-    chars: 40,
-    lines: 17,
+    margin: { top: bunko.margin.top, right: bunko.margin.side, bottom: bunko.margin.bottom, left: bunko.margin.side },
+    chars: bunko.chars,
+    lines: bunko.lines,
   },
 };
 
@@ -198,8 +272,7 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
   }
 
   const cellMm = availInline / layout.chars;
-  // PDF と字面を揃えるため、src/pdf.mjs と同じく 0.1pt 単位に切り捨てる
-  const fontSizePt = Math.floor((cellMm / MM_PER_PT) * 10) / 10;
+  const fontSizePt = fontSizeOfCell(cellMm);
   const fontSizeMm = fontSizePt * MM_PER_PT;
 
   const lineHeight = layout.lines ? availBlock / layout.lines / cellMm : AUTO_LINE_HEIGHT[layout.writingMode];
@@ -263,6 +336,25 @@ if (import.meta.vitest) {
       const m = computeMetrics({ ...DEFAULT_LAYOUT, writingMode: 'horizontal' });
       expect(m.lineHeight).toBe(1.8);
       expect(m.lines).toBe(Math.floor(m.availBlock / (m.fontSizeMm * 1.8)));
+    });
+  });
+
+  describe('trimMetrics', () => {
+    test('どの判型も、字数×文字サイズが版面の高さに、行数×行送りが版面の幅に収まる', () => {
+      for (const key of Object.keys(TRIM_SIZES)) {
+        const m = trimMetrics(key);
+        expect(m.chars * m.fontSizePt * MM_PER_PT).toBeLessThanOrEqual(m.areaH);
+        expect(m.areaH - m.chars * m.fontSizePt * MM_PER_PT).toBeLessThan(m.chars * 0.1 * MM_PER_PT);
+        expect(m.lines * m.linePitchMm).toBeLessThanOrEqual(m.areaW);
+        expect(m.lineHeight).toBeGreaterThan(1.4);
+      }
+    });
+    test('プレビューの文庫のプリセットは novel-pdf の文庫と同じ文字サイズ・行送り', () => {
+      const preset = computeMetrics(BUILTIN_PRESETS['文庫（A6・40字×17行）']);
+      const trim = trimMetrics('a6');
+      expect([preset.paperW, preset.paperH]).toEqual([trim.width, trim.height]);
+      expect(preset.fontSizePt).toBe(trim.fontSizePt);
+      expect(preset.linePitchMm).toBeCloseTo(trim.linePitchMm, 10);
     });
   });
 
