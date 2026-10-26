@@ -1,7 +1,7 @@
 /**
  * 設定ファイル（novel.json）の探索と読み書き。
  * 日本語のレイアウト（トップレベル）、英語のレイアウト（"english"）、表示範囲・倍率などの表示設定（"view"）と、
- * 作品情報（"id" / "title" / "author" / "genre" / "target" / "input" / "parts"。英語の出力の title / author / input は "english" の中）・
+ * 作品情報（"id" / "title" / "author" / "genre" / "target" / "input" / "parts" / "names"。英語の出力の title / author / input は "english" の中）・
  * 出力の定義（"outputs"。novel build が読む）を持つ。
  * 原稿のあるディレクトリから上へ向かって探し、最初に見つかったもの（＝一番近いもの）を使う。
  * 作品ごと（src/<作品>/story/）にも、上位ディレクトリに置いて複数作品の共通設定にもできる。
@@ -104,6 +104,11 @@ export function readParts(raw) {
   return parts.length > 0 ? parts : null;
 }
 
+/** 作中の名前（"names"）。前後の空白を除いた文字列の配列で、書いていなければ空 */
+export function readNames(raw) {
+  return Array.isArray(raw?.names) ? raw.names.map((n) => String(n).trim()).filter(Boolean) : [];
+}
+
 // 壊れたJSONは例外にする（黙って既定に戻すと、次の保存で中身を上書きしてしまうため）
 export function readSettingsFile(filePath) {
   const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
@@ -114,6 +119,7 @@ export function readSettingsFile(filePath) {
     sceneBreak: readSceneBreak(raw),
     sceneBreakIndent: readSceneBreakIndent(raw),
     parts: readParts(raw),
+    names: readNames(raw),
   };
 }
 
@@ -188,6 +194,7 @@ if (import.meta.vitest) {
           sceneBreak: { ja: null, en: null },
           sceneBreakIndent: null,
           parts: null,
+          names: [],
         });
         writeSettingsFile(file, {
           layout: { chars: 40, lines: 40 },
@@ -235,6 +242,12 @@ if (import.meta.vitest) {
       expect(readParts({ parts: [] })).toBeNull();
       expect(readParts({})).toBeNull();
     });
+
+    test('作中の名前は前後の空白を除いた文字列の配列で読み、無ければ空', () => {
+      expect(readNames({ names: [' ゼック ', '', 'エール'] })).toEqual(['ゼック', 'エール']);
+      expect(readNames({})).toEqual([]);
+    });
+
     test('writeParts は parts だけを書き換え、ほかの項目と並びは残す', () => {
       withTree(({ story }) => {
         const file = join(story, CONFIG_FILENAME);
@@ -270,6 +283,7 @@ if (import.meta.vitest) {
           genre: null,
           input: ['.'],
           parts: null,
+          names: [],
         });
         expect(config.outputs.pdf.out).toBe('out/a.pdf');
         expect(config.layout).toEqual(DEFAULT_LAYOUT);

@@ -89,7 +89,7 @@ function layoutFileFor(doc) {
 let warnedLayoutFile = null;
 
 /**
- * 原稿に効いている設定 { layout, english, view, sceneBreak, sceneBreakIndent, parts }（日本語・英語のレイアウトと表示設定、場面区切りの記号と字下げ、部の境界）。
+ * 原稿に効いている設定 { layout, english, view, sceneBreak, sceneBreakIndent, parts, names }（日本語・英語のレイアウトと表示設定、場面区切りの記号と字下げ、部の境界、作中の名前）。
  * 設定ファイルが無い・読めないときは既定のプリセットと既定の表示設定（読めないときは1度だけ警告を出す）
  */
 function settingsFor(doc) {
@@ -119,6 +119,7 @@ function settingsFor(doc) {
     sceneBreak: { ja: null, en: null },
     sceneBreakIndent: null,
     parts: null,
+    names: [],
   };
 }
 
@@ -128,10 +129,11 @@ const isEnglishManuscript = (doc) => detectLanguageOfLines(splitLines(doc.getTex
 /**
  * 原稿に効く設定。原稿の言語に応じて日本語か英語のレイアウトを返す。
  * 返す値: { layout, view, english: 英語の原稿か, sceneBreak: 場面区切りの記号（null なら既定）,
- *   sceneBreakIndent: 区切りの字下げ（null なら中央。英語の原稿は常に null）, parts: 部の境界（null なら分けない） }
+ *   sceneBreakIndent: 区切りの字下げ（null なら中央。英語の原稿は常に null）, parts: 部の境界（null なら分けない）,
+ *   names: 作中の名前（文章の傾向で繰り返しとして数えない） }
  */
 function resolvedSettingsFor(doc) {
-  const { layout, english, view, sceneBreak, sceneBreakIndent, parts } = settingsFor(doc);
+  const { layout, english, view, sceneBreak, sceneBreakIndent, parts, names } = settingsFor(doc);
   const en = isEnglishManuscript(doc);
   return {
     layout: en ? english : layout,
@@ -140,6 +142,7 @@ function resolvedSettingsFor(doc) {
     sceneBreak: en ? sceneBreak.en : sceneBreak.ja,
     sceneBreakIndent: en ? null : sceneBreakIndent,
     parts,
+    names,
   };
 }
 
@@ -1316,7 +1319,7 @@ function fileStampOf(filePath) {
   }
 }
 
-/** 原稿ごとの、形態素解析をしたときの原稿の版・言語・設定（stamp）と解析結果（report）。プレビューを並べて別々の原稿を見ても解析し直し合わないよう、原稿ごとに持つ */
+/** 原稿ごとの、形態素解析をしたときの原稿の版・言語・設定・作中の名前（stamp）と解析結果（report）。プレビューを並べて別々の原稿を見ても解析し直し合わないよう、原稿ごとに持つ */
 const proseCache = new Map();
 
 /**
@@ -1324,17 +1327,17 @@ const proseCache = new Map();
  * english, report: 文章の傾向（proseReport。英語の原稿か、設定 novelPreview.prose がオフなら null） }
  */
 function proseState(file) {
-  const { layout, english } = resolvedSettingsFor(manuscriptAt(file));
+  const { layout, english, names } = resolvedSettingsFor(manuscriptAt(file));
   const files = listWorkFiles(file);
   const work = files.length > 1 && files.includes(file) ? files : null;
   const enabled = config().get('prose') !== false;
   const metrics = computeMetrics(layout, { english });
   const lines = linesOf(file);
-  // 形態素解析の結果は原稿1ファイルにしか左右されない。他のファイルの編集やレイアウトの変更のたびに解析し直さないため、キーはその原稿の版だけにする
-  const stamp = [english, enabled, fileStampOf(file)].join('\n');
+  // 形態素解析の結果は原稿1ファイルと作中の名前にしか左右されない。他のファイルの編集やレイアウトの変更のたびに解析し直さないため、キーはその原稿の版と名前だけにする
+  const stamp = [english, enabled, fileStampOf(file), ...names].join('\n');
   let cached = proseCache.get(file);
   if (cached?.stamp !== stamp) {
-    cached = { stamp, report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer())) };
+    cached = { stamp, report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer(), { names })) };
     proseCache.set(file, cached);
   }
   return {
