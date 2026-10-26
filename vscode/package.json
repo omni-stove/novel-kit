@@ -193,7 +193,7 @@
         {
           "command": "novelPreview.backup",
           "when": "(resourceExtname == .txt || resourceFilename == novel.json) && config.novelPreview.show.backup",
-          "group": "2_novel@4"
+          "group": "navigation"
         }
       ],
       "editor/title/context": [

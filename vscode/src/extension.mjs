@@ -1045,7 +1045,7 @@ async function backup() {
     activeManuscript()?.uri ??
     (outlineFile ? vscode.Uri.file(outlineFile) : null) ??
     vscode.workspace.workspaceFolders?.[0]?.uri;
-  const repo = (uri && api.getRepository(uri)) ?? (api.repositories.length === 1 ? api.repositories[0] : null);
+  const repo = uri ? api.getRepository(uri) : api.repositories.length === 1 ? api.repositories[0] : null;
   if (!repo) {
     const publish = vscode.l10n.t('Publish to GitHub');
     const picked = await vscode.window.showInformationMessage(
@@ -1100,8 +1100,11 @@ async function backup() {
           progress.report({ message: vscode.l10n.t('Fetching the changes made elsewhere') });
           await repo.pull();
         }
-        progress.report({ message: vscode.l10n.t('Sending to {0}', plan.push.remote) });
-        await repo.push(plan.push.remote, plan.push.branch, plan.push.setUpstream);
+        const upstream = repo.state.HEAD.upstream;
+        progress.report({ message: vscode.l10n.t('Sending to {0}', upstream?.remote ?? plan.push.remote) });
+        // 追跡先が origin/ローカルと同じ名前とは限らないので、あるときは引数なしで追跡先へ push する
+        if (plan.push.setUpstream) await repo.push(plan.push.remote, plan.push.branch, true);
+        else await repo.push();
         return 'pushed';
       } catch (err) {
         const detail = String(err.stderr || err.message || err).trim();
