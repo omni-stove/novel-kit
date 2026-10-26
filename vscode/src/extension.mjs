@@ -1337,7 +1337,10 @@ function proseState(file) {
   const stamp = [english, enabled, fileStampOf(file), ...names].join('\n');
   let cached = proseCache.get(file);
   if (cached?.stamp !== stamp) {
-    cached = { stamp, report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer(), { names })) };
+    cached = {
+      stamp,
+      report: english || !enabled ? null : proseReport(analyzeProse(lines, proseTokenizer(), { names })),
+    };
     proseCache.set(file, cached);
   }
   return {

@@ -234,7 +234,9 @@ export function analyzeProse(lines, tokenizer, { names = [] } = {}) {
       const index = sentences.push(sentence) - 1;
       // 辞書が名前を1字ずつの語に分けることがあるので、語の基本形ではなく原文の位置で名前を除く
       const ranges = nameRanges(s, names);
-      const outsideNames = tokens.filter((tk) => !ranges.some(([start, end]) => tk.byteStart < end && tk.byteEnd > start));
+      const outsideNames = tokens.filter(
+        (tk) => !ranges.some(([start, end]) => tk.byteStart < end && tk.byteEnd > start),
+      );
       for (const word of outsideNames.map(contentWord).filter(Boolean)) {
         const repeat = open.get(word);
         if (repeat && index - repeat.last < REPEAT_WINDOW) {
