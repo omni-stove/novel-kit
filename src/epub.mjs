@@ -15,17 +15,41 @@
  *   --horizontal          横書きモード（デフォルトは縦書き）
  *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
  *   --scene-break-indent <字数>  区切りの行を中央でなく行頭から字数分下げて置く（既定: 中央）
+ *
+ * 挿絵の注記（［＃挿絵（images/a.png）入る］）の画像は OEBPS/images/ に入れ、1ページに1枚で組む。
  */
 
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, extname, join, resolve } from 'node:path';
 import { ARG, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
-import { AOZORA_CSS, separatorPlacementCss } from './lib/html.mjs';
+import { AOZORA_CSS, IMAGE_MEDIA_TYPES, requireImage, separatorPlacementCss } from './lib/html.mjs';
 import { logSections, parseWithSectionNumbering, requireInputFiles, startsNewChapter } from './lib/manuscript.mjs';
 import { escapeXml, parseTextFileForEpub, SCENE_BREAK_MARK } from './lib/text-parser.mjs';
+
+/**
+ * 挿絵の画像を EPUB に入れる名前で登録する。同じ画像は1つにまとめ、別のディレクトリの同名のファイルとぶつからないよう連番で名付ける。
+ * hrefOf(絶対パス) は章の XHTML から見た href を返し、images は manifest と書き出しに使う { id, href, path, mediaType } の配列
+ */
+export function createImageRegistry() {
+  const byPath = new Map();
+  return {
+    images: () => [...byPath.values()],
+    hrefOf(path) {
+      let image = byPath.get(path);
+      if (!image) {
+        requireImage(path);
+        const ext = extname(path).toLowerCase();
+        const id = `image-${String(byPath.size + 1).padStart(3, '0')}`;
+        image = { id, href: `images/${id}${ext}`, path, mediaType: IMAGE_MEDIA_TYPES[ext] };
+        byPath.set(path, image);
+      }
+      return image.href;
+    },
+  };
+}
 
 export function parseArgs(argv) {
   return parseCliArgs(
@@ -169,6 +193,20 @@ div.title-page p.author {
   text-indent: 0;
   margin-top: 2em;
 }
+
+div.illust {
+  page-break-before: always;
+  page-break-after: always;
+  break-before: page;
+  break-after: page;
+  text-align: center;
+  text-indent: 0;
+}
+
+div.illust img {
+  max-width: 100%;
+  max-height: 100vh;
+}
 `;
 }
 
@@ -216,7 +254,7 @@ function generateContainerXml() {
 </container>`;
 }
 
-function generateContentOpf(bookId, title, author, chapters, hasTitle, vertical) {
+function generateContentOpf(bookId, title, author, chapters, hasTitle, vertical, images = []) {
   const direction = vertical ? 'rtl' : 'ltr';
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -237,6 +275,9 @@ function generateContentOpf(bookId, title, author, chapters, hasTitle, vertical)
   }
 
   manifestItems.push('    <item id="toc" href="toc.xhtml" media-type="application/xhtml+xml" properties="nav" />');
+  for (const image of images) {
+    manifestItems.push(`    <item id="${image.id}" href="${image.href}" media-type="${image.mediaType}" />`);
+  }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId" xml:lang="ja" dir="${direction}">
@@ -323,7 +364,12 @@ export async function main(argv = process.argv.slice(2)) {
 
   console.log(`入力ファイル: ${inputFiles.length}件`);
 
-  const sections = parseWithSectionNumbering(inputFiles, parseTextFileForEpub, { sceneBreak: args.sceneBreak });
+  const imageRegistry = createImageRegistry();
+  const sections = parseWithSectionNumbering(inputFiles, parseTextFileForEpub, {
+    sceneBreak: args.sceneBreak,
+    illustSrc: imageRegistry.hrefOf,
+  });
+  const images = imageRegistry.images();
   const totalChars = logSections(sections, inputFiles);
 
   const chapters = groupIntoChapters(
@@ -348,8 +394,10 @@ export async function main(argv = process.argv.slice(2)) {
     writeFileSync(join(oebpsDir, 'style.css'), generateStyleCss(args.vertical, args.sceneBreakIndent));
     writeFileSync(
       join(oebpsDir, 'content.opf'),
-      generateContentOpf(bookId, title, args.author, chapters, hasTitle, args.vertical),
+      generateContentOpf(bookId, title, args.author, chapters, hasTitle, args.vertical, images),
     );
+    if (images.length > 0) mkdirSync(join(oebpsDir, 'images'));
+    for (const image of images) copyFileSync(image.path, join(oebpsDir, image.href));
     writeFileSync(join(oebpsDir, 'toc.xhtml'), generateTocXhtml(chapters, hasTitle));
 
     if (hasTitle) {
@@ -368,6 +416,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`\nEPUB出力: ${args.output}`);
     console.log(`文字数: ${totalChars.toLocaleString()}字`);
     console.log(`章数: ${chapters.length}章`);
+    if (images.length > 0) console.log(`挿絵: ${images.length}枚`);
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -418,6 +467,26 @@ if (import.meta.vitest) {
     test('継ぎ目の記号は指定でき、XMLとしてエスケープする', () => {
       const chapters = groupIntoChapters([section('a'), section('b')], ['010.txt', '020.txt'], '本', '<*>');
       expect(chapters[0].xhtml).toBe('a\n<p class="separator">&lt;*&gt;</p>\nb');
+    });
+  });
+
+  describe('createImageRegistry', () => {
+    test('同じ画像は1つにまとめ、同名の別の画像は連番で分ける', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'epub-test-'));
+      try {
+        for (const sub of ['a', 'b']) {
+          mkdirSync(join(dir, sub));
+          writeFileSync(join(dir, sub, 'fig.PNG'), '');
+        }
+        const registry = createImageRegistry();
+        expect(registry.hrefOf(join(dir, 'a', 'fig.PNG'))).toBe('images/image-001.png');
+        expect(registry.hrefOf(join(dir, 'b', 'fig.PNG'))).toBe('images/image-002.png');
+        expect(registry.hrefOf(join(dir, 'a', 'fig.PNG'))).toBe('images/image-001.png');
+        expect(registry.images().map((image) => image.mediaType)).toEqual(['image/png', 'image/png']);
+        expect(() => registry.hrefOf(join(dir, 'none.png'))).toThrow('挿絵の画像が見つかりません');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 

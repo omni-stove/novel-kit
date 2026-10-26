@@ -167,6 +167,7 @@ export function walkBodyLines(lines, { cols, pageBreakBeforeBody = false, chapte
       needBodyPageBreak = true;
       continue;
     }
+    if (aozora.kind === 'illust') continue;
     if (aozora.kind !== 'text') {
       blockIndent = aozora.indent ?? 0;
       continue;

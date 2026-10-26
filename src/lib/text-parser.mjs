@@ -6,6 +6,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import {
   BOLD_CLOSE,
   BOLD_OPEN,
@@ -631,9 +632,21 @@ function aozoraStyle({ indent, alignEnd, raise }, blockIndent) {
 
 const aozoraHeadingClass = (heading) => `aozora-heading aozora-heading-${heading}`;
 
-/** 原稿ファイルを読んで parseTextLines で縦書き（横書き）HTML にする。opts は parseTextLines と同じ */
+/**
+ * 挿絵の注記の行（{ kind: 'illust', src, alt }）を、画像1つの div にする。
+ * illustSrc は原稿のディレクトリ（baseDir）から解決した画像の絶対パスを受けて img の src を返す。
+ * illustSrc が無い出力（投稿用の pdf・プレビューなど）は挿絵を入れないので空文字を返す
+ */
+function illustHtml({ src, alt }, { baseDir, illustSrc }) {
+  if (!illustSrc) return '';
+  return `<div class="illust"><img src="${escapeXml(illustSrc(resolve(baseDir, src)))}" alt="${escapeXml(alt)}" /></div>`;
+}
+
+const isIllustLine = (line) => line != null && parseAozoraLine(line).kind === 'illust';
+
+/** 原稿ファイルを読んで parseTextLines で縦書き（横書き）HTML にする。opts は parseTextLines と同じ（baseDir の既定は原稿のディレクトリ） */
 export function parseTextFile(filePath, opts = {}) {
-  return parseTextLines(readLines(filePath), opts);
+  return parseTextLines(readLines(filePath), { baseDir: dirname(filePath), ...opts });
 }
 
 /**
@@ -642,6 +655,8 @@ export function parseTextFile(filePath, opts = {}) {
  *   blankAfterHeading: 視点行（章見出し）と本文の間に空行を1つ補う（既定は補わない。原稿側の空行はそのまま）
  *   lineNumbers: 段落・視点行・空行に元テキストの行番号（0始まり）を data-line で付ける
  *   sceneBreak: 場面区切り（* の行）を組む記号
+ *   illustSrc: 挿絵の画像の絶対パスから img の src を返す関数。省くと挿絵の注記の行を出さない
+ *   baseDir: 挿絵のファイル名を解決するディレクトリ（既定はカレントディレクトリ）
  */
 export function parseTextLines(
   lines,
@@ -653,6 +668,8 @@ export function parseTextLines(
     blankAfterHeading = false,
     lineNumbers = false,
     sceneBreak = SCENE_BREAK_MARK,
+    illustSrc = null,
+    baseDir = '.',
   } = {},
 ) {
   const htmlParts = [];
@@ -673,6 +690,12 @@ export function parseTextLines(
     const aozora = parseAozoraLine(processLines[i]);
     if (aozora.kind === 'pageBreak') {
       htmlParts.push('<div class="page-break-marker"></div>');
+      lastWasViewpoint = false;
+      continue;
+    }
+    if (aozora.kind === 'illust') {
+      const html = illustHtml(aozora, { baseDir, illustSrc });
+      if (html) htmlParts.push(html);
       lastWasViewpoint = false;
       continue;
     }
@@ -707,6 +730,8 @@ export function parseTextLines(
     }
 
     if (line.trim() === '') {
+      // 挿絵は1ページに組むので、隣の空行を出すと前後のページの端に余分な空きが出る
+      if (illustSrc && (isIllustLine(processLines[i - 1]) || isIllustLine(processLines[i + 1]))) continue;
       htmlParts.push(`<p class="empty"${lineAttr(i)}>&nbsp;</p>`);
       lastWasViewpoint = false;
       continue;
@@ -759,7 +784,13 @@ export function parseTextLines(
   return { html: htmlParts.join('\n'), hasViewpointStart, hasEmptyViewpointStart };
 }
 
-export function parseTextFileForEpub(filePath, { sectionNumber = null, sceneBreak = SCENE_BREAK_MARK } = {}) {
+/**
+ * 原稿ファイルを EPUB の章の XHTML にする。illustSrc は parseTextLines と同じ（挿絵のファイル名は原稿のディレクトリから解決する）
+ */
+export function parseTextFileForEpub(
+  filePath,
+  { sectionNumber = null, sceneBreak = SCENE_BREAK_MARK, illustSrc = null } = {},
+) {
   const lines = readLines(filePath);
   const xhtmlParts = [];
   const escapeOpts = { vertical: true, separateSymbolClasses: true };
@@ -785,6 +816,11 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null, sceneBrea
       xhtmlParts.push('<div class="page-break-marker"></div>');
       continue;
     }
+    if (aozora.kind === 'illust') {
+      const xhtml = illustHtml(aozora, { baseDir: dirname(filePath), illustSrc });
+      if (xhtml) xhtmlParts.push(xhtml);
+      continue;
+    }
     if (aozora.kind !== 'text') {
       blockIndent = aozora.indent ?? 0;
       continue;
@@ -793,12 +829,14 @@ export function parseTextFileForEpub(filePath, { sectionNumber = null, sceneBrea
     const style = aozoraStyle(aozora, blockIndent);
 
     if (line.trim() === '') {
-      // 区切り・視点行の前後の間隔は CSS の margin で取るため、隣の空行を出すと二重になる
+      // 区切り・視点行の前後の間隔は CSS の margin で取るため、隣の空行を出すと二重になる。
+      // 挿絵は1ページに組むので、隣の空行を出すと前後のページの端に余分な空きが出る
       const prevLine = i > 0 ? processLines[i - 1] : null;
       const nextLine = i < processLines.length - 1 ? processLines[i + 1] : null;
       const adjacentToSpecial =
         (prevLine !== null && (isSeparator(prevLine) || isViewpointLine(prevLine))) ||
-        (nextLine !== null && (isSeparator(nextLine) || isViewpointLine(nextLine)));
+        (nextLine !== null && (isSeparator(nextLine) || isViewpointLine(nextLine))) ||
+        (illustSrc && (isIllustLine(prevLine) || isIllustLine(nextLine)));
       if (!adjacentToSpecial) {
         xhtmlParts.push('<p><br /></p>');
       }
@@ -995,6 +1033,14 @@ if (import.meta.vitest) {
       expect(html).toContain('<p class="paragraph-short" data-line="6" style="text-align: end">四</p>');
       expect(html).toContain('<p class="aozora-heading aozora-heading-medium" data-line="7">五</p>');
       expect(html).not.toContain('［＃');
+    });
+    test('挿絵は illustSrc があれば原稿のディレクトリから解決した画像を組み、無ければ出さない', () => {
+      const lines = ['一', '', '［＃「駅」のキャプション付きの図（img/a.png）入る］', '', '二'];
+      const { html } = parseTextLines(lines, { baseDir: '/work', illustSrc: (path) => `src:${path}` });
+      expect(html).toBe(
+        '<p class="paragraph-short">一</p>\n<div class="illust"><img src="src:/work/img/a.png" alt="駅" /></div>\n<p class="paragraph-short">二</p>',
+      );
+      expect(parseTextLines(lines).html).not.toContain('illust');
     });
     test('字数の数え方では注記を数えない', () => {
       expect(stripInlineMarkup('東京《とうきょう》［＃「東京」に傍点］')).toBe('東京');
