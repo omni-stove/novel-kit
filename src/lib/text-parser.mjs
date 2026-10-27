@@ -36,16 +36,26 @@ export function isSceneBreak(line) {
 export const SCENE_BREAK_MARK = '＊';
 
 /**
- * 区切りの行か。場面区切り（*）のほか、記号だけの行（◇◇◇・■■■・※・>>> など）は
+ * 区切りの記号を明示する行か（*: ☆☆☆。* とコロンはそれぞれ全角でも可）。記号だけの行とは判定できない記号（☆・〜 など）でも
+ * 区切りにでき、記号を書かない *: は場面区切りになる。
+ */
+export function isBreakLine(line) {
+  return /^[*＊][:：]/.test(line);
+}
+
+/**
+ * 区切りの行か。場面区切り（*）と *: の行のほか、記号だけの行（◇◇◇・■■■・※・>>> など）は
  * 書いた記号のまま、場面区切りと同じ位置（中央か、sceneBreakIndent の字下げ）に置く飾りの区切りになる。
  */
 export function isSeparator(line) {
-  return isSceneBreak(line) || /^[◇◆□■○●◎※>＞]+$/.test(line.trim());
+  return isSceneBreak(line) || isBreakLine(line) || /^[◇◆□■○●◎※>＞]+$/.test(line.trim());
 }
 
 /** 区切りの行を紙面に出す記号にする。sceneBreakMark は出力ごとの場面区切りの記号 */
 export function separatorMark(line, sceneBreakMark = SCENE_BREAK_MARK) {
-  return isSceneBreak(line) ? sceneBreakMark : line.trim();
+  if (isSceneBreak(line)) return sceneBreakMark;
+  if (isBreakLine(line)) return line.replace(/^[*＊][:：]/, '').trim() || sceneBreakMark;
+  return line.trim();
 }
 
 /**
@@ -1062,6 +1072,12 @@ if (import.meta.vitest) {
       expect(separatorMark('■■■')).toBe('■■■');
       expect(separatorMark(' >>> ', '#')).toBe('>>>');
     });
+    test('*: の行は書いた記号に、記号が無ければ場面区切りの記号にする', () => {
+      expect(separatorMark('*: ☆　☆　☆', '#')).toBe('☆　☆　☆');
+      expect(separatorMark('＊：〜〜〜')).toBe('〜〜〜');
+      expect(separatorMark('*:', '#')).toBe('#');
+      expect(separatorMark('＊:  ', null)).toBe(null);
+    });
     test('sceneBreak で場面区切りの記号を変えられる', () => {
       const { html } = parseTextLines(['一', '*', '二'], { sceneBreak: '＊　＊　＊' });
       expect(html).toContain('<p class="separator">＊　＊　＊</p>');
@@ -1096,6 +1112,11 @@ if (import.meta.vitest) {
       }
       expect(isSceneBreak('◇◇◇')).toBe(false);
       expect(isSceneBreak('*強調*')).toBe(false);
+    });
+    test('*: で始まる行は記号を問わず区切り。行頭に無ければ本文', () => {
+      for (const line of ['*: ☆☆☆', '＊：〜', '*：◎', '*:']) expect(isSeparator(line)).toBe(true);
+      expect(isSeparator(' *: ☆☆☆')).toBe(false);
+      expect(isSeparator('*強調*: ☆')).toBe(false);
     });
     test('\u6587\u5B57\u304C\u6DF7\u3056\u308B\u3068false', () => {
       expect(isSeparator('\u25C7\u3042')).toBe(false);
