@@ -47,13 +47,13 @@ export function renderWebviewHtml({ cssUris, jsUris, cspSource, nonce, panel, la
     <span id="scope" class="segmented">
       <button data-scope="file">${t('This file')}</button><button data-scope="work">${t('Whole work')}</button>
     </span>
-    <button id="toggle-edit" aria-pressed="true" title="${attr(t('On: click a paragraph to edit it in place (Cmd/Ctrl+click opens the line in the editor)\nOff: double-click opens the line in the editor'))}">${t('Edit')}</button>
-    <button id="open-text" title="${attr(t('Switch this tab to the text editor (at the line you are looking at)'))}">${t('Open as Text')}</button>
     <span id="mode" class="segmented" title="${attr(t('Page: typeset on paper, one page at a time\nScroll: horizontal text flowing down without page breaks, as on Kakuyomu or Shōsetsuka ni Narō'))}">
       <button data-mode="page">${t('Page')}</button><button data-mode="scroll">${t('Scroll')}</button>
     </span>
     <label>${t('Zoom')}<select id="zoom">${options(zoomOptions())}</select></label>
     <span id="stats"></span>
+    <button id="toggle-edit" aria-pressed="true" title="${attr(t('On: click a paragraph to edit it in place (Cmd/Ctrl+click opens the line in the editor)\nOff: double-click opens the line in the editor'))}">${t('Edit')}</button>
+    <button id="open-text" title="${attr(t('Switch this tab to the text editor (at the line you are looking at)'))}">${t('Open as Text')}</button>
     <span id="export-wrap">
       <button id="export" aria-haspopup="menu" aria-expanded="false" title="${attr(t('Choose what to make from a menu (a PDF in the current layout, or the outputs in novel.json)'))}">${t('Export')} ▾</button>
       <div id="export-menu" role="menu" hidden></div>
