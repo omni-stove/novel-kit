@@ -578,48 +578,15 @@
     }
   });
 
-  /** ツールバーを、render で届いた値で埋める。英語の原稿は字数×行数の代わりに文字サイズと行送りを見せる */
+  /** ツールバーの表示範囲のボタンを、render で届いた値に合わせる */
   function fillForm() {
-    const { layout, metrics, presets, presetName, scope, canShowWork, language } = model;
-    const english = language === 'en';
-
-    const preset = $('preset');
-    preset.replaceChildren();
-    if (!presetName) preset.append(new Option(t('(Custom)'), ''));
-    for (const name of Object.keys(presets)) preset.append(new Option(name, name));
-    preset.value = presetName ?? '';
-
-    $('grid-fields').hidden = english;
-    $('en-fields').hidden = !english;
-    $('chars').value = layout.chars ?? '';
-    $('lines').value = layout.lines ?? '';
-    $('lines').placeholder = t('Auto ({0})', metrics.lines);
-    $('font-size').value = english ? layout.fontSize : '';
-    $('line-height').value = english ? layout.lineHeight : '';
-
+    const { scope, canShowWork } = model;
     for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('#scope button'))) {
       button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
       if (button.dataset.scope === 'work') button.disabled = !canShowWork;
     }
   }
 
-  /** ツールバーで変えたレイアウト。用紙・余白などはツールバーに無いので、いまのレイアウトのまま */
-  function readForm() {
-    return {
-      ...model.layout,
-      chars: $('chars').value,
-      lines: $('lines').value,
-      fontSize: $('font-size').value,
-      lineHeight: $('line-height').value,
-    };
-  }
-
-  for (const el of document.querySelectorAll('[data-layout-field]')) {
-    el.addEventListener('change', () => vscode.postMessage({ type: 'layout', layout: readForm() }));
-  }
-  $('preset').addEventListener('change', (e) => {
-    if (e.target.value) vscode.postMessage({ type: 'preset', name: e.target.value });
-  });
   $('scope').addEventListener('click', (e) => {
     const scope = e.target.dataset?.scope;
     if (scope) vscode.postMessage({ type: 'view', view: { scope } });

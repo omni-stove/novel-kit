@@ -44,11 +44,6 @@ export function renderWebviewHtml({ cssUris, jsUris, cspSource, nonce, panel, la
 </head>
 <body>
   <header id="toolbar">
-    <label>${t('Layout')}<select id="preset"></select></label>
-    <label id="grid-fields">${t('{0} chars ×', '<input id="chars" data-layout-field type="number" min="5" max="100">')}
-      ${t('{0} lines', '<input id="lines" data-layout-field type="number" min="1" max="100">')}</label>
-    <label id="en-fields" hidden><input id="font-size" data-layout-field type="number" min="5" max="40" step="0.5">pt ×
-      ${t('Leading')}<input id="line-height" data-layout-field type="number" min="1" max="3" step="0.05"></label>
     <span id="scope" class="segmented">
       <button data-scope="file">${t('This file')}</button><button data-scope="work">${t('Whole work')}</button>
     </span>
