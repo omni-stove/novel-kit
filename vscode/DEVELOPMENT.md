@@ -39,4 +39,4 @@ code --install-extension /tmp/novel-preview.vsix --force
 
 main に push すると、CI（`.github/workflows/release.yml`）が前回のリリースから `vscode/` などに変更があればテストして、vsix を `vscode-v<version>` の GitHub Release に置く。version は CalVer（`YYYY.MDD.N`、JST の日付と、その日の何回目か。例: `2026.1021.0`）で、CI がリリースのときだけ `vscode/package.json` に書き込む。リポジトリの `version` は `0.0.0` のまま。
 
-Marketplace へは `pnpm --dir vscode run publish`（先に `vsce login omnistove` で publisher の Personal Access Token を登録しておく）。
+同じ vsix を CI が Marketplace にも publish する。publisher `omnistove` の Personal Access Token（Organization は All accessible organizations、Scope は Marketplace の Manage）をリポジトリの Secret `VSCE_PAT` に入れておく。手元から `pnpm --dir vscode run publish` で出すときは、先に `npm pkg set version=...` で version を入れる（`0.0.0` のままだとその version で出てしまう）。
