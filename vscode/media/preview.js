@@ -171,7 +171,7 @@
     return `${range > 0 ? Math.round((viewport.scrollTop / range) * 100) : 100}%`;
   }
 
-  /** ツールバーの右端に見ている位置を出す（文字数は小説パネルの「文章の傾向」とステータスバーに出す） */
+  /** ツールバーの右寄せの並びの先頭に見ている位置を出す（文字数は小説パネルの「文章の傾向」とステータスバーに出す） */
   function updateStats() {
     if (!model || !geometry) return;
     $('stats').textContent = positionText();

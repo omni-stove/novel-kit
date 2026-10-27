@@ -40,7 +40,7 @@ Click a paragraph in the page view to edit it in place. Notation such as ruby sh
 
 !["Prose" in the novel panel: character counts, sheets, the distribution of sentence endings, and a list of sentences ending in 〜だった。](images/panel.png)
 
-It appears to the right of the preview. "Prose", "Work" and "Page Setup" at the right end of the toolbar open that tab; press the selected one again, or "×" on the panel, to close it. The panel remembers whether it is open, the tab and the width, and the next preview you open starts the same way. The command "Open the Novel Panel" (Command Palette, or "…" in the title bar of a `.txt` tab) also opens it (with a preview to the side if there is none).
+It appears to the right of the preview. "Prose & Settings" at the right end of the toolbar opens and closes it ("×" on the panel closes it too), and the tabs at the top of the panel switch between "Prose", "Work" and "Page Setup". The panel remembers whether it is open, the tab and the width, and the next preview you open starts the same way. The command "Open the Novel Panel" (Command Palette, or "…" in the title bar of a `.txt` tab) also opens it (with a preview to the side if there is none).
 
 - **Prose** (the default tab): character counts and sheets for this file and the whole work, and the tendencies of the prose
 - **Work**: the form for `novel.json` (see "Work settings" below)
