@@ -189,11 +189,6 @@
           "command": "novelPreview.exportPdf",
           "when": "resourceExtname == .txt",
           "group": "2_novel@3"
-        },
-        {
-          "command": "novelPreview.backup",
-          "when": "(resourceExtname == .txt || resourceFilename == novel.json) && config.novelPreview.show.backup",
-          "group": "navigation"
         }
       ],
       "editor/title/context": [

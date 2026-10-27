@@ -611,6 +611,7 @@
       el ? { type: 'openText', fileIndex: sectionIndexOf(el), line: Number(el.dataset.line) } : { type: 'openText' },
     );
   });
+  $('backup').addEventListener('click', () => vscode.postMessage({ type: 'backup' }));
   $('mode').addEventListener('click', (e) => {
     const next = e.target.dataset?.mode;
     if (next && next !== mode) vscode.postMessage({ type: 'view', view: { mode: next } });
@@ -765,6 +766,7 @@
         button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
       }
       if (data.view.edit !== editEnabled) setEditEnabled(data.view.edit);
+      $('backup').hidden = !data.showBackup;
       $('message').hidden = true;
       stage.hidden = false;
       $('doc-style').textContent = data.css;
