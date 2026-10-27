@@ -20,14 +20,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # paths は成果物に入るものだけにする。cli の tgz は lockfile を含まず、vsix は docs・sample・画像を含まない
           - name: cli
             dir: .
             tag-prefix: cli-v
-            paths: bin src package.json pnpm-lock.yaml
+            paths: bin src package.json
           - name: vscode
             dir: vscode
             tag-prefix: vscode-v
-            paths: vscode src package.json pnpm-lock.yaml
+            paths: vscode :!vscode/docs :!vscode/sample :!vscode/images :!vscode/DEVELOPMENT.md :!vscode/media/tsconfig.json src pnpm-lock.yaml
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     env:
