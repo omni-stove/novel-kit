@@ -1,5 +1,5 @@
 {
-  "displayName": "小説プレビュー",
+  "displayName": "Novel Kit",
   "description": "原稿テキスト（.txt）を PDF 出力と同じ組版でページ表示する。字数×行数などのレイアウトは Word のページ設定のように定義できる。英語原稿は自動判定してペーパーバック風の組版にする。",
   "customEditor.preview": "小説プレビュー",
   "customEditor.workSettings": "作品の設定",

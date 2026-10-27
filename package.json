@@ -1,7 +1,7 @@
 {
   "name": "novel-kit",
   "version": "0.0.0",
-  "description": "小説原稿（.txt）の組版エンジンと CLI（novel）。VS Code 拡張「小説プレビュー」は vscode/ にある。",
+  "description": "小説原稿（.txt）の組版エンジンと CLI（novel）。VS Code 拡張「Novel Kit」は vscode/ にある。",
   "private": true,
   "license": "ISC",
   "type": "module",

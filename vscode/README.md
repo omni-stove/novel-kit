@@ -1,4 +1,4 @@
-# Novel Preview
+# Novel Kit
 
 English | [日本語](README.ja.md)
 
@@ -22,7 +22,7 @@ The extension's interface follows the display language of VS Code (English or Ja
 
 ## Installation
 
-Search for "Novel Preview" in the Extensions view of VS Code and install it.
+Search for "Novel Kit" in the Extensions view of VS Code and install it.
 
 Chrome, which is used for PDF export, is downloaded the first time you export a PDF (about 180 MB). Nothing else needs installing.
 
