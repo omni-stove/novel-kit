@@ -171,7 +171,7 @@
     return `${range > 0 ? Math.round((viewport.scrollTop / range) * 100) : 100}%`;
   }
 
-  /** ツールバーの右端に見ている位置を出す（文字数は小説パネルの「文章の傾向」とステータスバーに出す） */
+  /** ツールバーの右寄せの並びの先頭に見ている位置を出す（文字数は小説パネルの「文章の傾向」とステータスバーに出す） */
   function updateStats() {
     if (!model || !geometry) return;
     $('stats').textContent = positionText();
@@ -677,9 +677,9 @@
           ]
         : [note(t('The outputs listed in "outputs" of novel.json can also be made from here'))]),
     );
-    // ツールバーは折り返すので、ボタンが右端に来ていればメニューを右に揃えて画面からはみ出さないようにする
-    menu.classList.remove('align-right');
-    menu.classList.toggle('align-right', menu.getBoundingClientRect().right > window.innerWidth);
+    // ツールバーは折り返すので、ボタンが左端に来て左へ開くと画面からはみ出すときは、左に揃えて右へ開く
+    menu.classList.remove('align-left');
+    menu.classList.toggle('align-left', menu.getBoundingClientRect().left < 0);
     menu.querySelector('button')?.focus();
   }
   $('export').addEventListener('click', () => setExportMenuOpen($('export-menu').hidden));

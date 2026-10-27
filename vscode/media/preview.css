@@ -78,20 +78,30 @@ button:disabled {
   cursor: default;
 }
 
+/* 単独のボタンや押した状態のトグルと見分けられるよう、枠の中から1つを選ぶ形にする */
 .segmented {
   display: inline-flex;
+  padding: 1px;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.4));
+  border-radius: 4px;
 }
 
 .segmented button {
-  border-radius: 0;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
 }
 
-.segmented button:first-child {
-  border-radius: 3px 0 0 3px;
+.segmented button:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
 }
 
-.segmented button:last-child {
-  border-radius: 0 3px 3px 0;
+.segmented button[aria-pressed="true"] {
+  color: var(--vscode-foreground);
+  background: var(--vscode-button-secondaryBackground);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+  cursor: default;
 }
 
 /* 押し忘れないよう、ほかの操作より目立つ色にする */
@@ -111,7 +121,7 @@ button:disabled {
 #export-menu {
   position: absolute;
   top: calc(100% + 2px);
-  left: 0;
+  right: 0;
   z-index: 10;
   display: flex;
   flex-direction: column;
@@ -124,9 +134,9 @@ button:disabled {
   box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
 }
 
-#export-menu.align-right {
-  right: 0;
-  left: auto;
+#export-menu.align-left {
+  right: auto;
+  left: 0;
 }
 
 #export-menu[hidden] {

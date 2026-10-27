@@ -42,9 +42,7 @@ function createNovelPanel(vscode) {
     for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('#tabs [data-tab]'))) {
       button.setAttribute('aria-selected', String(button.dataset.tab === tab));
     }
-    for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('[data-panel-tab]'))) {
-      button.setAttribute('aria-pressed', String(open && button.dataset.panelTab === tab));
-    }
+    $('toggle-panel').setAttribute('aria-pressed', String(open));
     for (const name of TABS) $(`tab-${name}`).hidden = name !== tab;
     if (notify) postState();
   }
@@ -54,10 +52,7 @@ function createNovelPanel(vscode) {
     if (next && next !== tab) show(true, next);
   });
   $('close-panel').addEventListener('click', () => show(false));
-  $('panel-toggles').addEventListener('click', (e) => {
-    const next = e.target.closest?.('button')?.dataset.panelTab;
-    if (next) show(root.hidden || next !== tab, next);
-  });
+  $('toggle-panel').addEventListener('click', () => show(root.hidden));
 
   $('panel-resizer').addEventListener('pointerdown', (/** @type {PointerEvent} */ e) => {
     const resizer = $('panel-resizer');
