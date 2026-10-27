@@ -311,5 +311,5 @@
   "Could not back up. {0}": "バックアップできませんでした。{0}",
   "Nothing new to back up. The backup is up to date.": "新しい変更はありません。バックアップは最新です。",
   "Backed up.": "バックアップしました。",
-  "Save the manuscripts, record every change in the work's folder with Git and send it to the remote repository": "原稿を保存し、作品のフォルダの変更をすべて Git に記録して、リモートのリポジトリへ送る"
+  "Save the manuscripts, record every change in the folder of the work with Git and send it to the remote repository": "原稿を保存し、作品のフォルダの変更をすべて Git に記録して、リモートのリポジトリへ送る"
 }
