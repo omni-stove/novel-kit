@@ -126,7 +126,7 @@ export function computeStats(fileLines, metrics) {
  * 英語組版（en-pdf.mjs）の HTML。ファイルは章にまとめられるので、段落は data-file でファイルを指す。
  * partStarts: 新しい部が始まるファイルの添字（null なら部に分けない）
  */
-function buildEnglishHtml(fileLines, metrics, sceneBreak, partStarts) {
+function buildEnglishHtml(fileLines, metrics, sceneBreak, partStarts, chapterBreak) {
   const m = metrics.layout.margin;
   const chapters = buildChapters(
     fileLines.map((lines) => parseEnglishLines(lines)),
@@ -142,7 +142,7 @@ function buildEnglishHtml(fileLines, metrics, sceneBreak, partStarts) {
       // プレビューは単ページなので、見開きの内側の余白を左、外側を右に当てる
       margin: { top: `${m.top}mm`, bottom: `${m.bottom}mm`, inner: `${m.left}mm`, outer: `${m.right}mm` },
     },
-    { smartQuotes: true, lineNumbers: true, sceneBreak },
+    { smartQuotes: true, lineNumbers: true, sceneBreak, chapterBreak },
   );
 }
 
@@ -152,6 +152,8 @@ function buildEnglishHtml(fileLines, metrics, sceneBreak, partStarts) {
  * sceneBreak: 場面区切り（* の行）に組む記号（null なら PDF 出力と同じ既定）
  * sceneBreakIndent: 日本語の区切りの行を行頭から下げる字数（null なら中央）
  * parts: 部の境界（novel.json の parts。null なら部に分けない）。章番号を PDF と同じ「部-章」にし、作品全体の表示では部の頭で改ページする
+ * chapterBreak: 章ごとに改ページするか（false なら PDF 出力の --no-chapter-break と同じく空行を1行空けて続ける）
+ * blankAfterHeading: 日本語の章見出し（視点行）と本文の間に空行を1行補うか
  * 返す値: { files, language, sources: ファイルごとの行列（プレビューで段落を編集するときの元テキスト）, css, body, stats }
  */
 export function buildDocument({
@@ -162,6 +164,8 @@ export function buildDocument({
   sceneBreak = null,
   sceneBreakIndent = null,
   parts = null,
+  chapterBreak = true,
+  blankAfterHeading = false,
 }) {
   const workFiles = listWorkFiles(filePath);
   const inWork = workFiles.includes(filePath);
@@ -175,7 +179,7 @@ export function buildDocument({
   const fileLines = files.map((f) => linesOf(f));
   const html =
     metrics.language === 'en'
-      ? buildEnglishHtml(fileLines, metrics, sceneBreak ?? undefined, whole ? partStarts : null)
+      ? buildEnglishHtml(fileLines, metrics, sceneBreak ?? undefined, whole ? partStarts : null, chapterBreak)
       : generateHtml(
           fileLines.map((lines, i) =>
             parseTextLines(lines, {
@@ -184,13 +188,14 @@ export function buildDocument({
               sectionNumber: labelOf(files[i]),
               lineNumbers: true,
               sceneBreak: sceneBreak ?? undefined,
+              blankAfterHeading,
             }),
           ),
           {
             vertical: metrics.vertical,
             chars: metrics.chars,
             lines: metrics.lines,
-            chapterBreak: true,
+            chapterBreak,
             sceneBreak: sceneBreak ?? undefined,
             sceneBreakIndent,
             // generateHtml は1始まりのファイル順で受け取る

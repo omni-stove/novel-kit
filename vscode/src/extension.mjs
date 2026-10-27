@@ -295,6 +295,8 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         sceneBreak,
         sceneBreakIndent,
         parts,
+        chapterBreak: view.chapterBreak,
+        blankAfterHeading: view.blankAfterHeading,
       });
       session.files = built.files;
       const presets = allPresets(english);
@@ -728,7 +730,8 @@ const shouldOpen = () => config().get('openAfterExport') !== false && process.en
 
 /**
  * PDF出力（novel pdf / novel pdf-en）。session があればその表示範囲（このファイル / 作品全体）で、無ければ開いている原稿1ファイルを出力する。
- * 日本語は novel pdf、英語は novel pdf-en（判型は用紙から選ぶ）。出力先はワークスペース（無ければ原稿のディレクトリ）の out/preview/ で、終わったら開く（shouldOpen）
+ * 日本語は novel pdf、英語は novel pdf-en（判型は用紙から選ぶ）。章ごとの改ページと章見出しの後の空行は、プレビューの表示設定と同じにする。
+ * 出力先はワークスペース（無ければ原稿のディレクトリ）の out/preview/ で、終わったら開く（shouldOpen）
  */
 function exportPdf(session = activeSession()) {
   const doc = session?.doc ?? activeManuscript();
@@ -736,7 +739,7 @@ function exportPdf(session = activeSession()) {
   const filePath = doc.uri.fsPath;
   const dir = dirname(filePath);
   const root = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath ?? dir;
-  const { layout, english, sceneBreak, sceneBreakIndent } = resolvedSettingsFor(doc);
+  const { layout, english, view, sceneBreak, sceneBreakIndent } = resolvedSettingsFor(doc);
   const metrics = computeMetrics(layout, { english });
   const command = english ? 'pdf-en' : 'pdf';
 
@@ -778,6 +781,8 @@ function exportPdf(session = activeSession()) {
   }
   if (sceneBreak) options.push('--scene-break', sceneBreak);
   if (sceneBreakIndent != null) options.push('--scene-break-indent', String(sceneBreakIndent));
+  if (!view.chapterBreak) options.push('--no-chapter-break');
+  if (view.blankAfterHeading && !english) options.push('--blank-after-heading');
   const outPath = join(root, 'out', 'preview', out);
   mkdirSync(dirname(outPath), { recursive: true });
 
@@ -1496,14 +1501,15 @@ function proseState(file) {
   };
 }
 
-/** 「ページ設定」のタブに送る中身（原稿の言語のレイアウトと、そこから決まる字数×行数・文字サイズ） */
+/** 「ページ設定」のタブに送る中身（原稿の言語のレイアウトと、そこから決まる字数×行数・文字サイズ、章の改ページ・見出しの後の空行の表示設定） */
 function pageState(file) {
   const doc = manuscriptAt(file);
-  const { layout, english } = resolvedSettingsFor(doc);
+  const { layout, english, view } = resolvedSettingsFor(doc);
   const metrics = computeMetrics(layout, { english });
   const presets = allPresets(english);
   const layoutFile = layoutFileFor(doc);
   return {
+    view: { chapterBreak: view.chapterBreak, blankAfterHeading: view.blankAfterHeading },
     file: basename(file),
     layout: metrics.layout,
     metrics,
@@ -1609,7 +1615,7 @@ function createNovelPanel(session) {
 
   /**
    * パネルからのメッセージ。ready（webview を作ったとき）・state で開け閉め・タブ・幅を受けて覚え、reveal で原稿の行を開き、layout・preset でレイアウトを変え、
-   * work は作品設定のフォームのメッセージ（create で novel.json を作る）
+   * view でページ設定のタブの章の欄（表示設定の chapterBreak・blankAfterHeading）を書き、work は作品設定のフォームのメッセージ（create で novel.json を作る）
    */
   function onMessage(msg) {
     const file = fileOf();
@@ -1632,6 +1638,8 @@ function createNovelPanel(session) {
         // 範囲外の値は丸めて保存するので、レイアウトが変わらなくても入力欄を保存した値に戻す
         posted.page = null;
         return doc && setLayout(doc, msg.layout);
+      case 'view':
+        return doc && updateSettings(doc, { view: msg.view });
       case 'preset': {
         const preset = doc && allPresets(isEnglishManuscript(doc))[msg.name];
         return preset && setLayout(doc, preset);

@@ -18,6 +18,7 @@
  *                （GA文庫大賞など、ルビを全角括弧で書く指定の応募先向け）。
  *   --scene-break: 場面区切り（* の行）とファイルの継ぎ目に書く記号（既定: ＊）
  *   --scene-break-indent: 区切りの行の前に全角空白を字数分入れて下げる（既定: 下げない）
+ *   --blank-after-heading: 見出し（視点行）と本文の間に空行を1行補う（既定: 補わない。原稿側の空行はそのまま）
  */
 
 import { writeFileSync } from 'node:fs';
@@ -53,6 +54,7 @@ export function parseArgs(argv) {
       { key: 'splits', flags: ['--splits', '--part', '--parts'], takesValue: true, parse: parseList },
       { key: 'target', flags: ['--target', '--persona'], takesValue: true },
       { key: 'rubyParens', flags: ['--ruby-parens'] },
+      { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
       ARG.sceneBreak,
       ARG.sceneBreakIndent,
     ],
@@ -63,7 +65,7 @@ export function parseArgs(argv) {
 export function mergeLines(
   filePaths,
   partFirstIndices = null,
-  { sceneBreak = SCENE_BREAK_MARK, sceneBreakIndent = null } = {},
+  { sceneBreak = SCENE_BREAK_MARK, sceneBreakIndent = null, blankAfterHeading = false } = {},
 ) {
   const place = (mark) => indentSeparator(mark, sceneBreakIndent);
   const partBoundarySet = partFirstIndices ? new Set(partFirstIndices) : null;
@@ -82,7 +84,8 @@ export function mergeLines(
     if (i > 0)
       allLines.push(...(startsPart || startsNewChapter(files, i) ? [''] : fileSeparatorLines(place(sceneBreak))));
 
-    for (const line of moveEpigraphsAfterHeading(trimBlankEdges(lines), { blankAfter: true })) {
+    const bodyLines = moveEpigraphsAfterHeading(trimBlankEdges(lines), { blankAfter: true });
+    bodyLines.forEach((line, j) => {
       if (isEpigraphLine(line)) {
         // 出力は最終成果物なので Lead: / Source: の記法は外し、紙面と同じく——で出典を続ける
         const { quote, source } = parseEpigraphLine(line, { aozora: false });
@@ -91,12 +94,15 @@ export function mergeLines(
         const label = partBoundarySet ? `${partNumber}-${sectionNumber}` : sectionNumber;
         allLines.push(applyViewpointLabel(line, label));
         sectionNumber++;
+        // エピグラフが続くときは、moveEpigraphsAfterHeading がエピグラフの後ろに空ける
+        const next = bodyLines[j + 1];
+        if (blankAfterHeading && next !== undefined && !isEpigraphLine(next) && next.trim() !== '') allLines.push('');
       } else if (isSeparator(line)) {
         allLines.push(place(separatorMark(line, sceneBreak)));
       } else {
         allLines.push(line);
       }
-    }
+    });
   });
 
   return trimBlankEdges(allLines);
@@ -135,6 +141,7 @@ export function main(argv = process.argv.slice(2)) {
   const bodyLines = mergeLines(filePaths, partFirstIndices, {
     sceneBreak: args.sceneBreak,
     sceneBreakIndent: args.sceneBreakIndent,
+    blankAfterHeading: args.blankAfterHeading,
   });
   const allLines = [
     ...headerLines,
@@ -199,6 +206,11 @@ if (import.meta.vitest) {
     test('エピグラフはプレフィックスを外して見出しの直後に置き、本文との間を1行空ける', () => {
       expect(merge(['Lead: 引用\nSource: 出典\n【】\n本文\n'])).toEqual(['【1】', '引用——出典', '', '本文']);
     });
+    test('blankAfterHeading なら見出しの後に空行を1行補い、原稿側の空行やエピグラフの後ろの空行と二重にしない', () => {
+      expect(
+        merge(['【】\n一\n', '【】\n\n二\n', 'Lead: 引用\n【】\n三\n'], null, { blankAfterHeading: true }),
+      ).toEqual(['【1】', '', '一', '', '【2】', '', '二', '', '【3】', '引用', '', '三']);
+    });
     test('部境界を渡すと「部-節」で採番し直し、部の頭には＊を挟まない', () => {
       expect(merge(['【】\n一\n', '【】\n二\n', '三\n'], [2])).toEqual([
         '【1-1】',
@@ -238,6 +250,7 @@ if (import.meta.vitest) {
         splits: null,
         target: null,
         rubyParens: false,
+        blankAfterHeading: false,
         sceneBreak: '＊',
         sceneBreakIndent: null,
       });

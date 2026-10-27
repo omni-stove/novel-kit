@@ -795,11 +795,12 @@ export function parseTextLines(
 }
 
 /**
- * 原稿ファイルを EPUB の章の XHTML にする。illustSrc は parseTextLines と同じ（挿絵のファイル名は原稿のディレクトリから解決する）
+ * 原稿ファイルを EPUB の章の XHTML にする。illustSrc は parseTextLines と同じ（挿絵のファイル名は原稿のディレクトリから解決する）。
+ * blankAfterHeading: 視点行（とその後ろのエピグラフ）と本文の間に空行を1つ置く（既定は置かない）
  */
 export function parseTextFileForEpub(
   filePath,
-  { sectionNumber = null, sceneBreak = SCENE_BREAK_MARK, illustSrc = null } = {},
+  { sectionNumber = null, sceneBreak = SCENE_BREAK_MARK, blankAfterHeading = false, illustSrc = null } = {},
 ) {
   const lines = readLines(filePath);
   const xhtmlParts = [];
@@ -865,6 +866,8 @@ export function parseTextFileForEpub(
         xhtmlParts.push(pendingEpigraph);
         pendingEpigraph = null;
       }
+      // 視点行に隣り合う原稿の空行は上で落とすので、二重にはならない
+      if (blankAfterHeading && i < processLines.length - 1) xhtmlParts.push('<p><br /></p>');
       continue;
     }
 
@@ -1614,6 +1617,19 @@ if (import.meta.vitest) {
         expect(xhtml).toBe(
           '<p class="viewpoint">【夜】</p>\n<p>一</p>\n<p><br /></p>\n<p>二</p>\n<p class="separator">＊</p>\n<p>三</p>',
         );
+      } finally {
+        unlinkSync(tmp);
+      }
+    });
+    test('blankAfterHeading: 視点行の後ろに空行を1つ置き、原稿側の空行と二重にしない', () => {
+      const tmp = join(tmpdir(), `epub-heading-${Date.now()}.txt`);
+      try {
+        for (const text of ['【夜】\n一\n', '【夜】\n\n一\n']) {
+          writeFileSync(tmp, text);
+          expect(parseTextFileForEpub(tmp, { blankAfterHeading: true }).xhtml).toBe(
+            '<p class="viewpoint">【夜】</p>\n<p><br /></p>\n<p>一</p>',
+          );
+        }
       } finally {
         unlinkSync(tmp);
       }

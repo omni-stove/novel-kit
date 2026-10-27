@@ -25,7 +25,8 @@
  *                         省略時は--authorの名前のみ）
  *   --ruby-parens         ルビをEQフィールドでなく「親文字（ルビ）」の括弧表記にする
  *                         （Word以外のRTF対応ソフトはEQフィールドを描画できないため）
- *   --no-chapter-break    章見出し（【】行）の前で改ページしない
+ *   --no-chapter-break    章見出し（【】行）の前で改ページせず、空行を1行空ける
+ *   --blank-after-heading --jaで章見出し（【】行）と本文の間に空行を1行補う（Shunn形式は章扉の後に常に空ける）
  *   --open                生成後に開く
  *   --scene-break <記号>  場面区切りの記号（既定: Shunn形式は #、--jaは ＊）
  *   --scene-break-indent <字数> --jaで区切りの行を中央でなく、前に全角空白を字数分入れて置く
@@ -103,6 +104,7 @@ export function parseArgs(argv) {
       },
       { key: 'rubyParens', flags: ['--ruby-parens'] },
       { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
+      { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
       ARG.open,
       ARG.sceneBreak,
       ARG.sceneBreakIndent,
@@ -180,6 +182,7 @@ export function buildParagraphs(inputFiles, opts) {
   const body = opts.shunn ? '\\pard\\fi720\\sl480\\slmult1 ' : '\\pard ';
   const center = opts.shunn ? '\\pard\\qc\\sl480\\slmult1 ' : '\\pard\\qc ';
   let pendingBreak = false;
+  let pendingHeadingBlank = false;
   let chapterNumber = 0;
 
   for (const file of inputFiles) {
@@ -197,6 +200,12 @@ export function buildParagraphs(inputFiles, opts) {
       }
       if (aozora.kind !== 'text') continue;
       const line = aozora.heading ? `${BOLD_OPEN}${aozora.text}${BOLD_CLOSE}` : aozora.text;
+
+      // 原稿に空行があればそれを使い、見出しの直後のエピグラフはその後ろに空ける
+      if (pendingHeadingBlank && !isEpigraphLine(line)) {
+        if (line.trim() !== '') paragraphs.push('\\pard\\par');
+        pendingHeadingBlank = false;
+      }
 
       if (line.trim() === '') {
         if (opts.shunn) pendingBreak = true;
@@ -221,6 +230,8 @@ export function buildParagraphs(inputFiles, opts) {
         if (opts.chapterBreak && paragraphs.length > 0) {
           paragraphs.push('\\pard\\sl480\\slmult1\\page\\par');
           for (let i = 0; i < 3; i++) paragraphs.push('\\pard\\sl480\\slmult1\\par');
+        } else if (paragraphs.length > 0) {
+          paragraphs.push('\\pard\\sl480\\slmult1\\par');
         }
         paragraphs.push(`${center}Chapter ${chapterNumberWord(chapterNumber)}\\par`);
         if (title) paragraphs.push(`${center}${formatInlineRtf(title, opts)}\\par`);
@@ -251,7 +262,9 @@ export function buildParagraphs(inputFiles, opts) {
 
       if (isViewpointLine(line)) {
         const breakCw = opts.chapterBreak && paragraphs.length > 0 ? '\\page' : '';
+        if (!breakCw && paragraphs.length > 0 && paragraphs.at(-1) !== '\\pard\\par') paragraphs.push('\\pard\\par');
         paragraphs.push(`\\pard${breakCw}\\b ${formatInlineRtf(line, opts)}\\b0\\par`);
+        pendingHeadingBlank = !!opts.blankAfterHeading;
         continue;
       }
 
@@ -454,6 +467,25 @@ if (import.meta.vitest) {
       try {
         const { paragraphs } = buildParagraphs([a], { ...opts, chapterBreak: false });
         expect(paragraphs.every((p) => !p.includes('\\page'))).toBe(true);
+        expect(paragraphs[2]).toBe('\\pard\\par'); // 前の章との間を1行空ける
+      } finally {
+        ul(a);
+      }
+    });
+
+    test('--blank-after-heading では見出しの後に空行を1行補い、原稿側にあれば二重にしない', () => {
+      const a = join(tmpdir(), `rtf-${process.pid}-h.txt`);
+      wf(a, '【一章】\n本文。\n【二章】\n\n続き。\n');
+      try {
+        const { paragraphs } = buildParagraphs([a], { ...opts, blankAfterHeading: true });
+        expect(paragraphs.map((p) => (p === '\\pard\\par' ? '' : p.includes('\\b ') ? '見出し' : '本文'))).toEqual([
+          '見出し',
+          '',
+          '本文',
+          '見出し',
+          '',
+          '本文',
+        ]);
       } finally {
         ul(a);
       }
@@ -599,6 +631,7 @@ if (import.meta.vitest) {
         contact: null,
         rubyParens: false,
         chapterBreak: true,
+        blankAfterHeading: false,
         open: false,
         sceneBreak: null,
         sceneBreakIndent: null,

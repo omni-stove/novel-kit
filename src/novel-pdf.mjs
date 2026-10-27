@@ -18,6 +18,7 @@
  *   --a5                 A5・同人誌・大判の本（45字×20行）
  *   --dark               ダークモード（黒背景・白文字）
  *   --open               生成後にプレビューを開く
+ *   --no-chapter-break   章ごとに改ページせず、空行を1行空けて続ける
  *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
  *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
  *   --scene-break-indent <字数>  区切りの行を中央でなく行頭から字数分下げて置く（既定: 中央）
@@ -49,11 +50,12 @@ export function parseArgs(argv) {
       ...Object.keys(TRIM_SIZES).map((key) => ({ key: 'pageSize', flags: [`--${key}`], value: key })),
       { key: 'dark', flags: ['--dark'] },
       ARG.open,
+      { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
       { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
       ARG.sceneBreak,
       ARG.sceneBreakIndent,
     ],
-    { pageSize: 'a6', sceneBreak: SCENE_BREAK_MARK },
+    { pageSize: 'a6', chapterBreak: true, sceneBreak: SCENE_BREAK_MARK },
   );
 }
 
@@ -61,16 +63,19 @@ function generateHtml(sections, size, options) {
   const m = { top: size.margin.top, bottom: size.margin.bottom, left: size.margin.side, right: size.margin.side };
 
   const sectionHtmls = sections.map((s, i) => {
-    const needsPageBreak = startsNewChapter(sections, i);
+    const newChapter = startsNewChapter(sections, i);
+    const needsPageBreak = newChapter && options.chapterBreak !== false;
     const className = needsPageBreak ? 'section page-break' : 'section';
-    const separator = needsPageBreak ? '' : `<p class="separator">${escapeHtml(options.sceneBreak)}</p>\n`;
+    let lead = '';
+    if (!newChapter) lead = `<p class="separator">${escapeHtml(options.sceneBreak)}</p>\n`;
+    else if (i > 0 && !needsPageBreak) lead = '<p class="empty">&nbsp;</p>\n';
 
     let html = s.html;
-    if (needsPageBreak) {
+    if (newChapter) {
       html = html.replace(/^(<p class="empty">&nbsp;<\/p>\n)+/, '');
     }
 
-    return `<div class="${className}">\n${separator}${html}\n</div>`;
+    return `<div class="${className}">\n${lead}${html}\n</div>`;
   });
 
   return `<!DOCTYPE html>
@@ -366,6 +371,7 @@ if (import.meta.vitest) {
         sceneBreak: '＊',
         dark: false,
         open: false,
+        chapterBreak: true,
         blankAfterHeading: false,
         title: null,
         author: null,
@@ -387,6 +393,7 @@ if (import.meta.vitest) {
           'A',
           '--dark',
           '--open',
+          '--no-chapter-break',
           '--blank-after-heading',
           '--scene-break',
           '◆◆◆',
@@ -397,6 +404,7 @@ if (import.meta.vitest) {
         author: 'A',
         dark: true,
         open: true,
+        chapterBreak: false,
         blankAfterHeading: true,
         sceneBreak: '◆◆◆',
       });
