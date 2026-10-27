@@ -1,6 +1,6 @@
 # novel-kit
 
-小説原稿（`.txt`）の組版エンジンと、それを使う CLI（`novel`）・VS Code 拡張「小説プレビュー」（[vscode/README.md](vscode/README.md)）。
+小説原稿（`.txt`）の組版エンジンと、それを使う CLI（`novel`）・VS Code 拡張「Novel Kit」（[vscode/README.md](vscode/README.md)）。
 
 ![42字×34行で組んだ原稿のページ表示と、エクスプローラーの小説の目次](vscode/images/page.png)
 

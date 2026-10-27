@@ -1,5 +1,5 @@
 {
-  "displayName": "Novel Preview",
+  "displayName": "Novel Kit",
   "description": "Shows a manuscript text file (.txt) as pages typeset the same way as its PDF. Define the layout, such as characters × lines, the way you set up a page in Word. English manuscripts are detected automatically and typeset like a paperback.",
   "customEditor.preview": "Novel Preview",
   "customEditor.workSettings": "Work Settings",
