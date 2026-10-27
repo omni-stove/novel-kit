@@ -19,6 +19,7 @@
  *                        章番号は部ごとにリセットされ、部に章が1つしかない場合は章番号を表示しない。
  *                        未訳などで該当ファイルが存在しない境界はスキップする。
  *   --recto              章を必ず右ページ（recto）から開始する
+ *   --no-chapter-break   章ごとに改ページせず、前の章に続けて組む（--recto より優先する。部扉では改ページする）
  *   --no-smart-quotes    ストレート引用符をカーリー引用符に変換しない
  *   --open               生成後にプレビューを開く
  *   --scene-break <記号> 場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: * * *）
@@ -117,11 +118,12 @@ export function parseArgs(argv) {
       { key: 'pageSize', flags: ['--a5'], value: 'a5' },
       ARG.parts,
       { key: 'recto', flags: ['--recto'] },
+      { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
       { key: 'smartQuotes', flags: ['--no-smart-quotes'], value: false },
       ARG.open,
       ARG.sceneBreak,
     ],
-    { pageSize: '6x9', smartQuotes: true },
+    { pageSize: '6x9', chapterBreak: true, smartQuotes: true },
   );
 }
 
@@ -268,6 +270,7 @@ export function buildChapters(parsedFiles, partFirstIndices = null) {
 /**
  * 1章分の HTML を組む（部の先頭なら部扉を前に付ける）。
  * opts: smartQuotes / sceneBreak / bareChapterHead（章題もサブヘッドも無ければ章ヘッダを出さない）/
+ *   chapterBreak（false なら部の頭以外の章を改ページせず前の章に続ける）/
  *   lineNumbers（段落・区切り・章題に data-file: ファイル番号 / data-line: 0始まりの行番号 を付ける）。
  * 章頭・場面区切り直後の段落は字下げしない。記号だけの区切り行は書いた記号のまま各記号の間に en スペースを挟み、
  * 場面区切りは sceneBreak（既定 ENGLISH_SCENE_BREAK）を空白を en スペースにして組む。
@@ -316,7 +319,9 @@ export function chapterHtml(ch, opts) {
     }
   }
 
-  const cls = ch.number === 1 && (ch.part === null || ch.part === 1) ? 'chapter chapter-first' : 'chapter';
+  const first = ch.number === 1 && (ch.part === null || ch.part === 1);
+  const continued = opts.chapterBreak === false && !first && !ch.startsPart;
+  const cls = first ? 'chapter chapter-first' : continued ? 'chapter chapter-continued' : 'chapter';
   const partPage = ch.startsPart
     ? `<section class="part-page">\n<p class="part-number">Part ${chapterNumberWord(ch.part)}</p>\n</section>\n`
     : '';
@@ -325,7 +330,7 @@ export function chapterHtml(ch, opts) {
 
 /**
  * 全章を組んだ印刷用 HTML を返す。size: PAGE_SIZES の1つ（または同じ形のオブジェクト）。
- * opts: title / author / recto / smartQuotes / sceneBreak / lineNumbers。
+ * opts: title / author / recto / chapterBreak（false で章ごとに改ページしない）/ smartQuotes / sceneBreak / lineNumbers。
  * 章が1つしかない作品では、章題もサブヘッドも無ければ章ヘッダを出さない。
  */
 export function generateHtml(chapters, size, opts) {
@@ -447,6 +452,15 @@ ${googleFontsLinks('EB+Garamond:ital,wght@0,400;0,500;0,600;1,400')}
     .chapter {
       page: chapter;
       break-before: ${opts.recto ? 'recto' : 'page'};
+    }
+
+    .chapter-continued {
+      break-before: auto;
+    }
+
+    /* ページの頭から下げる 12% は、前の章に続けるときには行送りの整数倍の空きにする */
+    .chapter-continued .chapter-head {
+      margin-top: 2lh;
     }
 
     /* 柱を出さないため front ページとして扱う */
@@ -882,6 +896,7 @@ if (import.meta.vitest) {
         pageSize: '6x9',
         smartQuotes: true,
         recto: false,
+        chapterBreak: true,
         open: false,
         title: null,
         author: null,
@@ -906,6 +921,7 @@ if (import.meta.vitest) {
         '--part',
         '070,085',
         '--recto',
+        '--no-chapter-break',
         '--no-smart-quotes',
         '--open',
         '--scene-break',
@@ -917,6 +933,7 @@ if (import.meta.vitest) {
         author: 'A',
         parts: ['070', '085'],
         recto: true,
+        chapterBreak: false,
         smartQuotes: false,
         open: true,
         sceneBreak: '~',
@@ -1060,6 +1077,25 @@ if (import.meta.vitest) {
         'break-before: recto',
       );
       expect(generateHtml([chapter('One')], PAGE_SIZES['6x9'], { smartQuotes: true })).not.toContain('recto;');
+    });
+    test('chapterBreak: false なら2章目から前の章に続け、部の頭では改ページする', () => {
+      const chapters = [
+        chapter('One'),
+        { ...chapter('Two'), number: 2 },
+        { ...chapter('Three'), part: 2, startsPart: true },
+      ];
+      const classes = (opts) =>
+        [
+          ...generateHtml(chapters, PAGE_SIZES['6x9'], { smartQuotes: true, ...opts }).matchAll(
+            /<section class="chapter[^"]*"/g,
+          ),
+        ].map((m) => m[0].slice('<section class="'.length, -1));
+      expect(classes({ chapterBreak: false })).toEqual([
+        'chapter chapter-first',
+        'chapter chapter-continued',
+        'chapter',
+      ]);
+      expect(classes({})).toEqual(['chapter chapter-first', 'chapter', 'chapter']);
     });
   });
 

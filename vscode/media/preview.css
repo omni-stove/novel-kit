@@ -287,7 +287,7 @@ button:disabled {
 }
 
 /* 英語組版（en-pdf.mjs）の章扉・部扉の改ページも同じく段の区切りにする */
-#flow .chapter,
+#flow .chapter:not(.chapter-continued),
 #flow .part-page {
   break-before: column;
 }
@@ -338,7 +338,7 @@ button:disabled {
 /* 改ページの位置（章・部の頭）は、前との間を空けて区切りを見せる */
 #viewport.scroll #flow .section.page-break:not(:first-child),
 #viewport.scroll #flow .page-break-marker,
-#viewport.scroll #flow .chapter:not(:first-child),
+#viewport.scroll #flow .chapter:not(:first-child, .chapter-continued),
 #viewport.scroll #flow .part-page:not(:first-child) {
   margin-block-start: 4em;
 }

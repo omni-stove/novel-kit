@@ -42,6 +42,10 @@ export const DEFAULT_VIEW = {
   edit: true,
   /** 'page' = 用紙に組んでページで見せる / 'scroll' = カクヨム・小説家になろうのように横書きでページを区切らず縦に流す */
   mode: 'page',
+  /** 章ごとに改ページするか（false なら空行を1行空けて続ける） */
+  chapterBreak: true,
+  /** 章見出し（視点行）と本文の間に空行を1行補うか */
+  blankAfterHeading: false,
 };
 
 export function normalizeView(raw) {
@@ -52,6 +56,8 @@ export function normalizeView(raw) {
     zoom: Number.isFinite(percent) && percent >= 10 && percent <= 400 ? Math.round(percent) : DEFAULT_VIEW.zoom,
     edit: typeof r.edit === 'boolean' ? r.edit : DEFAULT_VIEW.edit,
     mode: r.mode === 'scroll' ? 'scroll' : DEFAULT_VIEW.mode,
+    chapterBreak: typeof r.chapterBreak === 'boolean' ? r.chapterBreak : DEFAULT_VIEW.chapterBreak,
+    blankAfterHeading: typeof r.blankAfterHeading === 'boolean' ? r.blankAfterHeading : DEFAULT_VIEW.blankAfterHeading,
   };
 }
 
@@ -199,16 +205,24 @@ if (import.meta.vitest) {
         writeSettingsFile(file, {
           layout: { chars: 40, lines: 40 },
           english: { paper: 'A5' },
-          view: { scope: 'file', zoom: '150', edit: false, mode: 'scroll' },
+          view: { scope: 'file', zoom: '150', edit: false, mode: 'scroll', chapterBreak: false },
         });
+        const view = {
+          scope: 'file',
+          zoom: 150,
+          edit: false,
+          mode: 'scroll',
+          chapterBreak: false,
+          blankAfterHeading: false,
+        };
         expect(JSON.parse(readFileSync(file, 'utf-8'))).toEqual({
           ...DEFAULT_LAYOUT,
           chars: 40,
           lines: 40,
           english: { ...DEFAULT_ENGLISH_LAYOUT, paper: 'A5' },
-          view: { scope: 'file', zoom: 150, edit: false, mode: 'scroll' },
+          view,
         });
-        expect(readSettingsFile(file).view).toEqual({ scope: 'file', zoom: 150, edit: false, mode: 'scroll' });
+        expect(readSettingsFile(file).view).toEqual(view);
         expect(readSettingsFile(file).english.paper).toBe('A5');
       });
     });
@@ -313,7 +327,11 @@ if (import.meta.vitest) {
 
   describe('normalizeView', () => {
     test('不正値は既定に戻す', () => {
-      expect(normalizeView({ scope: 'x', zoom: 'big', edit: 'yes' })).toEqual(DEFAULT_VIEW);
+      expect(normalizeView({ scope: 'x', zoom: 'big', edit: 'yes', chapterBreak: 'no' })).toEqual(DEFAULT_VIEW);
+      expect(normalizeView({ chapterBreak: false, blankAfterHeading: true })).toMatchObject({
+        chapterBreak: false,
+        blankAfterHeading: true,
+      });
       expect(normalizeView({ zoom: 'fit-page' }).zoom).toBe('fit');
       expect(normalizeView({ zoom: 'fit-width' }).zoom).toBe('fit');
       expect(normalizeView({ zoom: 120 }).zoom).toBe(120);

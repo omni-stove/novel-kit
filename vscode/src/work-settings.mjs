@@ -150,11 +150,15 @@ const fieldDescriptions = () => ({
     chars: t('Number of characters per line'),
     lines: t('Lines per page (null for automatic leading)'),
     coverless: t('Make no cover, and put the title and author at body size at the head of the synopsis and the body'),
-    chapterBreak: t('false to not start a new page for each chapter (pdf / rtf / rtf-en / docx)'),
+    chapterBreak: t(
+      'false to not start a new page for each chapter (pdf / pdf-en / novel-pdf / epub / rtf / rtf-en / docx)',
+    ),
     pageBreak: t('Same as chapterBreak. false to not start a new page for each chapter (pdf)'),
     synopsis: t('false to leave out the synopsis (synopsis.txt)'),
     synopsisOnTitle: t('Put the synopsis on the title page'),
-    blankAfterHeading: t('Add a blank line between chapter headings (viewpoint lines) and the body'),
+    blankAfterHeading: t(
+      'Add a blank line between chapter headings (viewpoint lines) and the body (pdf / novel-pdf / epub / rtf / docx / merge)',
+    ),
     review: t(
       'For first readers. Ignore the cover, synopsis, character list and parts, and typeset about the first 20,000 characters',
     ),

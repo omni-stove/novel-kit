@@ -134,6 +134,11 @@ function renderPanel({ open, tab, width }) {
           <legend>${t('Font')}</legend>
           <input id="font-family" data-page-field type="text">
         </fieldset>
+        <fieldset>
+          <legend>${t('Chapters')}</legend>
+          <label><input id="view-chapter-break" type="checkbox">${t('New page for each chapter')}</label>
+          <label id="view-blank-after-heading-label"><input id="view-blank-after-heading" type="checkbox">${t('Blank line after chapter headings')}</label>
+        </fieldset>
         <p id="language-note" class="note"></p>
         <p id="derived" class="note"></p>
         <p id="layout-file" class="note"></p>
