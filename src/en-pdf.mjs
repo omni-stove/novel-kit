@@ -65,13 +65,13 @@ import {
   escapeXml,
   getBodyLines,
   isEpigraphLine,
-  isSceneBreak,
   isSeparator,
   isSubheadLine,
   parseEpigraphLine,
   parseSubheadLine,
   parseViewpointLine,
   readLines,
+  separatorMark,
 } from './lib/text-parser.mjs';
 
 /** 英語のペーパーバックでの場面区切りの既定（--scene-break 未指定時に組む記号） */
@@ -197,7 +197,7 @@ export function parseEnglishLines(sourceLines) {
     if (line.trim() === '') {
       blocks.push({ type: 'space', line: n });
     } else if (isSeparator(line)) {
-      blocks.push({ type: 'ornament', mark: isSceneBreak(line) ? null : line.trim(), line: n });
+      blocks.push({ type: 'ornament', mark: separatorMark(line, null), line: n });
     } else if (i === headingIndex) {
       const { title, rest } = parseViewpointLine(line);
       chapterTitle = title || null;
@@ -812,13 +812,13 @@ if (import.meta.vitest) {
       }
     });
 
-    test('* の行は * * * の場面区切り、ほかの記号だけの行（>>> など）は書いたまま、--- は出さない', () => {
+    test('* の行は * * * の場面区切り、ほかの記号だけの行（>>> など）と *: の記号は書いたまま、--- は出さない', () => {
       const tmp = join(tmpdir(), `en-pdf-${process.pid}-v.txt`);
-      wf(tmp, 'Body A.\n\n*\n\nBody B.\n\n>>>\n\n---\n\nBody C.\n');
+      wf(tmp, 'Body A.\n\n*\n\nBody B.\n\n>>>\n\n---\n\nBody C.\n\n*: ~\n\nBody D.\n\n*:\n\nBody E.\n');
       try {
         const parsed = parseEnglishFile(tmp);
         const ornaments = parsed.blocks.filter((b) => b.type === 'ornament');
-        expect(ornaments.map((b) => b.mark)).toEqual([null, '>>>']);
+        expect(ornaments.map((b) => b.mark)).toEqual([null, '>>>', '~', null]);
         const html = chapterHtml(
           {
             number: 1,
