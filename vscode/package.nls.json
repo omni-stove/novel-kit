@@ -38,7 +38,7 @@
   "config.outDir": "Where \"Build the Outputs of novel.json\" writes, relative to the workspace folder (an absolute path also works). Same as `--out-dir` of `novel build`",
   "config.openAfterExport": "Open exported PDFs and RTFs (also for \"Export a PDF in the Current Layout\"; like `novel build`, EPUBs and split / merge txt files are not opened). They are not opened when the environment variable `AUTO_OPEN=0` is set",
   "view.outline": "Novel Outline",
-  "config.show.backup": "Show the \"Back Up to the Remote Repository\" button (in the title bars of \"Novel Outline\" and the editor) and command. Turn it off if you do not back up with Git",
+  "config.show.backup": "Show the \"Back Up to the Remote Repository\" button (on the preview toolbar and in the title bar of \"Novel Outline\") and command. Turn it off if you do not back up with Git",
   "config.show.statusBar": "Show the character count, sheets of manuscript paper and layout of the manuscript in the status bar",
   "config.show.outline": "Show \"Novel Outline\" in the Explorer",
   "config.show.editorButtons": "Show the buttons in the title bar of the editor of a `.txt` / `novel.json` (open the preview on the side, switch to the preview, open the work settings)"

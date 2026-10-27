@@ -38,7 +38,7 @@
   "config.outDir": "「novel.json の出力を作る」の出力先。ワークスペースのフォルダから（絶対パスも可）。`novel build` の `--out-dir` と同じ",
   "config.openAfterExport": "出力した PDF・RTF を開く（「現在のレイアウトでPDFを出力」も同じ。EPUB と split / merge の txt は `novel build` と同じく開かない）。環境変数 `AUTO_OPEN=0` のときは開かない",
   "view.outline": "小説の目次",
-  "config.show.backup": "「リモートのリポジトリにバックアップ」のボタン（「小説の目次」とエディタのタイトルバー）とコマンドを出す。Git でバックアップしないならオフにする",
+  "config.show.backup": "「リモートのリポジトリにバックアップ」のボタン（プレビューのツールバーと「小説の目次」のタイトルバー）とコマンドを出す。Git でバックアップしないならオフにする",
   "config.show.statusBar": "ステータスバーに原稿の文字数・換算枚数・レイアウトを出す",
   "config.show.outline": "エクスプローラーに「小説の目次」を出す",
   "config.show.editorButtons": "`.txt`・`novel.json` のエディタのタイトルバーにボタン（小説プレビューを横に開く・小説プレビューに切り替える・作品の設定を開く）を出す"

@@ -320,6 +320,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         scope: session.scope,
         view,
         canShowWork: listWorkFiles(filePath).includes(filePath),
+        showBackup: config().get('show.backup'),
         reveal: initialReveal ?? revealTarget(),
         forceReveal: !!initialReveal,
         sources: built.sources,
@@ -458,6 +459,8 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         return session.doc && updateSettings(session.doc, { view: msg.view });
       case 'jump':
         return openInTextEditor(session.files[msg.fileIndex], msg.line, panel);
+      case 'backup':
+        return backup();
       case 'openText':
         return replaceWithTextEditor(session, session.files[msg.fileIndex] ?? session.doc?.uri.fsPath, msg.line ?? 0);
       case 'refresh':

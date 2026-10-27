@@ -70,7 +70,7 @@ The "Work" tab of the novel panel edits the `novel.json` nearest to the manuscri
 
 ## Backup
 
-The cloud button in the title bar of "Novel Outline" in the Explorer (command "Back Up to the Remote Repository", also in "…" of the editor title bar) saves unsaved manuscripts, records every change in the work's folder with Git, and sends it to the remote repository such as GitHub. One click keeps a copy of the manuscript elsewhere, without knowing git commands.
+"☁ Backup" on the preview toolbar (also the cloud button in the title bar of "Novel Outline" in the Explorer, and the command "Back Up to the Remote Repository") saves unsaved manuscripts, records every change in the work's folder with Git, and sends it to the remote repository such as GitHub. One click keeps a copy of the manuscript elsewhere, without knowing git commands.
 
 - It works through the Git extension built into VS Code, which also asks you to sign in to GitHub
 - If the work's folder is not a Git repository yet, it offers "Publish to GitHub"; if there is no remote, the Git extension's "Publish Branch"

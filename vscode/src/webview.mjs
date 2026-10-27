@@ -57,6 +57,7 @@ export function renderWebviewHtml({ cssUris, jsUris, cspSource, nonce, panel, la
       <button id="export" aria-haspopup="menu" aria-expanded="false" title="${attr(t('Choose what to make from a menu (a PDF in the current layout, or the outputs in novel.json)'))}">${t('Export')} ▾</button>
       <div id="export-menu" role="menu" hidden></div>
     </span>
+    <button id="backup" hidden title="${attr(t("Save the manuscripts, record every change in the work's folder with Git and send it to the remote repository"))}">☁ ${t('Backup')}</button>
     <span id="stats"></span>
     <span id="panel-toggles" class="segmented" title="${attr(t('Show in the panel on the right (press the selected one again to close it)'))}">
       <button data-panel-tab="prose" title="${attr(t('Show the character count and the distribution of sentence endings in the narration in the panel on the right'))}">${t('Prose')}</button><button data-panel-tab="work" title="${attr(t('Edit the work information, part boundaries and outputs of novel.json in the panel on the right'))}">${t('Work')}</button><button data-panel-tab="page" title="${attr(t('Change the paper, margins, writing direction and font in the panel on the right'))}">${t('Page Setup')}</button>
