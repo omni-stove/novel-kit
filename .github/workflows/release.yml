@@ -72,3 +72,10 @@ jobs:
         run: |
           npm pkg set version=${{ steps.version.outputs.version }}
           pnpm run release
+
+      # release が作った vsix をそのまま出して、GitHub Release と Marketplace で中身と version を揃える
+      - if: steps.version.outputs.version && matrix.name == 'vscode'
+        working-directory: vscode
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce publish --packagePath dist/novel-preview.vsix
