@@ -16,6 +16,7 @@
 #novel-panel[hidden],
 #novel-panel #tab-page[hidden],
 #novel-panel fieldset[hidden],
+#novel-panel #tab-page label[hidden],
 #novel-panel.blank :is(#tab-prose, #tab-work, #tab-page) {
   display: none;
 }
@@ -315,7 +316,7 @@
   width: 5em;
 }
 
-#novel-panel #tab-page input[type="radio"] {
+#novel-panel #tab-page input:is([type="radio"], [type="checkbox"]) {
   margin: 0 2px 0 0;
 }
 

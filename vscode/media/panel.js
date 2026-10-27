@@ -206,9 +206,12 @@ function createNovelPanel(vscode) {
     );
   }
 
-  /** ページ設定の欄を、届いた値で埋める。英語の原稿は横書き固定で、設定ファイルの "english" のレイアウトを見せる */
+  /**
+   * ページ設定の欄を、届いた値で埋める。英語の原稿は横書き固定で、設定ファイルの "english" のレイアウトを見せる。
+   * 章の欄は表示設定（view）で、英語の組版は章ヘッダの後に空きを取るので、見出しの後の空行は日本語の原稿にだけ出す
+   */
   function fillPage(data) {
-    const { layout, metrics, presets, presetName, userPresetNames, layoutFile, language } = data;
+    const { layout, metrics, presets, presetName, userPresetNames, layoutFile, language, view } = data;
     const english = language === 'en';
     pageLayout = layout;
 
@@ -241,6 +244,9 @@ function createNovelPanel(vscode) {
     $('font-family').placeholder = english
       ? t('Default ({0})', 'EB Garamond / Georgia')
       : t('Default ({0})', 'Noto Serif JP / 游明朝');
+    $('view-chapter-break').checked = view.chapterBreak;
+    $('view-blank-after-heading').checked = view.blankAfterHeading;
+    $('view-blank-after-heading-label').hidden = english;
     const pitch = Math.round(metrics.linePitchMm * 100) / 100;
     $('derived').textContent = english
       ? t(
@@ -291,6 +297,12 @@ function createNovelPanel(vscode) {
   for (const el of document.querySelectorAll('[data-page-field]')) {
     el.addEventListener('change', () => pageLayout && post({ type: 'layout', layout: readPage() }));
   }
+  $('view-chapter-break').addEventListener('change', (e) =>
+    post({ type: 'view', view: { chapterBreak: e.target.checked } }),
+  );
+  $('view-blank-after-heading').addEventListener('change', (e) =>
+    post({ type: 'view', view: { blankAfterHeading: e.target.checked } }),
+  );
   $('page-preset').addEventListener('change', (e) => {
     if (e.target.value) post({ type: 'preset', name: e.target.value });
   });

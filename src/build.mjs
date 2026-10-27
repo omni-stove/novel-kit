@@ -37,15 +37,16 @@
  *   pdf        縦書き（横書き）の PDF。coverless, chapterBreak（false で章ごとに改ページしない）,
  *              pageBreak（chapterBreak と同じ）, synopsis（false で梗概を入れない）,
  *              synopsisOnTitle, blankAfterHeading, review
- *   pdf-en     英語のペーパーバック風 PDF。recto, smartQuotes（false でカーリー引用符にしない）。判型は英語のレイアウトの用紙から選ぶ
- *   novel-pdf  文庫本見開きの縦書き PDF。size（"a6" / "shinsho" / "shiroku" / "b6" / "a5"。src/layout.mjs の TRIM_SIZES）, dark, blankAfterHeading
- *   epub       EPUB。縦書きか横書きかはレイアウトの writingMode
- *   rtf        日本語原稿の RTF。rubyParens, chapterBreak, contact
+ *   pdf-en     英語のペーパーバック風 PDF。recto, chapterBreak, smartQuotes（false でカーリー引用符にしない）。判型は英語のレイアウトの用紙から選ぶ
+ *   novel-pdf  文庫本見開きの縦書き PDF。size（"a6" / "shinsho" / "shiroku" / "b6" / "a5"。src/layout.mjs の TRIM_SIZES）, dark,
+ *              chapterBreak, blankAfterHeading
+ *   epub       EPUB。縦書きか横書きかはレイアウトの writingMode。chapterBreak, blankAfterHeading
+ *   rtf        日本語原稿の RTF。rubyParens, chapterBreak, blankAfterHeading, contact
  *   rtf-en     英語投稿用（Shunn 形式）の RTF。rubyParens, chapterBreak, contact
  *   docx       縦書きの Word 文書。coverless, chapterBreak, synopsis, blankAfterHeading。
  *              用紙・余白・字数×行数はレイアウトのまま Word のページ設定に入れる（横書きのレイアウトでも縦書きで組む）
  *   split      章ごとの txt（out はディレクトリ）。input はディレクトリ1つ
- *   merge      1つにまとめた txt。input はディレクトリ1つ。rubyParens
+ *   merge      1つにまとめた txt。input はディレクトリ1つ。rubyParens, blankAfterHeading
  * parts は作品で1つだけ書き、pdf / pdf-en / docx / split / merge のすべてに効く（出力ごとには変えない）。
  */
 
@@ -140,6 +141,7 @@ function enPdfArgs(output, config, { warn }) {
   return [
     `--${pageSize ?? '6x9'}`,
     ...flag(output.recto, '--recto'),
+    ...flag(output.chapterBreak === false, '--no-chapter-break'),
     ...flag(output.smartQuotes === false, '--no-smart-quotes'),
     ...option(config.parts?.join(','), '--part'),
     ...sceneBreakArgs(output, config.sceneBreak?.en),
@@ -149,6 +151,7 @@ function enPdfArgs(output, config, { warn }) {
 const novelPdfArgs = (output, config) => [
   ...(output.size ? [`--${output.size}`] : []),
   ...flag(output.dark, '--dark'),
+  ...flag(output.chapterBreak === false, '--no-chapter-break'),
   ...flag(output.blankAfterHeading, '--blank-after-heading'),
   ...sceneBreakArgs(output, config.sceneBreak?.ja),
   ...sceneBreakIndentArgs(output, config),
@@ -156,16 +159,22 @@ const novelPdfArgs = (output, config) => [
 
 const epubArgs = (output, config) => [
   ...flag(layoutOf(output, config).writingMode === 'horizontal', '--horizontal'),
+  ...flag(output.chapterBreak === false, '--no-chapter-break'),
+  ...flag(output.blankAfterHeading, '--blank-after-heading'),
   ...sceneBreakArgs(output, config.sceneBreak?.ja),
   ...sceneBreakIndentArgs(output, config),
 ];
 
-/** rtf（日本語）は作品の sceneBreak、rtf-en（Shunn 形式）は出力ごとの指定だけを使う。字下げは rtf だけ */
+/**
+ * rtf（日本語）は作品の sceneBreak、rtf-en（Shunn 形式）は出力ごとの指定だけを使う。
+ * 字下げと見出しの後の空行は rtf だけ（Shunn 形式は章扉の後に常に空ける）
+ */
 const rtfArgs = (style) => (output, config) => [
   style,
   ...option(output.contact?.join(';'), '--contact'),
   ...flag(output.rubyParens, '--ruby-parens'),
   ...flag(output.chapterBreak === false, '--no-chapter-break'),
+  ...flag(style === '--ja' && output.blankAfterHeading, '--blank-after-heading'),
   ...sceneBreakArgs(output, style === '--ja' ? config.sceneBreak?.ja : null),
   ...(style === '--ja' ? sceneBreakIndentArgs(output, config) : []),
 ];
@@ -208,6 +217,7 @@ function textArgv(output, config, out, { target, rubyParens }, { merge }) {
     ...(parts ? [`--splits=${parts.join(',')}`] : []),
     ...option(target ?? workValue(output, config, 'target'), '--target'),
     ...flag(merge && (rubyParens || output.rubyParens), '--ruby-parens'),
+    ...flag(merge && output.blankAfterHeading, '--blank-after-heading'),
     ...sceneBreakArgs(output, config.sceneBreak?.ja),
     ...sceneBreakIndentArgs(output, config),
   ];
@@ -258,10 +268,10 @@ const KEYS_BY_FORMAT = {
     'blankAfterHeading',
     'review',
   ],
-  'pdf-en': [...WORK_KEYS, 'recto', 'smartQuotes'],
-  'novel-pdf': [...WORK_KEYS, 'sceneBreakIndent', 'size', 'dark', 'blankAfterHeading'],
-  epub: [...WORK_KEYS, 'sceneBreakIndent', 'writingMode', 'chars', 'lines'],
-  rtf: [...WORK_KEYS, 'sceneBreakIndent', 'contact', 'rubyParens', 'chapterBreak'],
+  'pdf-en': [...WORK_KEYS, 'recto', 'chapterBreak', 'smartQuotes'],
+  'novel-pdf': [...WORK_KEYS, 'sceneBreakIndent', 'size', 'dark', 'chapterBreak', 'blankAfterHeading'],
+  epub: [...WORK_KEYS, 'sceneBreakIndent', 'writingMode', 'chars', 'lines', 'chapterBreak', 'blankAfterHeading'],
+  rtf: [...WORK_KEYS, 'sceneBreakIndent', 'contact', 'rubyParens', 'chapterBreak', 'blankAfterHeading'],
   'rtf-en': [...WORK_KEYS, 'contact', 'rubyParens', 'chapterBreak'],
   docx: [
     ...WORK_KEYS,
@@ -275,7 +285,7 @@ const KEYS_BY_FORMAT = {
     'blankAfterHeading',
   ],
   split: TEXT_KEYS,
-  merge: [...TEXT_KEYS, 'rubyParens'],
+  merge: [...TEXT_KEYS, 'rubyParens', 'blankAfterHeading'],
 };
 
 /** 出力の形式（novel <format> のコマンド名）の一覧 */
@@ -502,6 +512,21 @@ if (import.meta.vitest) {
       expect(argvOf({ format: 'rtf-en', out: 'a.rtf', contact: ['Name', 'Mail'] })).toEqual(
         expect.arrayContaining(['--shunn', '--contact', 'Name;Mail']),
       );
+    });
+
+    test('chapterBreak / blankAfterHeading は効く出力でだけフラグにする', () => {
+      const both = { chapterBreak: false, blankAfterHeading: true };
+      for (const format of ['novel-pdf', 'epub'])
+        expect(argvOf({ format, out: 'a', ...both })).toEqual(
+          expect.arrayContaining(['--no-chapter-break', '--blank-after-heading']),
+        );
+      expect(argvOf({ format: 'rtf', out: 'a.rtf', ...both })).toEqual(
+        expect.arrayContaining(['--no-chapter-break', '--blank-after-heading']),
+      );
+      expect(argvOf({ format: 'rtf-en', out: 'a.rtf', ...both })).not.toContain('--blank-after-heading');
+      expect(argvOf({ format: 'pdf-en', out: 'a.pdf', ...both })).toContain('--no-chapter-break');
+      expect(argvOf({ format: 'merge', out: 'a.txt', ...both })).toContain('--blank-after-heading');
+      expect(argvOf({ format: 'split', out: 'a', ...both })).not.toContain('--blank-after-heading');
     });
 
     test('docx は用紙・余白・字数×行数をレイアウトのまま渡し、横書きのレイアウトなら警告する', () => {

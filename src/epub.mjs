@@ -13,6 +13,8 @@
  *   --title <text>        書籍タイトル（デフォルト: ファイル名）
  *   --author <text>       著者名
  *   --horizontal          横書きモード（デフォルトは縦書き）
+ *   --no-chapter-break    章ごとに改ページ（xhtml を分ける）せず、空行を1行空けて続ける
+ *   --blank-after-heading 章見出し（視点行）と本文の間に空行を1行補う（既定: 補わない）
  *   --scene-break <記号>  場面区切り（* の行）とファイルの継ぎ目に組む記号（既定: ＊）
  *   --scene-break-indent <字数>  区切りの行を中央でなく行頭から字数分下げて置く（既定: 中央）
  *
@@ -59,10 +61,12 @@ export function parseArgs(argv) {
       ARG.title,
       ARG.author,
       { key: 'vertical', flags: ['--horizontal'], value: false },
+      { key: 'chapterBreak', flags: ['--no-chapter-break'], value: false },
+      { key: 'blankAfterHeading', flags: ['--blank-after-heading'] },
       ARG.sceneBreak,
       ARG.sceneBreakIndent,
     ],
-    { vertical: true, sceneBreak: SCENE_BREAK_MARK },
+    { vertical: true, chapterBreak: true, sceneBreak: SCENE_BREAK_MARK },
   );
 }
 function generateStyleCss(vertical, sceneBreakIndent = null) {
@@ -254,7 +258,7 @@ function generateContainerXml() {
 </container>`;
 }
 
-function generateContentOpf(bookId, title, author, chapters, hasTitle, vertical, images = []) {
+function generateContentOpf(bookId, title, author, files, hasTitle, vertical, images = []) {
   const direction = vertical ? 'rtl' : 'ltr';
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -268,8 +272,7 @@ function generateContentOpf(bookId, title, author, chapters, hasTitle, vertical,
     spineItems.push('    <itemref idref="titlepage" />');
   }
 
-  for (let i = 0; i < chapters.length; i++) {
-    const id = `chapter-${String(i + 1).padStart(3, '0')}`;
+  for (const { id } of files) {
     manifestItems.push(`    <item id="${id}" href="${id}.xhtml" media-type="application/xhtml+xml" />`);
     spineItems.push(`    <itemref idref="${id}" />`);
   }
@@ -299,17 +302,15 @@ ${spineItems.join('\n')}
 </package>`;
 }
 
-function generateTocXhtml(chapters, hasTitle) {
+function generateTocXhtml(tocItems, hasTitle) {
   const navItems = [];
 
   if (hasTitle) {
     navItems.push('      <li><a href="titlepage.xhtml">表紙</a></li>');
   }
 
-  for (let i = 0; i < chapters.length; i++) {
-    const id = `chapter-${String(i + 1).padStart(3, '0')}`;
-    const title = chapters[i].title;
-    navItems.push(`      <li><a href="${id}.xhtml">${title}</a></li>`);
+  for (const { href, title } of tocItems) {
+    navItems.push(`      <li><a href="${href}">${title}</a></li>`);
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -354,6 +355,34 @@ export function groupIntoChapters(sections, fileNames, bookTitle, sceneBreak = S
   return chapters;
 }
 
+/**
+ * 章を xhtml のファイルに割り当て、ファイル { id, title, xhtml } と目次の項目 { href, title } を返す。
+ * chapterBreak なら1章1ファイル（リーダーはファイルの頭で改ページする）。false なら全章を1ファイルに入れ、
+ * 章の間に空行を1行空けて、目次は各章の頭に付けた id へ飛ばす
+ */
+export function chapterFiles(chapters, { chapterBreak = true, bookTitle = '' } = {}) {
+  const idOf = (i) => `chapter-${String(i + 1).padStart(3, '0')}`;
+  if (chapterBreak) {
+    return {
+      files: chapters.map((ch, i) => ({ id: idOf(i), title: ch.title, xhtml: ch.xhtml })),
+      toc: chapters.map((ch, i) => ({ href: `${idOf(i)}.xhtml`, title: ch.title })),
+    };
+  }
+  const file = idOf(0);
+  return {
+    files: [
+      {
+        id: file,
+        title: bookTitle,
+        xhtml: chapters
+          .map((ch, i) => `${i > 0 ? '<p><br /></p>\n' : ''}<section id="${idOf(i)}">\n${ch.xhtml}\n</section>`)
+          .join('\n'),
+      },
+    ],
+    toc: chapters.map((ch, i) => ({ href: `${file}.xhtml#${idOf(i)}`, title: ch.title })),
+  };
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
 
@@ -367,6 +396,7 @@ export async function main(argv = process.argv.slice(2)) {
   const imageRegistry = createImageRegistry();
   const sections = parseWithSectionNumbering(inputFiles, parseTextFileForEpub, {
     sceneBreak: args.sceneBreak,
+    blankAfterHeading: args.blankAfterHeading,
     illustSrc: imageRegistry.hrefOf,
   });
   const images = imageRegistry.images();
@@ -378,6 +408,7 @@ export async function main(argv = process.argv.slice(2)) {
     title,
     args.sceneBreak,
   );
+  const { files, toc } = chapterFiles(chapters, { chapterBreak: args.chapterBreak, bookTitle: title });
 
   const tmpDir = mkdtempSync(join(tmpdir(), 'epub-'));
   const oebpsDir = join(tmpDir, 'OEBPS');
@@ -394,21 +425,19 @@ export async function main(argv = process.argv.slice(2)) {
     writeFileSync(join(oebpsDir, 'style.css'), generateStyleCss(args.vertical, args.sceneBreakIndent));
     writeFileSync(
       join(oebpsDir, 'content.opf'),
-      generateContentOpf(bookId, title, args.author, chapters, hasTitle, args.vertical, images),
+      generateContentOpf(bookId, title, args.author, files, hasTitle, args.vertical, images),
     );
     if (images.length > 0) mkdirSync(join(oebpsDir, 'images'));
     for (const image of images) copyFileSync(image.path, join(oebpsDir, image.href));
-    writeFileSync(join(oebpsDir, 'toc.xhtml'), generateTocXhtml(chapters, hasTitle));
+    writeFileSync(join(oebpsDir, 'toc.xhtml'), generateTocXhtml(toc, hasTitle));
 
     if (hasTitle) {
       writeFileSync(join(oebpsDir, 'titlepage.xhtml'), generateTitlePageXhtml(title, args.author));
     }
 
-    for (let i = 0; i < chapters.length; i++) {
-      const id = `chapter-${String(i + 1).padStart(3, '0')}`;
-      const xhtml = generateChapterXhtml(chapters[i].xhtml, chapters[i].title, i);
-      writeFileSync(join(oebpsDir, `${id}.xhtml`), xhtml);
-    }
+    files.forEach((file, i) => {
+      writeFileSync(join(oebpsDir, `${file.id}.xhtml`), generateChapterXhtml(file.xhtml, file.title, i));
+    });
 
     const outputPath = resolve(args.output);
     execSync(`cd "${tmpDir}" && zip -0Xq "${outputPath}" mimetype && zip -rq "${outputPath}" META-INF OEBPS`);
@@ -470,6 +499,41 @@ if (import.meta.vitest) {
     });
   });
 
+  describe('chapterFiles', () => {
+    const chapters = [
+      { xhtml: 'a', title: '1' },
+      { xhtml: 'b', title: '2' },
+    ];
+    test('既定は1章1ファイルで、目次はファイルへ飛ばす', () => {
+      expect(chapterFiles(chapters)).toEqual({
+        files: [
+          { id: 'chapter-001', title: '1', xhtml: 'a' },
+          { id: 'chapter-002', title: '2', xhtml: 'b' },
+        ],
+        toc: [
+          { href: 'chapter-001.xhtml', title: '1' },
+          { href: 'chapter-002.xhtml', title: '2' },
+        ],
+      });
+    });
+    test('chapterBreak: false なら1ファイルに空行を挟んでつなぎ、目次は章の頭の id へ飛ばす', () => {
+      expect(chapterFiles(chapters, { chapterBreak: false, bookTitle: '本' })).toEqual({
+        files: [
+          {
+            id: 'chapter-001',
+            title: '本',
+            xhtml:
+              '<section id="chapter-001">\na\n</section>\n<p><br /></p>\n<section id="chapter-002">\nb\n</section>',
+          },
+        ],
+        toc: [
+          { href: 'chapter-001.xhtml#chapter-001', title: '1' },
+          { href: 'chapter-001.xhtml#chapter-002', title: '2' },
+        ],
+      });
+    });
+  });
+
   describe('createImageRegistry', () => {
     test('同じ画像は1つにまとめ、同名の別の画像は連番で分ける', () => {
       const dir = mkdtempSync(join(tmpdir(), 'epub-test-'));
@@ -498,10 +562,16 @@ if (import.meta.vitest) {
         title: null,
         author: null,
         vertical: true,
+        chapterBreak: true,
+        blankAfterHeading: false,
         sceneBreak: '＊',
         sceneBreakIndent: null,
       });
       expect(parseArgs(['--horizontal']).vertical).toBe(false);
+      expect(parseArgs(['--no-chapter-break', '--blank-after-heading'])).toMatchObject({
+        chapterBreak: false,
+        blankAfterHeading: true,
+      });
     });
     test('--output・--title・--author・--scene-break を読む', () => {
       expect(

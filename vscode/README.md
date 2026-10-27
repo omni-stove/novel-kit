@@ -44,7 +44,7 @@ It appears to the right of the preview. "Prose & Settings" at the right end of t
 
 - **Prose** (the default tab): character counts and sheets for this file and the whole work, and the tendencies of the prose
 - **Work**: the form for `novel.json` (see "Work settings" below)
-- **Page Setup**: the layout (preset, characters × lines), writing direction, paper, margins and font, and saving and deleting presets
+- **Page Setup**: the layout (preset, characters × lines), writing direction, paper, margins and font, saving and deleting presets, and whether chapters start on a new page and get a blank line after the heading in the preview
 
 ## Work settings
 

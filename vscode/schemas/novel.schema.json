@@ -227,6 +227,14 @@
         "mode": {
           "enum": ["page", "scroll"],
           "description": "表示の形（page: 用紙に組んでページで見せる / scroll: カクヨム・小説家になろうのように横書きでページを区切らず縦に流す）"
+        },
+        "chapterBreak": {
+          "type": "boolean",
+          "description": "プレビューで章ごとに改ページする（false なら空行を1行空けて続ける。既定は true）"
+        },
+        "blankAfterHeading": {
+          "type": "boolean",
+          "description": "プレビューで章見出し（視点行）と本文の間に空行を1行補う"
         }
       }
     }
@@ -280,7 +288,7 @@
         },
         "chapterBreak": {
           "type": "boolean",
-          "description": "false で章ごとに改ページしない（pdf / rtf / rtf-en / docx）"
+          "description": "false で章ごとに改ページしない（pdf / pdf-en / novel-pdf / epub / rtf / rtf-en / docx）"
         },
         "pageBreak": {
           "type": "boolean",
@@ -296,7 +304,7 @@
         },
         "blankAfterHeading": {
           "type": "boolean",
-          "description": "章見出し（視点行）と本文の間に空行を1行補う"
+          "description": "章見出し（視点行）と本文の間に空行を1行補う（pdf / novel-pdf / epub / rtf / docx / merge）"
         },
         "review": {
           "type": "boolean",
