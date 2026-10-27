@@ -134,9 +134,9 @@ button:disabled {
   box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
 }
 
-#export-menu.align-right {
-  right: 0;
-  left: auto;
+#export-menu.align-left {
+  right: auto;
+  left: 0;
 }
 
 #export-menu[hidden] {
