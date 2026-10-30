@@ -208,7 +208,12 @@ export function trimBlankEdges(lines) {
  * （【】は以前の書き方として残す。行は1対1のままなので、行番号で原稿を書き換える側にも影響しない）。
  */
 export function splitLines(content) {
-  return content.split('\n').map((l) => hashHeadingToViewpoint(l.replace(/\r$/, '')));
+  return splitRawLines(content).map(hashHeadingToViewpoint);
+}
+
+/** 見出しを読み替えない行の分割。プレビューの編集で原稿の行をそのまま書き戻すための元テキストに使う */
+export function splitRawLines(content) {
+  return content.split('\n').map((l) => l.replace(/\r$/, ''));
 }
 
 /**
