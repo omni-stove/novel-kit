@@ -12,6 +12,7 @@
  *   split      章ごとの txt に分ける（src/split.mjs）
  *   merge      1つの txt にまとめる（src/merge.mjs）
  *   count      原稿用紙換算の枚数を数える（src/count.mjs）
+ *   import     RTF を原稿の txt にする（src/import.mjs）
  *
  * 各コマンドのオプションは、それぞれのファイルの先頭のコメントにある。
  */
@@ -27,6 +28,7 @@ const COMMANDS = {
   split: () => import('../src/split.mjs'),
   merge: () => import('../src/merge.mjs'),
   count: () => import('../src/count.mjs'),
+  import: () => import('../src/import.mjs'),
 };
 
 const [command, ...argv] = process.argv.slice(2);

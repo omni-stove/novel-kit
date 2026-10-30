@@ -20,6 +20,8 @@ mise なら `[env] _.path = ["{{config_root}}/node_modules/.bin"]` で `novel` �
 
 作品の設定ファイル `novel.json` は `vscode/schemas/novel.schema.json` のスキーマで書く（VS Code では補完が効く）。
 
+Scrivener・Google ドキュメント・Word などで書いた英語の原稿は、RTF に書き出して `novel import -o draft.txt draft.rtf` で txt にできる（斜体・太字・章見出し・場面区切りを記法にする。ルビと傍点は落とす）。
+
 バージョンを固定するときは `github:omni-stove/novel-kit#cli-v2026.1021.0` のようにタグを付ける。
 
 ## リリース
