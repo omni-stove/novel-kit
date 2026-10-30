@@ -154,6 +154,7 @@ function buildEnglishHtml(fileLines, metrics, sceneBreak, partStarts, chapterBre
  * parts: 部の境界（novel.json の parts。null なら部に分けない）。章番号を PDF と同じ「部-章」にし、作品全体の表示では部の頭で改ページする
  * chapterBreak: 章ごとに改ページするか（false なら PDF 出力の --no-chapter-break と同じく空行を1行空けて続ける）
  * blankAfterHeading: 日本語の章見出し（視点行）と本文の間に空行を1行補うか
+ * rawLinesOf: プレビューで編集する元テキストの行列を返す関数（`# 題` を読み替える前の行。省略時は linesOf）
  * 返す値: { files, language, sources: ファイルごとの行列（プレビューで段落を編集するときの元テキスト）, css, body, stats }
  */
 export function buildDocument({
@@ -161,6 +162,7 @@ export function buildDocument({
   scope,
   metrics,
   linesOf = readLines,
+  rawLinesOf = linesOf,
   sceneBreak = null,
   sceneBreakIndent = null,
   parts = null,
@@ -206,7 +208,7 @@ export function buildDocument({
   return {
     files,
     language: metrics.language,
-    sources: fileLines,
+    sources: files.map((f) => rawLinesOf(f)),
     ...splitGeneratedHtml(html),
     stats: computeStats(fileLines, metrics),
   };

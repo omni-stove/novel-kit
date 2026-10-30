@@ -22,7 +22,7 @@ import {
   matchesPdfScriptPage,
   normalizeLayout,
 } from '../../src/layout.mjs';
-import { countTextChars, readLines, splitLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
+import { countTextChars, readLines, splitLines, splitRawLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
 import { parsePageSpec } from '../../src/pdf.mjs';
 import { backupMessage, backupPlan } from './backup.mjs';
 import {
@@ -196,6 +196,12 @@ function linesOf(filePath) {
   return open ? splitLines(open.getText()) : readLines(filePath);
 }
 
+/** ファイルの行列（見出しの `# 題` を読み替える前）。プレビューの編集で原稿の行をそのまま書き戻す元テキスト */
+function rawLinesOf(filePath) {
+  const open = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === filePath);
+  return splitRawLines(open ? open.getText() : readFileSync(filePath, 'utf-8'));
+}
+
 /** いま操作しているプレビュー（タブが前面のもの。無ければ横のプレビュー） */
 const activeSession = () => [...sessions].find((s) => s.panel.active) ?? sidePreview;
 
@@ -292,6 +298,7 @@ function createSession(panel, { doc = null, follow = false, initialLine = null }
         scope: session.scope,
         metrics: flowMetrics,
         linesOf,
+        rawLinesOf,
         sceneBreak,
         sceneBreakIndent,
         parts,

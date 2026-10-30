@@ -24,7 +24,7 @@ import { t } from './l10n.mjs';
  * 設定の input（無ければ ["."]）の原稿ファイルを、novel pdf と同じ並びと章番号（parts があれば「部-章」）で返す。
  * 返す値: { files, missing: どのファイルにも当たらない parts の指定, error: 原稿を読めなかったときの理由 }。
  * files の要素: { name: 設定ファイルのディレクトリからのパス, token: ファイル名の先頭の番号（無ければ null）,
- *   title: 【】の見出し（見出しで始まらなければ null）, label: 章番号, startsPart: そのファイルから新しい部か }
+ *   title: 章見出しの題（見出しで始まらなければ null）, label: 章番号, startsPart: そのファイルから新しい部か }
  */
 export function describeWorkFiles(configDir, raw, { linesOf = readLines } = {}) {
   const input = Array.isArray(raw?.input) && raw.input.length > 0 ? raw.input : ['.'];

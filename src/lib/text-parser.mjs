@@ -203,8 +203,26 @@ export function trimBlankEdges(lines) {
   return lines;
 }
 
+/**
+ * 原稿の文字列を行に分ける。見出しの書き方 `# 題` / `#` は、ここで【題】/【】に読み替える
+ * （【】は以前の書き方として残す。行は1対1のままなので、行番号で原稿を書き換える側にも影響しない）。
+ */
 export function splitLines(content) {
+  return splitRawLines(content).map(hashHeadingToViewpoint);
+}
+
+/** 見出しを読み替えない行の分割。プレビューの編集で原稿の行をそのまま書き戻すための元テキストに使う */
+export function splitRawLines(content) {
   return content.split('\n').map((l) => l.replace(/\r$/, ''));
+}
+
+/**
+ * `# 題` を【題】に、`#` だけの行を【】にする。日本語入力のまま打てるよう、全角の ＃ と全角空白でもよい。
+ * `#Tag` や `## 題` は本文のまま
+ */
+export function hashHeadingToViewpoint(line) {
+  const match = line.match(/^[#＃](?:[ \t　]+(.*?))?[ \t　]*$/);
+  return match ? `【${match[1] ?? ''}】` : line;
 }
 
 export function readLines(filePath) {
@@ -953,6 +971,24 @@ if (import.meta.vitest) {
   describe('splitLines / countTextChars', () => {
     test('CRLF の CR を落とす', () => {
       expect(splitLines('a\r\nb\n')).toEqual(['a', 'b', '']);
+    });
+    test('# Title は【Title】、# だけの行は【】にし、#Tag や ## は本文のまま', () => {
+      expect(splitLines('# The Letter\r\n#\n#  \n#Tag\n## Part\n # x')).toEqual([
+        '【The Letter】',
+        '【】',
+        '【】',
+        '#Tag',
+        '## Part',
+        ' # x',
+      ]);
+    });
+    test('全角の ＃ と全角空白でも見出しにする', () => {
+      expect(splitLines('＃　朝の駅\n＃\n# 夜　の　海　\n＃タグ')).toEqual([
+        '【朝の駅】',
+        '【】',
+        '【夜　の　海】',
+        '＃タグ',
+      ]);
     });
     test('空白・改行・全角スペースを除いてコードポイントで数える', () => {
       expect(countTextChars('あ い\n　う\t')).toBe(3);
