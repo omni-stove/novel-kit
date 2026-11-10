@@ -14,8 +14,8 @@
  *   -o, --output <file>   出力ファイル名（必須）
  *   --title <title>       タイトル（表紙に出す）
  *   --author <author>     著者名（タイトルとともに出す）
- *   --size WxH            1ページの字数×行数（例: --size 42x34）。省略時は --chars と行送りの既定から決める
- *   --chars N             1行の字数（--size があればそちらが優先。既定はプレビューと同じ30）
+ *   --size WxH            1ページの字数×行数（例: --size 42x34）。--chars だけなら行数は行送りの既定から決める
+ *   --chars N             1行の字数（--size があればそちらが優先）。--size も --chars も無ければプレビューの既定と同じ40字×40行
  *   --paper <name>        用紙（A4 / B5 / A5 / B6 / A6。既定: A4）
  *   --portrait            用紙を縦向きにする（既定: 横向き）
  *   --margin t,r,b,l      余白（mm。上,右,下,左。既定はプレビューと同じ 20,20,25,20）
@@ -119,7 +119,7 @@ export function layoutMetrics(args) {
     orientation: args.portrait ? 'portrait' : 'landscape',
     margin: args.margin ?? DEFAULT_LAYOUT.margin,
     chars: args.size?.cols ?? args.chars ?? DEFAULT_LAYOUT.chars,
-    lines: args.size?.rows ?? null,
+    lines: args.size?.rows ?? (args.chars ? null : DEFAULT_LAYOUT.lines),
   });
 }
 
@@ -198,8 +198,9 @@ export async function main(argv = process.argv.slice(2)) {
   const metrics = layoutMetrics(args);
   const cols = metrics.chars;
   const rows = metrics.lines;
-  // Word の文字サイズは半ポイント刻みなので、字送りからはみ出さないよう切り捨てる
-  const fontHalfPt = Math.floor(metrics.fontSizePt * 2);
+  // Word の文字サイズは半ポイント刻みなので、字送りからはみ出さないよう切り捨てる。
+  // 行間に合わせて小さくした文字サイズを使わないのは、Word の文字グリッドは字送りを版面から決め、字間が空くだけになるため
+  const fontHalfPt = Math.floor(metrics.cellFontSizePt * 2);
 
   const partFirstIndices =
     args.parts && args.parts.length > 0 ? resolvePartIndices(args.parts, inputFiles).filter((i) => i > 0) : null;
@@ -278,9 +279,9 @@ if (import.meta.vitest) {
   };
 
   describe('layoutMetrics', () => {
-    test('既定はプレビューの既定と同じ A4横・30字', () => {
+    test('既定はプレビューの既定と同じ A4横・40字×40行', () => {
       const m = layoutMetrics(parseArgs([]));
-      expect(m.layout).toMatchObject({ paper: 'A4', orientation: 'landscape', chars: 30 });
+      expect(m.layout).toMatchObject({ paper: 'A4', orientation: 'landscape', chars: 40, lines: 40 });
     });
     test('--size / --paper / --portrait / --margin をレイアウトにする', () => {
       const m = layoutMetrics(parseArgs(['--size', '42x34', '--paper', 'B5', '--portrait', '--margin', '10,11,12,13']));

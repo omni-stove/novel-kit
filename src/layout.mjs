@@ -19,6 +19,11 @@ export const PAPER_SIZES = {
 
 const MM_PER_PT = 0.3528;
 const MM_PER_IN = 25.4;
+/**
+ * 行数を指定したときの、文字サイズに対する行送りの下限。ルビは親文字の半分の大きさで行間に置くため、
+ * 行間が字の半分より狭いと隣の行に重なる。版面を字数と行数で割った行送りがこれを下回るときは、文字を小さくする
+ */
+export const MIN_LINE_HEIGHT = 1.5;
 /** 行数を指定しないときの行送り（src/pdf.mjs の既定と同じ） */
 const AUTO_LINE_HEIGHT = { vertical: 1.125, horizontal: 1.8 };
 /** 英文の平均字幅の目安（em）。字数×行数の表示に使う */
@@ -30,9 +35,14 @@ export const DEFAULT_LAYOUT = {
   paper: 'A4',
   orientation: 'landscape',
   margin: { top: 20, right: 20, bottom: 25, left: 20 },
-  chars: 30,
+  chars: 40,
   /** null は行送りを自動（縦書きは字送りの 1.125 倍、横書きは 1.8 倍）にして、版面に入るだけ行を入れる */
-  lines: null,
+  lines: 40,
+  /**
+   * 文字を小さくして版面の字詰め方向に余りが出たときの、版面の置き場所。
+   * start は天（横書きは左）に揃えて余りを地（右）へ回し、center は天地（左右）中央に置く
+   */
+  areaAlign: 'start',
   fontFamily: '',
 };
 
@@ -123,8 +133,8 @@ export function trimMetrics(key) {
 const bunko = TRIM_SIZES.a6;
 
 export const BUILTIN_PRESETS = {
-  '標準（30字・行数自動）': DEFAULT_LAYOUT,
-  '40字×40行': { ...DEFAULT_LAYOUT, chars: 40, lines: 40 },
+  '標準（30字・行数自動）': { ...DEFAULT_LAYOUT, chars: 30, lines: null },
+  '40字×40行': DEFAULT_LAYOUT,
   '40字×30行': { ...DEFAULT_LAYOUT, chars: 40, lines: 30 },
   '42字×34行': { ...DEFAULT_LAYOUT, chars: 42, lines: 34 },
   '原稿用紙（20字×20行）': { ...DEFAULT_LAYOUT, chars: 20, lines: 20 },
@@ -208,7 +218,16 @@ export function normalizeLayout(raw, { english = false } = {}) {
       r.orientation === 'portrait' ? 'portrait' : r.orientation === 'landscape' ? 'landscape' : d.orientation,
     margin: normalizeMargin(r.margin, d.margin),
     chars: clampInt(r.chars, 5, 100, d.chars),
-    lines: r.lines == null || r.lines === '' ? null : clampInt(r.lines, 1, 100, null),
+    // 字数だけを書いたレイアウトは、novel pdf の --chars と同じく行数を自動にする
+    lines:
+      r.lines === undefined
+        ? r.chars == null
+          ? d.lines
+          : null
+        : r.lines == null || r.lines === ''
+          ? null
+          : clampInt(r.lines, 1, 100, null),
+    areaAlign: r.areaAlign === 'center' ? 'center' : 'start',
     fontFamily: typeof r.fontFamily === 'string' ? r.fontFamily.trim() : '',
   };
 }
@@ -231,7 +250,10 @@ export function detectLanguage(lines, isMetaLine = (_line) => false) {
 
 /**
  * english: true なら英語のレイアウトとして組む（横書き固定。chars は版面幅を文字サイズで割った値）。
- * 日本語は字数から文字サイズが決まる
+ * 日本語は字数から文字サイズが決まる。ただし行数を指定して行送りが MIN_LINE_HEIGHT 倍を下回るときは、
+ * 行送りの 1 / MIN_LINE_HEIGHT まで文字を小さくして字数×行数を保つ。
+ * cellFontSizePt は小さくする前の、字送りいっぱいの文字サイズ。
+ * areaOffsetMm は余白の天（横書きは左）から本文の頭までの距離で、areaAlign が center なら字詰め方向の余りの半分
  */
 export function computeMetrics(rawLayout, { english = false } = {}) {
   const layout = normalizeLayout(rawLayout, { english });
@@ -266,16 +288,21 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
       lines: Math.max(1, Math.floor(availBlock / (fontSizeMm * lineHeight))),
       fontSizePt,
       fontSizeMm,
+      cellFontSizePt: fontSizePt,
       lineHeight,
       linePitchMm: fontSizeMm * lineHeight,
+      areaOffsetMm: 0,
     };
   }
 
   const cellMm = availInline / layout.chars;
-  const fontSizePt = fontSizeOfCell(cellMm);
+  const pitchMm = layout.lines ? availBlock / layout.lines : null;
+  // 行送りの倍率は丸める前の字の大きさに対して決める。丸めた文字サイズに掛けると行送りが版面より狭くなり、行が収まるため
+  const sizeMm = pitchMm ? Math.min(cellMm, pitchMm / MIN_LINE_HEIGHT) : cellMm;
+  const fontSizePt = fontSizeOfCell(sizeMm);
   const fontSizeMm = fontSizePt * MM_PER_PT;
 
-  const lineHeight = layout.lines ? availBlock / layout.lines / cellMm : AUTO_LINE_HEIGHT[layout.writingMode];
+  const lineHeight = pitchMm ? pitchMm / sizeMm : AUTO_LINE_HEIGHT[layout.writingMode];
   const lines = layout.lines ?? Math.max(1, Math.floor(availBlock / (fontSizeMm * lineHeight)));
 
   return {
@@ -284,8 +311,10 @@ export function computeMetrics(rawLayout, { english = false } = {}) {
     lines,
     fontSizePt,
     fontSizeMm,
+    cellFontSizePt: fontSizeOfCell(cellMm),
     lineHeight,
     linePitchMm: fontSizeMm * lineHeight,
+    areaOffsetMm: layout.areaAlign === 'center' ? (availInline - layout.chars * fontSizeMm) / 2 : 0,
   };
 }
 
@@ -307,11 +336,16 @@ if (import.meta.vitest) {
   const { describe, test, expect } = import.meta.vitest;
 
   describe('computeMetrics', () => {
-    test('既定は pdf の calcVerticalLayout（30字・行送り1.125）と同じ寸法', () => {
+    test('既定は pdf の calcVerticalLayout（40字×40行）と同じ寸法', () => {
       const m = computeMetrics(DEFAULT_LAYOUT);
       expect(m.availInline).toBe(165);
       expect(m.availBlock).toBe(257);
-      expect(m.fontSizePt).toBe(Math.floor((165 / 30 / 0.3528) * 10) / 10);
+      expect(m.fontSizePt).toBe(Math.floor((165 / 40 / 0.3528) * 10) / 10);
+      expect(m.lineHeight).toBeCloseTo(257 / 40 / (165 / 40), 10);
+      expect(m.lines).toBe(40);
+    });
+    test('行数を自動にすると縦書きは行送り 1.125 で版面に入るだけ行を入れる', () => {
+      const m = computeMetrics(BUILTIN_PRESETS['標準（30字・行数自動）']);
       expect(m.lineHeight).toBe(1.125);
       expect(m.lines).toBe(41);
     });
@@ -319,6 +353,27 @@ if (import.meta.vitest) {
       const m = computeMetrics({ ...DEFAULT_LAYOUT, chars: 40, lines: 40 });
       expect(m.lineHeight).toBeCloseTo(257 / 40 / (165 / 40), 10);
       expect(m.lines).toBe(40);
+    });
+    test('行送りが字の 1.5 倍を下回る字数×行数は、字数×行数を保って文字を小さくする', () => {
+      // 144×97mm の版面に 42字×19行
+      const layout = { ...DEFAULT_LAYOUT, paper: 'B6', orientation: 'portrait', chars: 42, lines: 19 };
+      const m = computeMetrics({ ...layout, margin: { top: 19, bottom: 19, left: 15.5, right: 15.5 } });
+      expect(m.lines).toBe(19);
+      expect(m.cellFontSizePt).toBe(Math.floor((144 / 42 / 0.3528) * 10) / 10);
+      expect(m.fontSizePt).toBe(Math.floor((97 / 19 / 1.5 / 0.3528) * 10) / 10);
+      expect(m.lineHeight).toBeCloseTo(1.5, 10);
+      expect(m.areaOffsetMm).toBe(0);
+    });
+    test('行送りが 1.5 倍以上なら文字を小さくしない', () => {
+      const m = computeMetrics({ ...DEFAULT_LAYOUT, chars: 40, lines: 40 });
+      expect(m.fontSizePt).toBe(m.cellFontSizePt);
+    });
+    test('areaAlign: center は字詰め方向の余りを天地に等分する', () => {
+      const layout = { ...DEFAULT_LAYOUT, chars: 30, lines: 50, areaAlign: 'center' };
+      const m = computeMetrics(layout);
+      expect(m.areaOffsetMm).toBeCloseTo((165 - 30 * m.fontSizeMm) / 2, 10);
+      expect(m.areaOffsetMm).toBeGreaterThan(0);
+      expect(normalizeLayout({ areaAlign: 'middle' }).areaAlign).toBe('start');
     });
     test('横書きは字を左右に、行を天地に送る', () => {
       const m = computeMetrics({
@@ -333,7 +388,7 @@ if (import.meta.vitest) {
       expect(m.availBlock).toBe(252);
     });
     test('行数を指定しなければ版面に入るだけ行を入れる（横書きの行送りは 1.8）', () => {
-      const m = computeMetrics({ ...DEFAULT_LAYOUT, writingMode: 'horizontal' });
+      const m = computeMetrics({ ...DEFAULT_LAYOUT, writingMode: 'horizontal', lines: null });
       expect(m.lineHeight).toBe(1.8);
       expect(m.lines).toBe(Math.floor(m.availBlock / (m.fontSizeMm * 1.8)));
     });
@@ -417,7 +472,12 @@ if (import.meta.vitest) {
   describe('normalizeLayout', () => {
     test('欠けた値・不正値は既定で埋める', () => {
       expect(normalizeLayout(null)).toEqual(DEFAULT_LAYOUT);
-      expect(normalizeLayout({ chars: 'x', lines: '', paper: 'Z9', margin: { top: -1 } })).toEqual(DEFAULT_LAYOUT);
+      expect(normalizeLayout({ paper: 'Z9', margin: { top: -1 }, areaAlign: 'x' })).toEqual(DEFAULT_LAYOUT);
+    });
+    test('字数だけを書いたレイアウトと、行数を空や null にしたレイアウトは行数自動', () => {
+      expect(normalizeLayout({ chars: 30 }).lines).toBeNull();
+      expect(normalizeLayout({ lines: '' }).lines).toBeNull();
+      expect(normalizeLayout({ lines: null }).lines).toBeNull();
     });
     test('指定値は丸めて採用する', () => {
       const l = normalizeLayout({

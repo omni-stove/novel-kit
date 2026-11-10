@@ -115,6 +115,12 @@ function renderPanel({ open, tab, width }) {
           <label><input type="radio" name="writing-mode" value="vertical" data-page-field>${t('Vertical')}</label>
           <label><input type="radio" name="writing-mode" value="horizontal" data-page-field>${t('Horizontal')}</label>
         </fieldset>
+        <fieldset id="area-align-fields">
+          <legend>${t('Text area position')}</legend>
+          <label><input type="radio" name="area-align" value="start" data-page-field>${t('Align to the top (left)')}</label>
+          <label><input type="radio" name="area-align" value="center" data-page-field>${t('Center between the top and bottom (left and right)')}</label>
+          <p class="note">${t('Applies when the characters are made smaller so that ruby fits between the lines')}</p>
+        </fieldset>
         <fieldset>
           <legend>${t('Paper')}</legend>
           <label>${t('Size')}<select id="paper" data-page-field>${options(Object.keys(PAPER_SIZES).map((p) => [p, PAPER_LABELS[p] ?? p]))}</select></label>

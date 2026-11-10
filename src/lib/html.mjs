@@ -98,7 +98,7 @@ export const AOZORA_CSS = `
 
 /**
  * 縦書き本文で escapeHtml（text-parser）が生成する span クラスのスタイル。
- * pdf / novel-pdf が共有する。
+ * pdf / novel-pdf が共有する。ルビの置き場所は、祖先に指定した --line-height（行送りの倍率）から決める
  */
 export const VERTICAL_GLYPH_CSS = `
     /* text-combine-upright: all だと
@@ -203,14 +203,21 @@ export const VERTICAL_GLYPH_CSS = `
 
     /* プレビューは段組み（multicol）で頁を送るため、rt の箱を段の端より外に置くと
        Chromium が段の内側へ押し戻して親文字に重ねて描く（各頁の先頭行だけルビが潰れる）。
-       箱は親文字の右端に揃えて段内に置き、レイアウトに影響しない transform で
-       自分の幅ぶん（-0.4em の食い込み込み）右へ見かけだけずらす。 */
+       箱は字の中に置き、レイアウトに影響しない transform で見かけだけ右へ出す。
+       ruby の箱の端はフォントの ascent/descent で動くため、字の中心から測る。
+       --rt-shift は字の中心からルビの内側の端までの距離（rt の em）で、ルビを行間の中央に置く。
+       行間が広いと隣の行のルビに見えるため、親文字からの離れは親文字の 0.2em（1.4em）で止める。
+       行送りを lh 単位で読まないのは、Vivliostyle が lh の入った transform を正しく解決できないため。
+       text-indent は絶対配置の箱にも継承され、字下げした段落でルビがずれるため打ち消す。 */
     rt {
+      --rt-shift: calc(min(var(--line-height) - 0.5, 1.4) * 1em);
       font-size: 0.5em;
+      line-height: 1;
       position: absolute;
-      right: 0;
+      right: 50%;
       top: 50%;
-      transform: translate(calc(100% - 0.4em), -50%);
+      text-indent: 0;
+      transform: translate(calc(100% + var(--rt-shift)), -50%);
       white-space: nowrap;
     }
 
@@ -228,16 +235,15 @@ export const VERTICAL_GLYPH_CSS = `
       top: auto;
       right: auto;
       inset-inline-start: calc(var(--rt-off, 0) * 1em);
-      inset-block-start: 0;
-      transform: translateX(calc(100% - 0.4em));
+      inset-block-start: 50%;
+      transform: translateX(calc(100% + var(--rt-shift)));
       letter-spacing: calc(var(--rt-ls, 0) * 1em);
     }
 
-    /* 左ルビ（青空文庫の注記）は rt と同じ置き方を左右反転し、親文字の左端から自分の幅ぶん左へずらす */
     ruby.left-ruby > rt {
       right: auto;
-      left: 0;
-      transform: translate(calc(-100% + 0.4em), -50%);
+      left: 50%;
+      transform: translate(calc(-100% - var(--rt-shift)), -50%);
     }
 `;
 
@@ -246,8 +252,7 @@ export const VERTICAL_GLYPH_CSS = `
  * pdf（横書き）と VS Code 拡張のスクロール表示が使う。
  */
 export const HORIZONTAL_GLYPH_CSS = `
-    /* 縦書きと同じく、点とルビは行の箱を広げないよう絶対配置にし、
-       字の中心から 0.5em 上（点・ルビの 1em）に置く。 */
+    /* 縦書きと同じく、点とルビは行の箱を広げないよう絶対配置にする。 */
     .emphasis-dot::after {
       right: auto;
       top: auto;
@@ -261,15 +266,13 @@ export const HORIZONTAL_GLYPH_CSS = `
       top: auto;
       left: 50%;
       bottom: 50%;
-      line-height: 1;
-      text-indent: 0;
-      transform: translate(-50%, -1em);
+      transform: translate(-50%, calc(-1 * var(--rt-shift)));
     }
 
     ruby.fit > rt {
       bottom: 50%;
       inset-block-start: auto;
-      transform: translateY(-1em);
+      transform: translateY(calc(-1 * var(--rt-shift)));
     }
 
     /* 左ルビは横書きでは字の下に置く。縦書き用の ruby.left-ruby > rt より後ろで同じ詳細度にして上書きする */
@@ -277,7 +280,7 @@ export const HORIZONTAL_GLYPH_CSS = `
       left: 50%;
       top: 50%;
       bottom: auto;
-      transform: translate(-50%, 1em);
+      transform: translate(-50%, var(--rt-shift));
     }
 `;
 

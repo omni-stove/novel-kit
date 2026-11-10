@@ -31,6 +31,7 @@
   "config.presets.margin": "Margins (mm)",
   "config.presets.chars": "Characters per line",
   "config.presets.lines": "Lines per page (null for automatic leading)",
+  "config.presets.areaAlign": "Where the text goes when the characters are made smaller so that ruby fits between the lines (start: at the top, or the left in horizontal writing, with the rest of the space below; center: centered)",
   "config.presets.fontSize": "Body font size of the English layout (pt)",
   "config.presets.lineHeight": "Leading of the English layout (multiplier)",
   "config.presets.fontFamily": "Body font (empty for the same as the PDF: Mincho for Japanese, EB Garamond for English)",

@@ -779,12 +779,12 @@ function exportPdf(session = activeSession()) {
     }
     const size = `${metrics.chars}x${metrics.lines}`;
     out = `${name}-${metrics.vertical ? size : 'horizontal'}.pdf`;
-    // 行数自動（既定の30字組）はスクリプトの既定そのものなので --size を付けない
     options = !metrics.vertical
       ? ['--horizontal']
-      : layout.lines == null && layout.chars === 30
-        ? []
+      : layout.lines == null
+        ? ['--chars', String(layout.chars)]
         : ['--size', size];
+    if (metrics.vertical && layout.areaAlign === 'center') options.push('--area-center');
   }
   if (sceneBreak) options.push('--scene-break', sceneBreak);
   if (sceneBreakIndent != null) options.push('--scene-break-indent', String(sceneBreakIndent));

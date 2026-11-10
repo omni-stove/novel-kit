@@ -114,6 +114,10 @@
       "maximum": 100,
       "description": "1ページの行数（null で行送り自動）"
     },
+    "areaAlign": {
+      "enum": ["start", "center"],
+      "description": "行間にルビが収まるよう文字を小さくしたときの本文の置き場所（start: 天（横書きは左）に揃えて余りを地へ回す、center: 天地（横書きは左右）中央）"
+    },
     "fontFamily": {
       "type": "string",
       "description": "本文フォント（空なら PDF 出力と同じ。日本語は明朝、英語は EB Garamond）"

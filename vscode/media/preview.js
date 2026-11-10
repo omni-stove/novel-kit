@@ -80,9 +80,10 @@
     s.writingMode = m.vertical ? 'vertical-rl' : 'horizontal-tb';
     s.fontSize = `${fontPx}px`;
     s.lineHeight = String(m.lineHeight);
+    s.setProperty('--line-height', String(m.lineHeight));
     s.fontFamily = m.layout.fontFamily || '';
-    s.top = `${m.layout.margin.top * u}px`;
-    s.left = `${m.layout.margin.left * u}px`;
+    s.top = `${(m.layout.margin.top + (m.vertical ? m.areaOffsetMm : 0)) * u}px`;
+    s.left = `${(m.layout.margin.left + (m.vertical ? 0 : m.areaOffsetMm)) * u}px`;
     s.width = `${m.vertical ? blockPx : inlinePx}px`;
     s.height = `${m.vertical ? inlinePx : blockPx}px`;
     s.columnGap = `${period - inlinePx}px`;
@@ -143,7 +144,9 @@
     const s = flow.style;
     s.writingMode = 'horizontal-tb';
     s.fontSize = `${fontPx}px`;
-    s.lineHeight = String(isEnglish() ? model.metrics.lineHeight : 1.8);
+    const lineHeight = String(isEnglish() ? model.metrics.lineHeight : 1.8);
+    s.lineHeight = lineHeight;
+    s.setProperty('--line-height', lineHeight);
     s.fontFamily = model.metrics.layout.fontFamily || '';
     s.top = s.left = s.height = s.columnGap = '';
     s.width = `${width}px`;

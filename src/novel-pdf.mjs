@@ -106,6 +106,7 @@ ${
       font-family: "Noto Serif JP", "游明朝", "Yu Mincho", "Hiragino Mincho Pro", serif;
       font-size: ${size.fontSizePt}pt;
       line-height: ${size.lineHeight};
+      --line-height: ${size.lineHeight};
       writing-mode: vertical-rl;
       text-orientation: upright;
       hanging-punctuation: allow-end last;${

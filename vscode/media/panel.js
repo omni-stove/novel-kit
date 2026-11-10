@@ -237,6 +237,12 @@ function createNovelPanel(vscode) {
     )) {
       radio.checked = radio.value === (layout.writingMode ?? 'horizontal');
     }
+    $('area-align-fields').hidden = english;
+    for (const radio of /** @type {NodeListOf<HTMLInputElement>} */ (
+      document.querySelectorAll('input[name="area-align"]')
+    )) {
+      radio.checked = radio.value === (layout.areaAlign ?? 'start');
+    }
     $('paper').value = layout.paper;
     $('orientation').value = layout.orientation;
     for (const side of ['top', 'bottom', 'left', 'right']) $(`margin-${side}`).value = layout.margin[side];
@@ -277,6 +283,8 @@ function createNovelPanel(vscode) {
     return {
       ...pageLayout,
       writingMode: /** @type {HTMLInputElement | null} */ (document.querySelector('input[name="writing-mode"]:checked'))
+        ?.value,
+      areaAlign: /** @type {HTMLInputElement | null} */ (document.querySelector('input[name="area-align"]:checked'))
         ?.value,
       paper: $('paper').value,
       orientation: $('orientation').value,
