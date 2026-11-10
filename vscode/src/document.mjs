@@ -441,13 +441,13 @@ if (import.meta.vitest) {
     test('英語では文字サイズと行送りを出し、日本語の表示では日本語で出す', async () => {
       const { readFileSync } = await import('node:fs');
       const { setBundle } = await import('./l10n.mjs');
-      expect(describeLayout(DEFAULT_LAYOUT)).toBe('30 chars × 41 lines');
+      expect(describeLayout(DEFAULT_LAYOUT)).toBe('40 chars × 40 lines');
       expect(describeLayout(BUILTIN_ENGLISH_PRESETS.A5, { english: true })).toMatch(
         /^11pt · leading 1\.4 \(about \d+ chars × \d+ lines\)$/,
       );
       setBundle(JSON.parse(readFileSync(new URL('../l10n/bundle.l10n.ja.json', import.meta.url), 'utf8')));
       try {
-        expect(describeLayout(DEFAULT_LAYOUT)).toBe('30字×41行');
+        expect(describeLayout(DEFAULT_LAYOUT)).toBe('40字×40行');
         expect(describeLayout(BUILTIN_ENGLISH_PRESETS.A5, { english: true })).toMatch(
           /^11pt・行送り1\.4（約\d+字×\d+行）$/,
         );

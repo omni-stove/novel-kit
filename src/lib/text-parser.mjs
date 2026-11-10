@@ -348,17 +348,17 @@ function rubyCellCount(text, vertical) {
 
 /**
  * 親文字 n 字・ルビ m 字の配置を決める。
- *   ルビが短い → 親文字の長さに合わせて 1:2:1 で均等配置（gap＝ルビの字間、rtStart＝先頭のアキ）。
- *                字数が同じなら1字ずつ親文字の真横に来る
+ *   ルビが短い → 先頭を親文字の頭に、末尾を親文字の終わりに揃え、間を字間で埋める（gap＝ルビの字間、rtStart＝先頭のアキ）。
+ *                ルビが1字なら親文字の中央に置く
  *   ルビが長い → まず前後の文字へはみ出させ（rtStart が負）、余りは親文字の字間を広げて吸収（widen）
+ * m は組み上がりのセル数で、横書きの半角では端数になる。count は字間を数えるためのルビの字数
  */
-export function layoutRuby(n, m, capBefore = 0, capAfter = 0) {
+export function layoutRuby(n, m, capBefore = 0, capAfter = 0, count = m) {
   const baseLen = n;
   const rubyLen = m * RUBY_SCALE;
   if (rubyLen <= baseLen) {
-    // 字間をそれ以上広げると間延びするため、ルビ1字分で止めて残りは中央に寄せる
-    const gap = Math.min((baseLen - rubyLen) / m, RUBY_SCALE);
-    return { gap, rtStart: (baseLen - rubyLen - gap * (m - 1)) / 2, widen: 0 };
+    if (count <= 1) return { gap: 0, rtStart: (baseLen - rubyLen) / 2, widen: 0 };
+    return { gap: (baseLen - rubyLen) / (count - 1), rtStart: 0, widen: 0 };
   }
   const excess = rubyLen - baseLen;
   let before = Math.min(capBefore, excess / 2);
@@ -477,7 +477,7 @@ export function escapeHtml(text, { vertical = true, separateSymbolClasses = fals
     const m = rubyCellCount(ruby, vertical);
     const capBefore = rubyOverhangCap(prev, 'before') / (prevShared ? 2 : 1);
     const capAfter = rubyOverhangCap(next, 'after') / (nextShared ? 2 : 1);
-    const { gap, rtStart, widen } = layoutRuby(n, m, capBefore, capAfter);
+    const { gap, rtStart, widen } = layoutRuby(n, m, capBefore, capAfter, vertical ? m : [...ruby].length);
     const rtVars = (start) => `--rt-off:${cssNum(start / RUBY_SCALE)};--rt-ls:${cssNum(gap / RUBY_SCALE)}`;
 
     // 1つの <ruby> のままだと途中で行を折り返せないため、ルビが収まるなら親文字1字ごとに分ける
@@ -1310,16 +1310,16 @@ if (import.meta.vitest) {
         '<ruby>\u6F22\u5B57<rt>\u304B\u3093\u3058</rt></ruby>',
       );
     });
-    test('rubyLayout: 字数が同じなら親文字1字ごとに分け、ルビ1字ずつを真横に置く', () => {
+    test('rubyLayout: 字数が同じなら親文字1字ごとに分け、ルビを親文字の頭から終わりまで広げる', () => {
       expect(escapeHtml('|籠手《こて》', { rubyLayout: true })).toBe(
-        '<ruby class="fit" style="--rt-off:0.5;--rt-ls:1">籠<rt>こ</rt></ruby>' +
-          '<ruby class="fit" style="--rt-off:0.5;--rt-ls:1">手<rt>て</rt></ruby>',
+        '<ruby class="fit" style="--rt-off:0;--rt-ls:2">籠<rt>こ</rt></ruby>' +
+          '<ruby class="fit" style="--rt-off:1;--rt-ls:2">手<rt>て</rt></ruby>',
       );
     });
-    test('rubyLayout: 短いルビは親文字の長さに均等配置し、中心が乗る親文字に付ける', () => {
+    test('rubyLayout: 短いルビは親文字の頭から終わりまで広げ、中心が乗る親文字に付ける', () => {
       expect(escapeHtml('|琥珀《こはく》', { rubyLayout: true })).toBe(
-        '<ruby class="fit" style="--rt-off:0.167;--rt-ls:0.333">琥<rt>こ</rt></ruby>' +
-          '<ruby class="fit" style="--rt-off:-0.5;--rt-ls:0.333">珀<rt>はく</rt></ruby>',
+        '<ruby class="fit" style="--rt-off:0;--rt-ls:0.5">琥<rt>こ</rt></ruby>' +
+          '<ruby class="fit" style="--rt-off:-0.5;--rt-ls:0.5">珀<rt>はく</rt></ruby>',
       );
     });
     test('rubyLayout: 長いルビは前後のかなへはみ出させ、余りは親文字の前後を空ける', () => {
@@ -1335,10 +1335,13 @@ if (import.meta.vitest) {
         '「<ruby class="fit" style="--rt-off:0;--rt-ls:0;--rb-pad:0.125;--rb-gap:0.25">東<span class="ruby-gap"></span>恋<rt>あずまれん</rt></ruby>」',
       );
     });
-    test('layoutRuby: 字間はルビ1字分までで、それ以上は中央に寄せる', () => {
-      expect(layoutRuby(2, 2)).toEqual({ gap: 0.5, rtStart: 0.25, widen: 0 });
-      expect(layoutRuby(4, 1)).toEqual({ gap: 0.5, rtStart: 1.75, widen: 0 });
-      expect(layoutRuby(6, 3)).toEqual({ gap: 0.5, rtStart: 1.75, widen: 0 });
+    test('layoutRuby: 短いルビの先頭と末尾を親文字の頭と終わりに揃え、1字なら中央に置く', () => {
+      expect(layoutRuby(2, 2)).toEqual({ gap: 1, rtStart: 0, widen: 0 });
+      expect(layoutRuby(6, 3)).toEqual({ gap: 2.25, rtStart: 0, widen: 0 });
+      expect(layoutRuby(4, 1)).toEqual({ gap: 0, rtStart: 1.75, widen: 0 });
+    });
+    test('layoutRuby: 半角のルビの字間は、セル数でなく字数で割る', () => {
+      expect(layoutRuby(2, 1.5, 0, 0, 3)).toEqual({ gap: 0.625, rtStart: 0, widen: 0 });
     });
     test('layoutRuby: はみ出しは許される側へ最大限使い、残りだけ親文字を広げる', () => {
       expect(layoutRuby(1, 4, 0.5, 0.5)).toEqual({ gap: 0, rtStart: -0.5, widen: 0 });

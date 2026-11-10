@@ -53,7 +53,7 @@
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { CONFIG_FILENAME, findConfigFile, readWorkConfig } from './config.mjs';
-import { computeMetrics, enPdfPageSize, matchesPdfScriptPage } from './layout.mjs';
+import { computeMetrics, DEFAULT_LAYOUT, enPdfPageSize, matchesPdfScriptPage } from './layout.mjs';
 
 const LAYOUT_OVERRIDES = ['writingMode', 'chars', 'lines'];
 
@@ -112,11 +112,13 @@ function pdfArgs(output, config, { warn, pages, limit }) {
 
   let size = [];
   if (layout.writingMode === 'horizontal') size = ['--horizontal'];
-  else if (layout.lines != null) size = ['--size', `${layout.chars}x${computeMetrics(layout).lines}`];
-  else if (layout.chars !== 30) size = ['--chars', String(layout.chars)];
+  else if (layout.lines == null) size = ['--chars', String(layout.chars)];
+  else if (layout.chars !== DEFAULT_LAYOUT.chars || layout.lines !== DEFAULT_LAYOUT.lines)
+    size = ['--size', `${layout.chars}x${layout.lines}`];
 
   return [
     ...size,
+    ...flag(layout.writingMode !== 'horizontal' && layout.areaAlign === 'center', '--area-center'),
     ...flag(output.coverless, '--coverless'),
     ...flag(output.chapterBreak === false, '--no-chapter-break'),
     ...flag(output.pageBreak === false, '--no-page-break'),
@@ -412,7 +414,7 @@ if (import.meta.vitest) {
   const argvOf = (output, c = config(), extra) => outputArgv('x', output, c, '/p', extra);
 
   describe('outputArgv', () => {
-    test('既定のレイアウト（30字・行数自動）なら字詰めの指定を付けない', () => {
+    test('既定のレイアウト（40字×40行）なら字詰めの指定を付けない', () => {
       const argv = outputArgv('pdf', { format: 'pdf', out: 'a.pdf' }, config(), process.cwd());
       expect(argv).toEqual(['--title', '作品', '--author', '著者', '-o', 'out/a.pdf', '/p/src/work/story', '--open']);
     });
@@ -427,8 +429,19 @@ if (import.meta.vitest) {
           config({ layout: { ...DEFAULT_LAYOUT, chars: 40, lines: 40 } }),
         ),
       ).not.toContain('--size');
-      expect(argvOf({ format: 'pdf', out: 'a.pdf', chars: 40 })).toEqual(expect.arrayContaining(['--chars', '40']));
+      expect(argvOf({ format: 'pdf', out: 'a.pdf', chars: 40, lines: null })).toEqual(
+        expect.arrayContaining(['--chars', '40']),
+      );
       expect(argvOf({ format: 'pdf', out: 'a.pdf', writingMode: 'horizontal' })).toContain('--horizontal');
+    });
+
+    test('レイアウトの areaAlign が center なら、縦書きの pdf に --area-center を付ける', () => {
+      const centered = config({ layout: { ...DEFAULT_LAYOUT, areaAlign: 'center' } });
+      expect(argvOf({ format: 'pdf', out: 'a.pdf' }, centered)).toContain('--area-center');
+      expect(argvOf({ format: 'pdf', out: 'a.pdf', writingMode: 'horizontal' }, centered)).not.toContain(
+        '--area-center',
+      );
+      expect(argvOf({ format: 'pdf', out: 'a.pdf' })).not.toContain('--area-center');
     });
 
     test('pdf の項目をフラグにする', () => {

@@ -15,8 +15,10 @@
  *                        同一章内のファイル境界には場面区切りの記号（既定: ＊）を挟む（--part 非指定時のみ有効）
  *   --no-page-break      --no-chapter-break と同じ（ファイル間の改ページは章境界でしか起きないため）
  *   --horizontal         横書きモード
- *   --size WxH           1ページの文字数（例: --size 40x40 → 40字×40行）
+ *   --size WxH           1ページの文字数（例: --size 42x34 → 42字×34行）。--size も --chars も無ければ 40字×40行
+ *                        行送りが字の1.5倍に満たない字数×行数は、ルビが行間に収まるよう文字を小さくして字数×行数を保つ
  *   --chars N            1行の字数だけを指定し、行数は行送りの既定（字送りの1.125倍）に任せる（--size があればそちらが優先）
+ *   --area-center        文字を小さくして版面の天地に余りが出たとき、本文を天地中央に置く（既定: 天に揃えて余りを地へ回す）
  *   --limit <n>          先頭からn個のファイルのみ処理
  *   --part 060,085,...   部の境界となるファイル名プレフィックス（novel split の --splits と同形式）。
  *                        該当ファイルから新しい部が始まる。各部の頭で改ページし、
@@ -45,6 +47,7 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { PDFDocument, PDFName, ReadingDirection, rgb } from 'pdf-lib';
+import { computeMetrics, DEFAULT_LAYOUT } from './layout.mjs';
 import { ARG, buildPdfFromHtml, fail, openFile, parseCliArgs, requireOutput, runMain } from './lib/cli.mjs';
 import {
   AOZORA_CSS,
@@ -138,6 +141,7 @@ export function parseArgs(argv) {
       { key: 'vertical', flags: ['--horizontal'], value: false },
       ARG.size,
       { key: 'chars', flags: ['--chars'], takesValue: true, parse: (v) => parseInt(v, 10) },
+      { key: 'areaCenter', flags: ['--area-center'] },
       { key: 'limit', flags: ['--limit'], takesValue: true, parse: (v) => parseInt(v, 10) },
       { key: 'synopsisOnTitle', flags: ['--synopsis-on-title'] },
       { key: 'noSynopsis', flags: ['--no-synopsis'] },
@@ -160,30 +164,21 @@ export function parseArgs(argv) {
   return args;
 }
 
-// 寸法（mm）は @page の A4横（297mm x 210mm）から余白を引いたもの
+/** 縦書きの寸法。@page の A4横・余白はプレビューの既定のレイアウトと同じなので、その計算（computeMetrics）に任せる */
 function calcVerticalLayout(options) {
-  const chars = options.chars || 30;
-  const lines = options.lines || null;
-
-  const availHeight = 165;
-  const fontSizeMm = availHeight / chars;
-  const fontSizePt = fontSizeMm / 0.3528;
-
-  let lineHeight;
-  if (lines) {
-    const availWidth = 257;
-    const columnPitchMm = availWidth / lines;
-    lineHeight = columnPitchMm / fontSizeMm;
-  } else {
-    lineHeight = 1.125;
-  }
-
-  return { fontSizePt: Math.floor(fontSizePt * 10) / 10, lineHeight, chars };
+  const m = computeMetrics({
+    ...DEFAULT_LAYOUT,
+    chars: options.chars || DEFAULT_LAYOUT.chars,
+    lines: options.chars ? options.lines || null : DEFAULT_LAYOUT.lines,
+    areaAlign: options.areaCenter ? 'center' : 'start',
+  });
+  return { fontSizePt: m.fontSizePt, lineHeight: m.lineHeight, chars: m.chars, areaOffsetMm: m.areaOffsetMm };
 }
 
 export function generateHtml(sections, options, synopsisHtml = null, _synopsisCharCount = 0, charactersHtml = null) {
   const writingMode = options.vertical ? 'vertical-rl' : 'horizontal-tb';
   const layout = options.vertical ? calcVerticalLayout(options) : null;
+  const lineHeight = options.vertical ? layout.lineHeight : '1.8';
 
   const explicitPartIndices =
     options.parts && options.parts.length > 0
@@ -229,10 +224,12 @@ ${googleFontsLinks('Noto+Serif+JP:wght@400')}
     body {
       font-family: "Noto Serif JP", "游明朝", "Yu Mincho", "Hiragino Mincho Pro", serif;
       font-size: ${options.vertical ? `${layout.fontSizePt}pt` : '10.5pt'};
-      line-height: ${options.vertical ? layout.lineHeight : '1.8'};
+      line-height: ${lineHeight};
+      --line-height: ${lineHeight};
       writing-mode: ${writingMode};
       ${options.vertical ? 'text-orientation: mixed;' : ''}
       ${options.vertical ? `height: ${layout.chars}em;` : ''}
+      ${layout?.areaOffsetMm ? `padding-top: ${layout.areaOffsetMm}mm;` : ''}
       hanging-punctuation: allow-end last;
       text-spacing-trim: space-all;
       orphans: 2;
@@ -1036,13 +1033,30 @@ if (import.meta.vitest) {
 
     test('字数だけの指定では行送りは字送りの1.125倍', () => {
       expect(generateHtml(one, { ...baseOptions, chars: 30, lines: null })).toContain('line-height: 1.125;');
+      expect(generateHtml(one, { ...baseOptions, chars: 30, lines: null })).toContain('--line-height: 1.125;');
     });
 
     test('行数も指定すると行送りは行数から決まる', () => {
-      const html = generateHtml(one, { ...baseOptions, chars: 30, lines: 40 });
+      const html = generateHtml(one, { ...baseOptions, chars: 30, lines: 20 });
       const fontSizeMm = 165 / 30;
-      expect(html).toContain(`line-height: ${257 / 40 / fontSizeMm};`);
+      expect(html).toContain(`line-height: ${257 / 20 / fontSizeMm};`);
       expect(html).toContain('height: 30em;');
+      expect(html).not.toContain('padding-top');
+    });
+
+    test('行送りが字の1.5倍に満たない行数では、文字を小さくして行送りを1.5倍にする', () => {
+      const html = generateHtml(one, { ...baseOptions, chars: 30, lines: 40 });
+      expect(html).toContain('line-height: 1.5;');
+      expect(html).toContain(`font-size: ${Math.floor((257 / 40 / 1.5 / 0.3528) * 10) / 10}pt;`);
+      expect(html).toContain('height: 30em;');
+      expect(html).not.toContain('padding-top');
+    });
+
+    test('--area-center なら小さくした本文を天地中央に置く', () => {
+      const html = generateHtml(one, { ...baseOptions, chars: 30, lines: 40, areaCenter: true });
+      const fontSizeMm = (Math.floor((257 / 40 / 1.5 / 0.3528) * 10) / 10) * 0.3528;
+      expect(html).toContain(`padding-top: ${(165 - 30 * fontSizeMm) / 2}mm;`);
+      expect(parseArgs(['--area-center', 'a.txt']).areaCenter).toBe(true);
     });
 
     test('--scene-break の記号をファイルの継ぎ目に組む', () => {

@@ -310,5 +310,9 @@
   "Could not back up. {0}": "バックアップできませんでした。{0}",
   "Nothing new to back up. The backup is up to date.": "新しい変更はありません。バックアップは最新です。",
   "Backed up.": "バックアップしました。",
-  "Save the manuscripts, record every change in the folder of the work with Git and send it to the remote repository": "原稿を保存し、作品のフォルダの変更をすべて Git に記録して、リモートのリポジトリへ送る"
+  "Save the manuscripts, record every change in the folder of the work with Git and send it to the remote repository": "原稿を保存し、作品のフォルダの変更をすべて Git に記録して、リモートのリポジトリへ送る",
+  "Text area position": "版面の位置",
+  "Align to the top (left)": "天（横書きは左）に揃える",
+  "Center between the top and bottom (left and right)": "天地（横書きは左右）中央",
+  "Applies when the characters are made smaller so that ruby fits between the lines": "行間にルビが収まるよう文字を小さくしたときの、余りの置き方"
 }

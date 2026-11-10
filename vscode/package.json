@@ -348,7 +348,7 @@
       "properties": {
         "novelPreview.defaultPreset": {
           "type": "string",
-          "default": "標準（30字・行数自動）",
+          "default": "40字×40行",
           "description": "%config.defaultPreset%"
         },
         "novelPreview.presets": {
@@ -416,6 +416,13 @@
                   "null"
                 ],
                 "description": "%config.presets.lines%"
+              },
+              "areaAlign": {
+                "enum": [
+                  "start",
+                  "center"
+                ],
+                "description": "%config.presets.areaAlign%"
               },
               "fontSize": {
                 "type": "number",
