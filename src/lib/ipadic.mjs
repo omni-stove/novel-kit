@@ -1,14 +1,15 @@
 /**
- * 「文章の傾向」の形態素解析（lindera-wasm）に使う IPA 辞書を用意する。
+ * 形態素解析（lindera-wasm）に使う IPA 辞書を用意する（novel tokenize と、VS Code 拡張の「文章の傾向」）。
  * 辞書は npm に無く Lindera の GitHub Releases に zip で置かれているので、初回に取ってきて node_modules/.cache に置く。
  *
- *   node src/ipadic.mjs <dir>   辞書を <dir> にコピーする（拡張のビルドで dist/ipadic に置く）
+ *   node src/lib/ipadic.mjs <dir>   辞書を <dir> にコピーする（拡張のビルドで vscode/dist/ipadic に置く）
  */
 
 import { cpSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IPADIC_FILES } from './prose.mjs';
+import { createTokenizer, IPADIC_FILES } from './tokenizer.mjs';
 
 /** lindera-wasm と辞書の形式は版ごとに変わるので、package.json の lindera-wasm と同じ版にする */
 export const IPADIC_VERSION = '6.2.0';
@@ -16,7 +17,7 @@ export const IPADIC_VERSION = '6.2.0';
 // IPA 辞書の使用許諾で、辞書と一緒に配る
 const FILES = [...IPADIC_FILES, 'NOTICE.txt'];
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 export const IPADIC_CACHE_DIR = join(ROOT, 'node_modules', '.cache', `lindera-ipadic-${IPADIC_VERSION}`);
 
@@ -42,10 +43,16 @@ export async function ensureIpadic() {
   return IPADIC_CACHE_DIR;
 }
 
+/** IPA 辞書を用意して（初回は取ってきて）、このパッケージが依存している lindera-wasm の形態素解析器を作る */
+export async function createIpadicTokenizer() {
+  const wasm = join(dirname(createRequire(import.meta.url).resolve('lindera-wasm')), 'lindera_wasm_bg.wasm');
+  return createTokenizer({ wasm, dictDir: await ensureIpadic() });
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = process.argv[2];
   if (!out) {
-    console.error('使い方: node src/ipadic.mjs <dir>');
+    console.error('使い方: node src/lib/ipadic.mjs <dir>');
     process.exit(1);
   }
   rmSync(out, { recursive: true, force: true });

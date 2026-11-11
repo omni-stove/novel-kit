@@ -23,6 +23,7 @@ import {
   normalizeLayout,
 } from '../../src/layout.mjs';
 import { countTextChars, readLines, splitLines, splitRawLines, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
+import { createTokenizer } from '../../src/lib/tokenizer.mjs';
 import { parsePageSpec } from '../../src/pdf.mjs';
 import { backupMessage, backupPlan } from './backup.mjs';
 import {
@@ -35,7 +36,7 @@ import {
 } from './document.mjs';
 import { setBundle } from './l10n.mjs';
 import { emphasisMarkup, kanjiRunAt, rubyMarkup } from './markup.mjs';
-import { analyzeProse, createTokenizer, proseReport } from './prose.mjs';
+import { analyzeProse, proseReport } from './prose.mjs';
 import { moveFiles, remapParts, renumberPlan } from './reorder.mjs';
 import { createSettingsEditorProvider, createWorkSettingsController, SETTINGS_VIEW_TYPE } from './settings-editor.mjs';
 import { renderWebviewHtml } from './webview.mjs';
