@@ -22,6 +22,8 @@ mise なら `[env] _.path = ["{{config_root}}/node_modules/.bin"]` で `novel` �
 
 Scrivener・Google ドキュメント・Word などで書いた英語の原稿は、RTF に書き出して `novel import -o draft.txt draft.rtf` で txt にできる（斜体・太字・章見出し・場面区切りを記法にする。ルビと傍点は落とす）。
 
+`novel tokenize 010_手紙.txt` で原稿を形態素解析できる（lindera と IPA 辞書。辞書は初回に GitHub から取ってくる）。既定は MeCab と同じ形で出し、`--json` なら段落ごとに1行の JSON にする。ファイルを渡さなければ標準入力を読む。
+
 バージョンを固定するときは `github:omni-stove/novel-kit#cli-v2026.1021.0` のようにタグを付ける。
 
 ## リリース

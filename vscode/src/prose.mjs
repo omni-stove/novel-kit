@@ -1,27 +1,11 @@
 /**
  * 日本語の原稿の文章の傾向（文末の種類・文の長さ・台詞の割合など）を数える。
  * 直すための指摘ではなく、いまの原稿がどうなっているかを見るための集計（小説パネルの「文章の傾向」に出す）。
- * 文末の種類は lindera-wasm と IPA 辞書（ipadic.mjs が用意する）で形態素解析して決める。
+ * 文末の種類は lindera-wasm と IPA 辞書（src/lib/tokenizer.mjs）で形態素解析して決める。
  */
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { initSync, loadDictionaryFromBytes, TokenizerBuilder } from 'lindera-wasm';
 import { getBodyLines, isSeparator, isViewpointLine, stripInlineMarkup } from '../../src/lib/text-parser.mjs';
 import { t } from './l10n.mjs';
-
-/** loadDictionaryFromBytes に渡す順の、辞書のファイル */
-export const IPADIC_FILES = [
-  'metadata.json',
-  'dict.trie',
-  'dict.valsidx',
-  'dict.vals',
-  'dict.wordsidx',
-  'dict.words',
-  'matrix.mtx',
-  'char_def.bin',
-  'unk.bin',
-];
 
 /** 文末の種類。表示の順に並べる。label は表示の言語の名前を返す */
 const ENDINGS = [
@@ -47,22 +31,6 @@ const REPEAT_WINDOW = 3;
  * 2回でも拾うと、隣の文で同じ名詞を受け直すような普通の書き方まで並んで、くどい箇所が埋もれる
  */
 const REPEAT_MIN = 3;
-
-/**
- * lindera-wasm の形態素解析器を作る。wasm: lindera_wasm_bg.wasm のパス、dictDir: IPA 辞書のディレクトリ。
- * 返す解析器の tokenize(text) は、各語の details に IPA 辞書の素性（品詞・細分類1〜3・活用型・活用形・基本形…）を持つ
- */
-export function createTokenizer({ wasm, dictDir }) {
-  initSync({ module: readFileSync(wasm) });
-  const [metadata, trie, valsIdx, vals, wordsIdx, words, matrix, charDef, unk] = IPADIC_FILES.map((f) =>
-    readFileSync(join(dictDir, f)),
-  );
-  const dictionary = loadDictionaryFromBytes(metadata, trie, valsIdx, vals, wordsIdx, words, matrix, charDef, unk);
-  const builder = new TokenizerBuilder();
-  builder.setDictionaryInstance(dictionary);
-  builder.setMode('normal');
-  return builder.build();
-}
 
 const pos = (token) => token.details[0];
 const conjugationType = (token) => token.details[4];
@@ -174,7 +142,7 @@ function splitSentences(line) {
 const isDialogueLine = (line) => /^[「『]/.test(line);
 
 /**
- * 原稿1ファイル分の行から、文章の傾向を数える。tokenizer は createTokenizer で作ったもの。
+ * 原稿1ファイル分の行から、文章の傾向を数える。tokenizer は src/lib/tokenizer.mjs の createTokenizer で作ったもの。
  * names は作中の名前（novel.json の names）で、繰り返しとして数えない。
  * メタ行・視点行【】・区切りの行は数えない。
  * 返り値:
@@ -332,16 +300,13 @@ export function proseReport(r) {
 
 if (import.meta.vitest) {
   const { describe, test, expect, beforeAll } = import.meta.vitest;
-  const { dirname, resolve } = await import('node:path');
-  const { fileURLToPath } = await import('node:url');
-  const { ensureIpadic } = await import('./ipadic.mjs');
+  const { readFileSync } = await import('node:fs');
+  const { createIpadicTokenizer } = await import('../../src/lib/ipadic.mjs');
   const { setBundle } = await import('./l10n.mjs');
 
   let tokenizer;
   beforeAll(async () => {
-    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-    const wasm = join(root, 'node_modules', 'lindera-wasm', 'lindera_wasm_bg.wasm');
-    tokenizer = createTokenizer({ wasm, dictDir: await ensureIpadic() });
+    tokenizer = await createIpadicTokenizer();
   }, 120_000);
 
   describe('classifyEnding', () => {

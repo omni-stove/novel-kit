@@ -172,6 +172,9 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.2
+      lindera-wasm:
+        specifier: 6.2.0
+        version: 6.2.0
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
@@ -209,12 +212,6 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
-      jszip:
-        specifier: ^3.10.2
-        version: 3.10.2
-      lindera-wasm:
-        specifier: 6.2.0
-        version: 6.2.0
       puppeteer-core:
         specifier: 24.27.0
         version: 24.27.0(supports-color@7.2.0)

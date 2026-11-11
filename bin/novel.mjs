@@ -13,6 +13,7 @@
  *   merge      1つの txt にまとめる（src/merge.mjs）
  *   count      原稿用紙換算の枚数を数える（src/count.mjs）
  *   import     RTF を原稿の txt にする（src/import.mjs）
+ *   tokenize   形態素解析して、語ごとの品詞・活用・読みを出す（src/tokenize.mjs）
  *
  * 各コマンドのオプションは、それぞれのファイルの先頭のコメントにある。
  */
@@ -29,6 +30,7 @@ const COMMANDS = {
   merge: () => import('../src/merge.mjs'),
   count: () => import('../src/count.mjs'),
   import: () => import('../src/import.mjs'),
+  tokenize: () => import('../src/tokenize.mjs'),
 };
 
 const [command, ...argv] = process.argv.slice(2);

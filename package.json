@@ -28,6 +28,7 @@
   "dependencies": {
     "@vivliostyle/cli": "^10.6.0",
     "jszip": "^3.10.1",
+    "lindera-wasm": "6.2.0",
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
