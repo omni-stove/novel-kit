@@ -30,7 +30,8 @@ export async function ensureIpadic() {
   const { default: JSZip } = await import('jszip');
   const zip = await JSZip.loadAsync(await res.arrayBuffer());
   // 途中で失敗したときに、欠けた辞書を揃ったものと見なさないよう、一時ディレクトリに書いてから置き換える
-  const tmp = `${IPADIC_CACHE_DIR}.tmp`;
+  // 並行して走る別プロセスと一時ディレクトリを取り合わないよう、プロセスごとに分ける
+  const tmp = `${IPADIC_CACHE_DIR}.${process.pid}.tmp`;
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
   for (const name of FILES) {
@@ -38,9 +39,15 @@ export async function ensureIpadic() {
     if (!entry) throw new Error(`IPA 辞書の zip に ${name} がありません: ${url}`);
     writeFileSync(join(tmp, name), await entry.async('uint8array'));
   }
+  // 別プロセスが先に揃えていたら、それを消さずに使う（消すと読み込み中のプロセスが辞書を失う）
+  if (FILES.every((f) => existsSync(join(IPADIC_CACHE_DIR, f)))) {
+    rmSync(tmp, { recursive: true, force: true });
+    return IPADIC_CACHE_DIR;
+  }
   rmSync(IPADIC_CACHE_DIR, { recursive: true, force: true });
   renameSync(tmp, IPADIC_CACHE_DIR);
   return IPADIC_CACHE_DIR;
+
 }
 
 /** IPA 辞書を用意して（初回は取ってきて）、このパッケージが依存している lindera-wasm の形態素解析器を作る */
