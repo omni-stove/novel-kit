@@ -598,18 +598,50 @@
     setEditEnabled(!editEnabled);
     vscode.postMessage({ type: 'view', view: { edit: editEnabled } });
   });
-  /** 表示領域に見えている最初の段落（行番号を持つ要素）。無ければ undefined */
-  function firstVisibleLineElement() {
+  /**
+   * 見ている範囲の矩形。スクロール表示は表示領域、ページ表示は表示領域のうち見ているページ（currentPage）の用紙の部分
+   */
+  function viewedArea() {
     const view = viewport.getBoundingClientRect();
+    if (!geometry || geometry.scroll) return view;
+    // 表示領域の端に隣のページが覗いていても、そこの段落は見ているページのものではない
+    const stageRect = stage.getBoundingClientRect();
+    const start = (geometry.vertical ? stageRect.top : stageRect.left) + (currentPage() - 1) * geometry.period;
+    const end = start + geometry.sheet;
+    return geometry.vertical
+      ? { top: Math.max(view.top, start), bottom: Math.min(view.bottom, end), left: view.left, right: view.right }
+      : { top: view.top, bottom: view.bottom, left: Math.max(view.left, start), right: Math.min(view.right, end) };
+  }
+
+  /** 見ている範囲（viewedArea）に見えている段落（行番号を持つ要素）を、原稿の順に */
+  function visibleLineElements() {
+    const area = viewedArea();
     const isVisible = (el) =>
       [...el.getClientRects()].some(
-        (r) => r.bottom > view.top && r.top < view.bottom && r.right > view.left && r.left < view.right,
+        (r) => r.bottom > area.top && r.top < area.bottom && r.right > area.left && r.left < area.right,
       );
-    return [...flow.querySelectorAll('[data-line]')].find(isVisible);
+    return [...flow.querySelectorAll('[data-line]')].filter(isVisible);
+  }
+
+  /** 見ている範囲に見えている最初の段落。無ければ undefined */
+  function firstVisibleLineElement() {
+    return visibleLineElements()[0];
+  }
+
+  /**
+   * テキストエディタで開く段落。ページ表示で、見ているページの途中から次のファイルが始まっていれば、そのファイルの頭。
+   * それ以外は見えている最初の段落
+   */
+  function lineElementToOpen() {
+    const visible = visibleLineElements();
+    if (!geometry || geometry.scroll) return visible[0];
+    // ページの頭は前のファイルの終わりの続きでも、そのページで始まるファイルを読みに来ているはずなので、そちらを開く
+    const fileOf = (el) => el.dataset.file ?? el.closest('#flow > .section');
+    return visible.find((el, i) => i > 0 && fileOf(el) !== fileOf(visible[i - 1])) ?? visible[0];
   }
 
   $('open-text').addEventListener('click', () => {
-    const el = editing?.el ?? firstVisibleLineElement();
+    const el = editing?.el ?? lineElementToOpen();
     vscode.postMessage(
       el ? { type: 'openText', fileIndex: sectionIndexOf(el), line: Number(el.dataset.line) } : { type: 'openText' },
     );
