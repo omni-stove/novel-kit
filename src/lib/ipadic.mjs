@@ -47,7 +47,6 @@ export async function ensureIpadic() {
   rmSync(IPADIC_CACHE_DIR, { recursive: true, force: true });
   renameSync(tmp, IPADIC_CACHE_DIR);
   return IPADIC_CACHE_DIR;
-
 }
 
 /** IPA 辞書を用意して（初回は取ってきて）、このパッケージが依存している lindera-wasm の形態素解析器を作る */
